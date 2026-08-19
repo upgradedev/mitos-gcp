@@ -1,7 +1,20 @@
 # Mitos
 
+[![CI](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
+[![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
+[![coverage 93%](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
+[![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
+[![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=mitos-fleet)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **A schema change ships on Tuesday. In March, a regulator asks who approved the mobile-number
 column and why. Mitos is the fleet that answers that, and the thread you follow back.**
+
+**▶ Demo video:** `PENDING_YOUTUBE_UPLOAD`
+*(the 3:49 master is built and verified in CI. This line is replaced with the public URL at upload,
+and every CI run annotates a warning while the placeholder is still here so it cannot be quietly
+forgotten.)*
 
 Named for Ariadne's thread. You can always retrace your way out.
 
