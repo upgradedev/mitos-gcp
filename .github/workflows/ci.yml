@@ -113,7 +113,10 @@ jobs:
 
       - name: Start the Firestore emulator
         run: |
-          gcloud components install cloud-firestore-emulator beta --quiet
+          # `gcloud components install` is disabled on GitHub runners; the CLI
+          # is apt-managed there and tells you to use this instead.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq google-cloud-cli-firestore-emulator
           nohup gcloud emulators firestore start --host-port=127.0.0.1:8089 \
             > /tmp/firestore.log 2>&1 &
           for i in $(seq 1 60); do

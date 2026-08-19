@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 - runs this repo's own demo with fixed argv
 import sys
 import time
 from pathlib import Path
@@ -43,7 +43,7 @@ def record(pace: float, out: Path, ledger: str) -> dict:
 
     started = time.monotonic()
     lines: list[dict] = []
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # nosec B603
         cmd,
         cwd=ROOT,
         env=env,
@@ -54,7 +54,8 @@ def record(pace: float, out: Path, ledger: str) -> dict:
         errors="replace",
         bufsize=1,
     )
-    assert proc.stdout is not None
+    if proc.stdout is None:  # pragma: no cover - defensive
+        raise RuntimeError("could not capture the demo's stdout")
     for raw in proc.stdout:
         lines.append(
             {"t": round(time.monotonic() - started, 3), "line": raw.rstrip("\n")}

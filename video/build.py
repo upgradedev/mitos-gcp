@@ -25,7 +25,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - drives ffmpeg with fixed argv, never a shell
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,7 +74,8 @@ def font_file() -> str:
 
 
 def run(cmd: list[str]) -> str:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # Fixed argv list, shell=False. Nothing here is user supplied.
+    proc = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
     if proc.returncode != 0:
         raise SystemExit(f"command failed: {' '.join(cmd[:4])}…\n{proc.stderr[-2000:]}")
     return proc.stdout
@@ -131,12 +132,18 @@ def stage_narrate() -> None:
         payload = json.dumps(
             {"text": beat.text, "model_id": cfg["model_id"]}
         ).encode("utf-8")
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{cfg['voice_id']}"
+        # The voice id comes from a config file in this repo, so the URL is not
+        # attacker controlled, but pinning the scheme means a future edit cannot
+        # turn this into a file:// or custom-scheme read.
+        if not url.startswith("https://api.elevenlabs.io/"):
+            raise SystemExit(f"refusing to call {url!r}")
         req = urllib.request.Request(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{cfg['voice_id']}",
+            url,
             data=payload,
             headers={"xi-api-key": key, "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
             target.write_bytes(resp.read())
         stamp.write_text(beat.digest)
         made += 1
