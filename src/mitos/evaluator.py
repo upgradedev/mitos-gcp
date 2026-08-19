@@ -1,0 +1,181 @@
+"""The gate.
+
+Productised from the ARKON `evaluator-companion`, which is a critic that sits
+between every generator and anything that reaches a real system. Two of its
+checks are auto-FAIL there and they are auto-FAIL here: a leaked credential and a
+guardrail bypass. Its anti-manipulation rule is here too, because a generator's
+output can carry an injection that was planted upstream in the diff.
+
+Everything in this module is deterministic. No model decides whether a draft
+passes, which is the point: a gate whose verdict is produced by the same class of
+thing it is gating can be argued out of its verdict.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+# Credential shapes. Deliberately narrow: a detector that fires on any long
+# string produces noise, and a gate that cries wolf gets widened by the next
+# person, which is how gates die.
+SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("azure-service-bus-connection-string", re.compile(r"Endpoint=sb://", re.I)),
+    ("shared-access-key", re.compile(r"SharedAccessKey\s*=\s*\S+", re.I)),
+    ("account-key", re.compile(r"AccountKey\s*=\s*\S+", re.I)),
+    ("aws-access-key-id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("private-key-block", re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----")),
+    ("bearer-token", re.compile(r"\bBearer\s+[A-Za-z0-9\-._~+/]{20,}")),
+    (
+        "password-in-url",
+        re.compile(r"\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s:@]+@", re.I),
+    ),
+]
+
+# Instructions aimed at the reader rather than statements about the system.
+INJECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("override-previous-instructions", re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.I)),
+    ("role-reassignment", re.compile(r"\byour\s+new\s+task\s+is\b", re.I)),
+    ("verdict-injection", re.compile(r"\b(?:output|reply\s+with|respond\s+with)\s+APPROVED\b", re.I)),
+    ("gate-skip", re.compile(r"\bskip\s+the\s+(?:compliance|security|evaluation)\s+check\b", re.I)),
+    ("self-approval", re.compile(r"\b(?:rate|mark|score)\s+this\s+as\s+(?:PASS|APPROVED)\b", re.I)),
+    ("pre-approved-claim", re.compile(r"\bthis\s+spec\s+is\s+already\s+approved\b", re.I)),
+]
+
+# Guardrail bypasses, verbatim from the ARKON evaluator's auto-FAIL list.
+BYPASS_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("force-deploy", re.compile(r"\bforce[- ]deploy\b", re.I)),
+    ("bypass-approval", re.compile(r"\bbypass[- ]approval\b", re.I)),
+    ("skip-tests", re.compile(r"\bskip[- ]tests\b", re.I)),
+    ("no-verify", re.compile(r"--no-verify\b")),
+    ("destructive-sql", re.compile(r"\b(?:drop\s+database|truncate\s+table)\b", re.I)),
+]
+
+
+@dataclass
+class Finding:
+    severity: str
+    check: str
+    detail: str
+    evidence: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "severity": self.severity,
+            "check": self.check,
+            "detail": self.detail,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass
+class Verdict:
+    passed: bool
+    findings: list[Finding] = field(default_factory=list)
+    injection_attempt: bool = False
+    checked: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "injection_attempt": self.injection_attempt,
+            "checks_run": self.checked,
+            "findings": [f.as_dict() for f in self.findings],
+        }
+
+    def summary(self) -> str:
+        if self.passed:
+            return f"PASS, {len(self.checked)} checks, no findings"
+        worst = ", ".join(sorted({f.check for f in self.findings}))
+        return f"FAIL on {worst}"
+
+
+def _redact(text: str, match: re.Match[str]) -> str:
+    """Quote enough of the hit to be actionable without reprinting the secret."""
+    start = max(0, match.start() - 24)
+    head = text[start : match.start()]
+    hit = match.group(0)
+    shown = hit[:12] + "…redacted…" if len(hit) > 12 else hit
+    return (head + shown).replace("\n", " ").strip()
+
+
+def _scan(text: str, patterns, severity: str, kind: str) -> list[Finding]:
+    out = []
+    for name, rx in patterns:
+        m = rx.search(text)
+        if m:
+            out.append(
+                Finding(
+                    severity=severity,
+                    check=kind,
+                    detail=name,
+                    evidence=_redact(text, m),
+                )
+            )
+    return out
+
+
+def evaluate(draft: str, *, known_paths: list[str] | None = None) -> Verdict:
+    """Run every check on a generator draft and return one verdict.
+
+    `known_paths` is the set of files the fleet actually read. A draft citing
+    anything outside it is a hallucinated reference, which is the ARKON
+    evaluator's check 3.
+    """
+    checks = [
+        "secret-leak",
+        "prompt-injection",
+        "guardrail-bypass",
+        "hallucinated-path",
+        "non-empty",
+    ]
+    findings: list[Finding] = []
+
+    findings += _scan(draft, SECRET_PATTERNS, "CRITICAL", "secret-leak")
+    injection = _scan(draft, INJECTION_PATTERNS, "CRITICAL", "prompt-injection")
+    findings += injection
+    findings += _scan(draft, BYPASS_PATTERNS, "CRITICAL", "guardrail-bypass")
+
+    if known_paths is not None:
+        cited = set(re.findall(r"[A-Za-z0-9_./-]+\.(?:java|sql|ya?ml|md|py|ts|json)", draft))
+        for path in sorted(cited):
+            if not any(known.endswith(path) or path in known for known in known_paths):
+                findings.append(
+                    Finding(
+                        severity="HIGH",
+                        check="hallucinated-path",
+                        detail=f"cites {path}, which the fleet never read",
+                        evidence=path,
+                    )
+                )
+
+    if not draft.strip():
+        findings.append(
+            Finding("HIGH", "non-empty", "the draft is empty", "")
+        )
+
+    return Verdict(
+        passed=not findings,
+        findings=findings,
+        injection_attempt=bool(injection),
+        checked=checks,
+    )
+
+
+def redact_for_repair(draft: str) -> str:
+    """Strip exactly what the gate objected to, so the second pass is a repair
+    and not a re-roll.
+
+    Kept mechanical on purpose. If repair were a second model call, a demo could
+    pass on one take and fail on the next, and the whole point of putting the
+    poison in the fixture was to stop that.
+    """
+    out = draft
+    for _, rx in SECRET_PATTERNS:
+        out = rx.sub("[secret removed by mitos-evaluator]", out)
+    for _, rx in INJECTION_PATTERNS:
+        out = rx.sub("[instruction addressed to the agent, discarded]", out)
+    for _, rx in BYPASS_PATTERNS:
+        out = rx.sub("[guardrail bypass removed]", out)
+    return out

@@ -54,7 +54,7 @@ jobs:
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
           # Without this, setup-python looks only for **/requirements.txt or
           # **/pyproject.toml and fails the job outright when it finds neither.
@@ -72,3 +72,31 @@ jobs:
 
       - name: The gate blocks, the control permits, the contract is pinned
         run: python -m pytest tests/spike -q
+
+  # The chore. Stdlib only, so it needs no install at all: the offline path is
+  # the same code the deployed services run, with an in-memory ledger behind the
+  # same interface Firestore implements.
+  chore:
+    name: The chore holds
+    needs: secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install pytest only
+        run: pip install pytest==8.3.4
+
+      - name: Claims a judge is entitled to doubt
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/test_chore.py -q
+
+      - name: The demo runs end to end, offline
+        env:
+          PYTHONPATH: src
+        run: python -m mitos.demo --ledger memory --yes --fast
