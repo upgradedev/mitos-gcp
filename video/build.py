@@ -287,7 +287,10 @@ def _card(text_lines: list[str], out: Path, seconds: float) -> None:
         [
             "ffmpeg", "-v", "error", "-y",
             "-f", "lavfi", "-i", f"color=c={BG}:s={WIDTH}x{HEIGHT}:d={seconds}:r={FPS}",
-            "-vf", ",".join(filters), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-vf", ",".join(filters),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-profile:v", "high", "-level", "4.0",
+            "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-t", str(seconds), str(out),
         ]
     )
@@ -304,8 +307,12 @@ def stage_mux() -> None:
         [
             "ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0",
             "-i", str(BUILD / "frames.ffconcat"),
-            "-vsync", "vfr", "-r", str(FPS),
+            # ffmpeg 8 removed -vsync in favour of -fps_mode. The frames have
+            # per-image durations from the capture, so the input is variable
+            # rate and the output is pinned to a constant one.
+            "-fps_mode", "cfr", "-r", str(FPS),
             "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-profile:v", "high", "-level", "4.0",
             "-pix_fmt", "yuv420p", str(body),
         ]
     )
