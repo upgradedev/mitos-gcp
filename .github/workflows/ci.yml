@@ -164,10 +164,12 @@ jobs:
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8089
           GOOGLE_CLOUD_PROJECT: mitos-test
         run: |
-          python -m pytest tests/integration/test_firestore_ledger.py -q | tee /tmp/fs.txt
+          python -m pytest tests/integration/test_firestore_ledger.py             tests/integration/test_watcher_firestore.py -q | tee /tmp/fs.txt
           grep -qE "[0-9]+ passed" /tmp/fs.txt
           if grep -q "skipped" /tmp/fs.txt; then
-            echo "the Firestore adapter suite skipped; coverage of the live adapter is a fiction"
+            echo "the Firestore suites skipped. Coverage of the live adapter is a"
+            echo "fiction, and the query-subscription claim the entry leads with"
+            echo "is unproven."
             exit 1
           fi
 
