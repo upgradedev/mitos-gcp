@@ -35,7 +35,9 @@ from mitos.fleet import CATALOG  # noqa: E402
 from mitos.guard import ROLE_READER, WRITE_TOOLS, is_allowed  # noqa: E402
 from mitos.gemini import build_analyst, build_critic  # noqa: E402
 from mitos.ledger import Entry, build_ledger  # noqa: E402
+from mitos.chore import escalate_on_wake  # noqa: E402
 from mitos.spec_repo import build_spec_repo  # noqa: E402
+from mitos.watcher import build_watcher  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "mitos-fleet")
@@ -43,6 +45,59 @@ SECRET = "spec-repo-write-token"  # nosec B105 - the secret's NAME, not its valu
 METADATA = "http://metadata.google.internal/computeMetadata/v1"
 
 app = FastAPI(title=f"Mitos · {ROLE}")
+
+# The control plane. Only the reader holds it: the writer must never act on an
+# unattended wake, because waking is cheap and nobody is watching.
+_WATCHER = None
+
+
+@app.on_event("startup")
+def _open_the_subscription() -> None:
+    """Hold a Firestore query subscription open for the life of the service.
+
+    This is the thing the entry leads with, so it is worth being precise: no
+    scheduler is started here and nothing is enqueued. The query is the trigger.
+
+    Requires CPU to be allocated outside requests. Cloud Run throttles to zero
+    between requests by default, which would suspend the subscription silently,
+    so the service is deployed with --no-cpu-throttling. A listener that only
+    runs while someone is calling you is a poller with extra steps.
+    """
+    global _WATCHER
+    if ROLE != ROLE_READER:
+        return
+    try:
+        ledger = build_ledger()
+        _WATCHER = build_watcher(ledger, PROJECT)
+        _WATCHER.start(lambda expired: escalate_on_wake(ledger, expired))
+    except Exception as exc:  # pragma: no cover - reported, never swallowed
+        app.state.watch_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+
+
+@app.get("/watch")
+def watch() -> dict[str, Any]:
+    """Proof the subscription is real, and countable.
+
+    `wakeups` only increments when Firestore delivered a snapshot in which a
+    deferral had expired. Nothing in this codebase calls the fleet to produce
+    one.
+    """
+    err = getattr(app.state, "watch_error", None)
+    if _WATCHER is None:
+        return {
+            "subscribed": False,
+            "reason": err or f"the {ROLE} service does not hold the subscription",
+        }
+    wakeups = _WATCHER.wakeups
+    return {
+        "subscribed": True,
+        "mechanism": "firestore query subscription (on_snapshot), no scheduler, no queue",
+        "watching": "kind == finding.deferred, escalated once its expiry passes",
+        "wakeups": len(wakeups),
+        "detail": [
+            {"reason": w.reason, "matched": w.matched, "at": w.at} for w in wakeups
+        ],
+    }
 
 
 def _running_as() -> Optional[str]:

@@ -346,3 +346,41 @@ def execute_write(
         ),
         branch=f"mitos/pr-{card.pr_number}-{approved_hash[:8]}",
     )
+
+
+def escalate_on_wake(ledger: Ledger, expired: list[Entry]) -> list[Entry]:
+    """What the fleet does when the subscription fires.
+
+    Nobody called an endpoint and nothing was scheduled. A deferral reached its
+    expiry date, Firestore handed the reader service a snapshot in which the
+    watched set had changed, and the fleet acted.
+
+    Deliberately narrow. Waking is cheap and unattended, so the action taken
+    unattended is the smallest useful one: record the escalation against the
+    same thread, so the next run of the chore sees it and a human can retrace
+    why it happened. It does not write to the specification repository, because
+    an unattended wake must never reach the one credential that changes
+    something outside the ledger.
+    """
+    written: list[Entry] = []
+    for deferral in expired:
+        written.append(
+            ledger.append(
+                Entry(
+                    kind="finding.escalated",
+                    actor="compliance-companion",
+                    subject=deferral.subject,
+                    payload={
+                        "reason": "the deferral expired and nobody re-opened it",
+                        "deferred_on": deferral.payload.get("deferred_on"),
+                        "expires_on": deferral.payload.get("expires_on"),
+                        "deferred_by": deferral.payload.get("deferred_by"),
+                        "finding": deferral.payload.get("finding"),
+                        "woken_by": "firestore-query-subscription",
+                    },
+                    parent_id=deferral.entry_id,
+                    run_id="watch",
+                )
+            )
+        )
+    return written

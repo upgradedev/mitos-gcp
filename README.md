@@ -43,6 +43,7 @@ middle.
 ```mermaid
 flowchart TB
     PR["Pull request<br/>schema change, 4 files, 3 languages"] -->|webhook| R
+    L -.->|"query subscription<br/><b>the trigger</b>"| R
 
     subgraph READER["mitos-reader &nbsp;·&nbsp; Cloud Run"]
         direction TB
@@ -86,14 +87,44 @@ The two dotted red-herring arrows into Secret Manager are the point of the whole
 and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code
 decides that.
 
-## Why Google Cloud and ADK are load-bearing
+## Why Google Cloud is load-bearing
 
-> **Mitos runs its reader, its evaluator and its writer as three Cloud Run services under three
+> **Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so a
+> compliance finding deferred until 12 August wakes the fleet on 12 August because the query itself
+> is the subscription. Take Firestore away and the thread you follow back stops being the control
+> plane and becomes a log, and you need a queue, a poller and a separate state store to get the same
+> behaviour, none of which can be retraced as one thread.**
+
+A change feed is not the same thing. DynamoDB Streams is shard-ordered, consumed server-side, and
+delivers events about a *table*. `on_snapshot` subscribes to a **query**: *every finding whose
+deferral is still open*. The process holding it is handed the current result set and then every
+change to it, so "wake me when this set changes" needs no poller, no queue, and no second store to
+remember what was already seen.
+
+The consequence is architectural rather than cosmetic. **The provenance thread stops being a log and
+becomes the thing that dispatches work.** One store is the memory, the audit trail and the control
+plane at once, which is why a run can be retraced as a single thread instead of reconciled across
+three systems. It is also what makes the track's hardest phrase mechanical: a deferral until
+12 August is a standing query, and the fleet wakes when the world moves past that date with nobody
+scheduling anything.
+
+Watch it, with no account. `wakeups` only increments when Firestore delivered a snapshot in which a
+deferral had expired:
+
+```bash
+curl -s https://mitos-reader-696476845998.europe-west1.run.app/watch
+```
+
+Cloud Run throttles CPU to zero between requests by default, which would suspend a subscription
+silently. The reader is deployed with `--no-cpu-throttling` for exactly that reason. A listener that
+only runs while someone happens to be calling you is a poller with extra steps.
+
+### And the privilege boundary underneath it
+
+> Mitos runs its reader, its evaluator and its writer as three Cloud Run services under three
 > separate service accounts, and enforces every gate decision inside ADK's tool-call interceptor
 > rather than in a prompt, so the identity that reads production data holds no credential that can
-> write it and no agent in the fleet can talk its way past the gate. Take Google Cloud away and those
-> two controls collapse into one process where the approval step is an `if` statement the agent
-> itself is free to skip.**
+> write it and no agent in the fleet can talk its way past the gate.
 
 Check it yourself, with no account:
 
@@ -158,7 +189,7 @@ class of thing that wrote it.
 | Track wording | Where it is |
 |---|---|
 | "cataloged for cross-department use" | the catalogue is a queried structure, not a table in a document. The router reads it to decide who wakes, so adding a companion changes behaviour. `GET /catalog` |
-| "safely maintain context across weeks of asynchronous operations" | the Firestore thread. The demo runs the chore **twice**, and the second run recalls what the first wrote, live. A deferral from July is seeded, labelled synthetic, and escalates because it expired |
+| "safely maintain context across weeks of asynchronous operations" | **the query subscription is the mechanism, not the storage.** A deferral until 12 August is a standing query; the fleet wakes when the world moves past that date with nobody scheduling anything. `GET /watch` counts how many times it has. The demo also runs the chore twice and the second run recalls what the first wrote, live |
 | "without violating enterprise compliance, data sovereignty, or security policies" | three identities, one write credential, an append-only ledger with no mutation method, and a write addressed by sha256 |
 
 ## Run it
@@ -224,9 +255,17 @@ this repository either.
 
 ## Pre-existing components
 
-Nothing here predates the submission period. The fleet's *shape* is derived from ARKON, 58 companion
-definitions used as configuration for the authors' own workflow. Five are productised here; none of
-their text is reused verbatim and the definitions are not part of this repository.
+Every line of code in this repository was written during the submission period. Two bodies of
+earlier **design** work by the same author informed it, and both are named here because both
+rulebooks require it.
+
+| Pre-existing work | What it is | What was carried across |
+|---|---|---|
+| **ARKON companion definitions** | 58 agent definitions used as configuration for the author's own development workflow | the fleet's *shape*: leaders, specialists, and a mandatory evaluator between a generator and any real system. Five are productised here. None of their text is reused verbatim and the definitions are not part of this repository |
+| **ARKON platform design notes (ADR-015, "Typed Agent Cards")** | an internal architecture decision record on typed agent contracts and capability-based routing | the idea that an agent publishes a typed input/output contract, that a coordinator routes by declared capability rather than hardcoded dispatch, and that a handoff carries a status a callee can push back with. The document is not in this repository and no code was copied from it |
+
+Neither body of work is or contains a deployable product, and neither is submitted. What is
+submitted is this repository.
 
 ## Licence
 
