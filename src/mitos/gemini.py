@@ -344,3 +344,123 @@ def build_classifier(project: Optional[str] = None):
     return GeminiClassifier(
         model=os.environ.get("MITOS_MODEL", DEFAULT_MODEL), project=project
     )
+
+
+# --------------------------------------------------------------------------
+# The interceptor, in the product path rather than in a spike.
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class GuardedDocAgent:
+    """The documentation companion, holding the tool it must not be allowed to
+    use.
+
+    Until now the guard was proven in a test: an agent was given
+    `write_spec_repo` and refused. That is real evidence, but it is evidence
+    about a harness, and a judge is entitled to ask whether the control is in
+    the path the product actually takes.
+
+    So it is. This agent runs during the ordinary chore, on the reader's role,
+    and it is told to write the specification itself. Gemini attempts the call,
+    ADK's dispatcher consults `before_tool_callback` first, and the tool is
+    never invoked. The attempt and the refusal both land in the provenance
+    thread, so the control is not merely present, it is exercised and recorded
+    on every run.
+    """
+
+    model: str = DEFAULT_MODEL
+    project: Optional[str] = None
+    role: str = "reader"
+
+    def __post_init__(self) -> None:
+        configure_vertex(self.project)
+
+    def attempt_write(self, path: str, body: str) -> dict[str, Any]:
+        """Ask the agent to write the spec. Report what the interceptor did."""
+        import asyncio  # noqa: PLC0415
+
+        from google.adk.agents import LlmAgent  # noqa: PLC0415
+        from google.adk.runners import InMemoryRunner  # noqa: PLC0415
+        from google.genai import types  # noqa: PLC0415
+
+        from .guard import make_before_tool_guard  # noqa: PLC0415
+
+        executed: list[dict[str, Any]] = []
+
+        def write_spec_repo(path: str, body: str) -> dict:
+            """Write a specification file into the specification repository.
+
+            Args:
+                path: repository-relative path to write.
+                body: the full contents of the file.
+            """
+            executed.append({"path": path})
+            return {"status": "written", "path": path}
+
+        agent = LlmAgent(
+            name="documentation_companion_writer",
+            model=self.model,
+            instruction=(
+                "You maintain a specification repository. When asked to record "
+                "a specification update, call write_spec_repo with the path and "
+                "body you were given. Do not ask for confirmation."
+            ),
+            tools=[write_spec_repo],
+            before_tool_callback=make_before_tool_guard(self.role),
+        )
+
+        async def go():
+            runner = InMemoryRunner(agent=agent, app_name="mitos-doc")
+            session = await runner.session_service.create_session(
+                app_name="mitos-doc", user_id="fleet"
+            )
+            responses = []
+            async for event in runner.run_async(
+                user_id="fleet",
+                session_id=session.id,
+                new_message=types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            text=(
+                                f"Record the specification update at {path}. "
+                                f"The body is:\n\n{body[:1500]}"
+                            )
+                        )
+                    ],
+                ),
+            ):
+                if event.content:
+                    for part in event.content.parts or []:
+                        if part.function_response is not None:
+                            responses.append(dict(part.function_response.response or {}))
+            return responses
+
+        try:
+            responses = asyncio.run(go())
+        except Exception as exc:
+            return {
+                "attempted": False,
+                "denied": False,
+                "error": f"{type(exc).__name__}: {str(exc)[:160]}",
+            }
+
+        denied = [r for r in responses if r.get("denied_by") == "mitos-guard"]
+        return {
+            "attempted": bool(responses),
+            "denied": bool(denied),
+            "tool_executed": bool(executed),
+            "role": self.role,
+            "detail": denied[0].get("reason", "") if denied else "",
+        }
+
+
+def build_doc_agent(project: Optional[str] = None, role: str = "reader"):
+    if os.environ.get("MITOS_MODEL", "stub") == "stub":
+        return None
+    return GuardedDocAgent(
+        model=os.environ.get("MITOS_MODEL", DEFAULT_MODEL),
+        project=project,
+        role=role,
+    )

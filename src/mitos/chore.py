@@ -92,6 +92,8 @@ def run_chore(
     analyst: Any = None,
     critic: Any = None,
     publisher: Optional[SpecRepo] = None,
+    classifier: Any = None,
+    doc_agent: Any = None,
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
@@ -117,11 +119,22 @@ def run_chore(
     )
     emit("trigger", f"PR {pr.number} — {pr.title}\n  {len(pr.files)} files from {pr.author}")
 
-    # 2. The branch point.
-    dispatch = fleet.route(pr)
+    # 2. The branch point. A model may widen it and can never narrow it.
+    dispatch, divergence = fleet.route_with_model(pr, classifier)
     cursor = record(
-        "fleet.dispatch", "architect-leader", dispatch.as_dict(), root.entry_id
+        "fleet.dispatch",
+        "architect-leader",
+        {**dispatch.as_dict(), "model_divergence": divergence},
+        root.entry_id,
     ).entry_id
+    if divergence and not divergence.get("agreed", True):
+        emit(
+            "divergence",
+            "the model and the rules disagreed, recorded rather than resolved\n"
+            f"  model added   {divergence.get('model_added') or 'nothing'}\n"
+            f"  model missed  {divergence.get('model_missed') or 'nothing'}\n"
+            f"  the union is what ran; a model can widen, never narrow",
+        )
     for s in dispatch.signals:
         emit("signal", f"{s.name:<15} {s.path}\n                  {s.evidence}")
     emit(
@@ -253,6 +266,24 @@ def run_chore(
             None, False, False, {}, None, "", responses,
             root.entry_id, cursor, escalated,
         )
+
+    # 5b. The interceptor, exercised in the product path rather than in a test.
+    # The documentation companion is handed the write tool and told to use it.
+    # ADK consults the guard before dispatch and the tool is never invoked.
+    if doc_agent is not None:
+        probe = doc_agent.attempt_write(target, draft)
+        cursor = record("guard.exercised", "documentation-companion", probe, cursor).entry_id
+        if probe.get("denied"):
+            emit(
+                "guard",
+                "the documentation companion asked to write and ADK refused it\n"
+                f"  tool actually executed: {probe.get('tool_executed')}\n"
+                f"  {probe.get('detail', '')[:110]}",
+            )
+        elif probe.get("error"):
+            emit("guard", f"the guard probe could not run: {probe['error']}")
+        else:
+            emit("guard", "WARNING: the write tool was reachable from the reader role")
 
     # 6. The approval card, content-addressed.
     card = ApprovalCard(
