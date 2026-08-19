@@ -1,0 +1,71 @@
+# Adapted from the submission kit's ci/ci.yml. The trigger block, the pinned
+# gitleaks step with its sha256 check, the concurrency block and the action SHA
+# pins are copied byte for byte. The build and test jobs are ours.
+#
+# `push:` deliberately carries no `branches:` key. Two of our pull requests once
+# sat with zero checks because push was pinned to main.
+#
+# The readiness gate job is NOT here yet. It is added when there is a demo for it
+# to fetch; a readiness gate with no live URL to veto is decoration.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: gitleaks detect (pinned v8.18.4, redacted)
+        run: |
+          curl --fail --silent --show-error --location \
+            --output gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
+          echo "ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d  gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --source . --redact --no-banner
+
+  # The interceptor spike. This is the job that decides whether the entry's
+  # architectural claim is true. It runs entirely offline: the model is a stub,
+  # so there is no API key, no Google Cloud credential and no paid call, and an
+  # expired token cannot turn this red the night before the deadline.
+  interceptor-spike:
+    name: ADK interceptor holds
+    needs: secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned dependencies
+        run: pip install -r requirements/spike.txt
+
+      - name: Record the resolved ADK version alongside the result
+        run: |
+          python -c "import importlib.metadata as m; print('google-adk', m.version('google-adk'))"
+
+      - name: Compile
+        run: python -m compileall -q src tests
+
+      - name: The gate blocks, the control permits, the contract is pinned
+        run: python -m pytest tests/spike -q

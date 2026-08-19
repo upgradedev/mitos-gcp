@@ -1,0 +1,5 @@
+# Pinned so a CI run today and a CI run on the deadline resolve the same tree.
+# The interceptor semantics this repo depends on were read from the adk-python
+# source at this release; see the README section "Why ADK is load-bearing".
+google-adk==2.7.1
+pytest==8.3.4
