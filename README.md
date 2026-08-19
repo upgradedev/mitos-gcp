@@ -1,91 +1,202 @@
 # Mitos
 
-A fleet of institutional agents with bounded reads, an evaluator gate, one human-approved governed
-write, and a thread of provenance you can follow back.
+**A schema change ships on Tuesday. In March, a regulator asks who approved the mobile-number
+column and why. Mitos is the fleet that answers that, and the thread you follow back.**
 
-Named for Ariadne's thread. The promise is that you can always retrace your way out.
+Named for Ariadne's thread. You can always retrace your way out.
 
 Built for **All Things Agentic (Google)**, track **The Fortified Enterprise Fleet**.
 
-## Why ADK is load-bearing
+## Who this is for
 
-Mitos enforces every gate decision inside ADK's tool-call interceptor rather than in a prompt. A
-system-prompt instruction saying "do not call write tools" is a request. `before_tool_callback` is a
-control: ADK evaluates it before it dispatches the tool, and the model has no way to reach the
-decision.
+The engineering lead at a **regulated European electricity distribution operator**. Every schema
+change that touches a customer field drags four things behind it: a specification that silently goes
+stale, a record of processing under GDPR Article 30, a retention entry, and an owner who has to be
+told. Today one person chases all four by hand after the fact, and finds out they missed one when
+someone external asks.
 
-The mechanism, read from the ADK source rather than inferred. In
-`google/adk/flows/llm_flows/functions.py`, the dispatcher runs every registered callback first and
-invokes the tool only when the collected response `is None`:
+Mitos does that chase unattended and returns **one diff to approve**.
 
-```python
-for before_callback in agent.canonical_before_tool_callbacks:
-    ...
-    function_response = callback_result
-    if function_response:
-        break
+## The one thing it does
 
-if function_response is None:
-    function_response = await __call_tool_async(tool, args=..., tool_context=...)
+A pull request lands carrying a schema change on a field that holds personal data. Nobody opens
+Mitos; a webhook starts it. The fleet works out which specialists the change concerns, remembers what
+it already decided about that service weeks ago, has its first draft **rejected by its own gate**,
+repairs it, and comes back with a single content-addressed diff for a human.
+
+Everything before the approval is autonomous. The approval is the last step, not a stall in the
+middle.
+
+```mermaid
+flowchart TB
+    PR["Pull request<br/>schema change, 4 files, 3 languages"] -->|webhook| R
+
+    subgraph READER["mitos-reader &nbsp;·&nbsp; Cloud Run"]
+        direction TB
+        R["architect-leader<br/><i>router: decides who wakes</i>"]
+        R --> S1["db-architect-leader"]
+        R --> S2["documentation-companion"]
+        R --> S3["compliance-companion<br/><i>skipped when no personal data</i>"]
+    end
+
+    S1 & S2 & S3 --> D["draft"]
+
+    subgraph EVAL["mitos-evaluator &nbsp;·&nbsp; Cloud Run"]
+        G["deterministic gate<br/>secrets · injection · bypass · hallucinated paths"]
+        C["Gemini critic<br/><i>may only ADD findings</i>"]
+        G --> C
+    end
+
+    D --> G
+    C -->|FAIL| RE["repair"] --> G
+    C -->|PASS| CARD["approval card<br/>sha256 of the exact plan"]
+
+    CARD --> H(["human approves"])
+
+    subgraph WRITER["mitos-writer &nbsp;·&nbsp; Cloud Run"]
+        W["governed write<br/><i>refuses any other hash</i>"]
+    end
+
+    H --> W --> OUT["spec repo PR<br/>+ red status check on the code PR"]
+
+    READER -.->|append only| L[("Firestore<br/>provenance thread")]
+    EVAL -.->|append only| L
+    WRITER -.->|append only| L
+
+    SEC[["Secret Manager<br/>spec-repo write token"]]
+    WRITER ==>|"granted"| SEC
+    READER -.->|"PermissionDenied"| SEC
+    EVAL -.->|"PermissionDenied"| SEC
 ```
 
-So a non-empty dict from [`src/mitos/guard.py`](src/mitos/guard.py) means the tool is never invoked,
-and the dict becomes what the model sees as the tool's result.
+The two dotted red-herring arrows into Secret Manager are the point of the whole design. The reader
+and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code
+decides that.
 
-One detail the ADK documentation gets loosely: it says a falsy return "lets the next one run". That
-is true of the callback chain, but the dispatcher then tests `is None` rather than truthiness, so an
-empty dict from the last callback in the chain suppresses the tool anyway. The guard returns a
-**non-empty** dict so the contract is unambiguous under any number of callbacks, and
-`test_empty_dict_return_also_suppresses_the_tool` pins the behaviour so an ADK upgrade that changes
-it turns CI red.
+## Why Google Cloud and ADK are load-bearing
 
-### The proof, and the proof that it can fail
+> **Mitos runs its reader, its evaluator and its writer as three Cloud Run services under three
+> separate service accounts, and enforces every gate decision inside ADK's tool-call interceptor
+> rather than in a prompt, so the identity that reads production data holds no credential that can
+> write it and no agent in the fleet can talk its way past the gate. Take Google Cloud away and those
+> two controls collapse into one process where the approval step is an `if` statement the agent
+> itself is free to skip.**
 
-The test model is a stub that demands the write tool on **every** turn. Nothing in the prompt
-discourages it. It is the worst case: an agent fully committed to writing.
+Check it yourself, with no account:
+
+```bash
+curl -s https://mitos-reader-696476845998.europe-west1.run.app/identity
+curl -s https://mitos-writer-696476845998.europe-west1.run.app/identity
+```
+
+| Identity | may call `write_spec_repo` | reaches the write credential |
+|---|---|---|
+| `mitos-reader` | `false` | **PermissionDenied**, from IAM |
+| `mitos-evaluator` | `false` | **PermissionDenied**, from IAM |
+| `mitos-writer` | `true` | yes |
+
+`/identity` does not read a config flag. It **attempts** the access and reports what came back.
+
+### The interceptor, and the proof it can fail
+
+The refusal happens in ADK's dispatcher, not in a system prompt. In
+`google/adk/flows/llm_flows/functions.py` the dispatcher runs every registered callback and invokes
+the tool only when the collected response `is None`, so a non-empty dict from
+[`src/mitos/guard.py`](src/mitos/guard.py) means the tool is never called.
 
 | Run | Result | What it establishes |
 |---|---|---|
-| [32234664424](https://github.com/upgradedev/mitos-gcp/actions/runs/32234664424) | 3 passed, google-adk 2.7.1 | under the reader role the tool never executes. Under the writer role the **identical** request does execute, so the harness genuinely dispatches |
-| [32234805908](https://github.com/upgradedev/mitos-gcp/actions/runs/32234805908) | 1 failed, 2 passed | **proof the gate has teeth.** The guard was disabled by one deliberate edit; the same stub then wrote `docs/customer.md` and the reader test failed with *"the gate is a prompt, not a control"* |
-| [32234931833](https://github.com/upgradedev/mitos-gcp/actions/runs/32234931833) | success | guard restored |
+| [32234664424](https://github.com/upgradedev/mitos-gcp/actions/runs/32234664424) | 3 passed | a stub model demanding the write never reaches the tool as reader, and **does** reach it as writer, so the harness genuinely dispatches |
+| [32234805908](https://github.com/upgradedev/mitos-gcp/actions/runs/32234805908) | 1 failed | **proof the gate has teeth.** Guard disabled by one edit; the same model then wrote `docs/customer.md` |
+| local, 2026-08-19 | 6 passed | the same block against **live Gemini 3.7**, not a stub. `tests/integration/test_gemini_live.py` |
 
-The middle row is the one that matters. A gate nobody has watched go red is a gate nobody should
-believe. The second row is why the first is not merely a harness that never dispatched a tool at all.
+A gate nobody has watched go red is a gate nobody should believe.
 
-Both are reproducible: `python -m pytest tests/spike -q`.
+### Why a model is allowed near the gate
 
-## Spin-up
+The evaluator is deterministic. A Gemini critic sits behind it and **can only add findings**.
+`_with_critic` in [`src/mitos/evaluator.py`](src/mitos/evaluator.py) computes
+`passed = deterministic_passed AND the critic found nothing`; there is no branch that removes a
+finding or flips a verdict. [`tests/unit/test_critic_invariant.py`](tests/unit/test_critic_invariant.py)
+feeds it a critic that insists everything is approved and asserts the deterministic findings survive.
 
-No API key, no cloud credential and no paid call are needed to reproduce the gate proof. The model is
-a stub, so the suite is offline by construction.
+A gate a model can argue its way out of is not a gate, and the model reviewing the draft is the same
+class of thing that wrote it.
+
+## What the track asked for
+
+| Track wording | Where it is |
+|---|---|
+| "cataloged for cross-department use" | the catalogue is a queried structure, not a table in a document. The router reads it to decide who wakes, so adding a companion changes behaviour. `GET /catalog` |
+| "safely maintain context across weeks of asynchronous operations" | the Firestore thread. The demo runs the chore **twice**, and the second run recalls what the first wrote, live. A deferral from July is seeded, labelled synthetic, and escalates because it expired |
+| "without violating enterprise compliance, data sovereignty, or security policies" | three identities, one write credential, an append-only ledger with no mutation method, and a write addressed by sha256 |
+
+## Run it
+
+The offline path needs **no credential, no API key and no paid call**. It is standard library only.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements/spike.txt
-python -m pytest tests/spike -q
+PYTHONPATH=src python -m mitos.demo --ledger memory --yes
 ```
 
-Requires Python 3.10 or newer; CI runs 3.12.
+Against the real stack:
+
+```bash
+export GOOGLE_CLOUD_PROJECT=mitos-fleet MITOS_LEDGER=firestore MITOS_MODEL=gemini-3.7-flash
+PYTHONPATH=src python -m mitos.demo
+```
+
+Python 3.10+; CI runs 3.13.
+
+**Gemini 3.x is served on Vertex's `global` endpoint, not the regional ones.** Every regional
+endpoint returns 404 for a 3.x model id while serving 2.5 happily. That cost an hour to find and
+`test_gemini_live.py` pins it.
+
+## Tests
+
+| Layer | What it covers |
+|---|---|
+| `tests/unit` | the policy, the ledger contract, every detector, the critic invariant |
+| `tests/integration` | the chore end to end, the ADK dispatcher, Firestore against the emulator, live Gemini |
+| `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
+
+**94% coverage against an 85% floor.** The floor is deliberately below the real number so a
+regression trips it rather than the number drifting down to meet it. The Firestore adapter is
+exercised against the emulator rather than trusted because the in-memory one passes, and a separate
+CI step fails the build if that suite ever skips.
+
+gitleaks runs over history with **no ignore file**. Every credential-shaped test value is assembled
+at runtime in [`tests/synthetic_secrets.py`](tests/synthetic_secrets.py), because allowlisting a
+pattern to make a secret scan pass is how secret scanners stop working.
+
+## The video
+
+Built by [`.github/workflows/video.yml`](.github/workflows/video.yml), never on a developer machine.
+`video/record.py` runs the demo as a subprocess and records every byte it printed with the second it
+printed it; `video/build.py` replays exactly that, at exactly that speed. **Nothing is cut and no
+beat is sped up.** If the chore fails, the recording fails and no video is produced.
 
 ## Status, stated honestly
 
 | Claim | State |
 |---|---|
-| the gate is a control and not a prompt | **proven**, in CI, both directions, links above |
-| the guard's policy is deterministic and model-independent | **in the repo**, `src/mitos/guard.py` |
-| three Cloud Run services under three separate service accounts | **not built yet.** An architectural intention, not a shipped fact |
-| Firestore as the provenance ledger | **not built yet** |
-| the fleet, the evaluator gate, the governed write | **not built yet** |
+| the gate is a control, not a prompt | **proven in CI, both directions**, and against live Gemini 3.7 |
+| three Cloud Run services, three service accounts | **deployed**, verifiable with the two `curl`s above |
+| Firestore provenance thread | **deployed**, append-only |
+| Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
+| the spec-repo write | **simulated**. The governed write is proven against a hash and an identity; it does not yet open a real GitHub PR |
+| the webhook | **simulated**. The trigger is a fixture, not a live GitHub webhook |
 
-Anything marked not built is not claimed anywhere else in this repository either. When it ships, this
-table changes with it.
+The last two rows are the honest limits of what is built. They are not claimed anywhere else in this
+repository either.
 
 ## Pre-existing components
 
-Nothing in this repository predates the submission period. The fleet's *shape* is derived from ARKON,
-a set of 58 companion definitions used as configuration for the authors' own workflow; those
-definitions are not part of this repository and none of their content is reused verbatim.
+Nothing here predates the submission period. The fleet's *shape* is derived from ARKON, 58 companion
+definitions used as configuration for the authors' own workflow. Five are productised here; none of
+their text is reused verbatim and the definitions are not part of this repository.
 
 ## Licence
 

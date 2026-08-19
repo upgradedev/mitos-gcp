@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 # Credential shapes. Deliberately narrow: a detector that fires on any long
 # string produces noise, and a gate that cries wolf gets widened by the next
@@ -116,12 +116,28 @@ def _scan(text: str, patterns, severity: str, kind: str) -> list[Finding]:
     return out
 
 
-def evaluate(draft: str, *, known_paths: list[str] | None = None) -> Verdict:
+class Critic(Protocol):
+    """A second opinion that can only ever make the gate stricter."""
+
+    def review(self, draft: str, already_found: list[str]) -> list[dict[str, str]]: ...
+
+
+def evaluate(
+    draft: str,
+    *,
+    known_paths: list[str] | None = None,
+    critic: Critic | None = None,
+) -> Verdict:
     """Run every check on a generator draft and return one verdict.
 
     `known_paths` is the set of files the fleet actually read. A draft citing
     anything outside it is a hallucinated reference, which is the ARKON
     evaluator's check 3.
+
+    `critic` is an optional model-backed reviewer. Read `_with_critic` before
+    changing anything about how its result is combined: the invariant that it
+    can only add findings is the reason a model is allowed near this gate at
+    all.
     """
     checks = [
         "secret-leak",
@@ -155,11 +171,47 @@ def evaluate(draft: str, *, known_paths: list[str] | None = None) -> Verdict:
             Finding("HIGH", "non-empty", "the draft is empty", "")
         )
 
-    return Verdict(
+    verdict = Verdict(
         passed=not findings,
         findings=findings,
         injection_attempt=bool(injection),
         checked=checks,
+    )
+    return verdict if critic is None else _with_critic(verdict, draft, critic)
+
+
+def _with_critic(verdict: Verdict, draft: str, critic: Critic) -> Verdict:
+    """Union the critic's findings into the deterministic verdict.
+
+    THE INVARIANT, and it is the whole reason a model is permitted here:
+
+        the critic can only ADD findings.
+
+    There is deliberately no branch in this function that removes a finding, that
+    clears the injection flag, or that sets `passed` to True. `passed` is
+    `verdict.passed AND the critic found nothing`, so the model is strictly a
+    tightening step. A gate whose verdict a model can reverse is not a gate, and
+    the model reviewing the draft is the same class of thing that wrote it.
+
+    `tests/unit/test_critic_invariant.py` feeds this a critic that insists
+    everything is approved, and asserts the deterministic findings survive.
+    """
+    extra_raw = critic.review(draft, [f.detail for f in verdict.findings])
+    extra = [
+        Finding(
+            severity="HIGH",
+            check="model-critic",
+            detail=item.get("detail", ""),
+            evidence=item.get("evidence", ""),
+        )
+        for item in extra_raw
+        if item.get("detail")
+    ]
+    return Verdict(
+        passed=verdict.passed and not extra,
+        findings=verdict.findings + extra,
+        injection_attempt=verdict.injection_attempt,
+        checked=[*verdict.checked, "model-critic"],
     )
 
 
