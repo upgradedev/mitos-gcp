@@ -41,6 +41,7 @@ STYLE = {
     "dispatch": (BLUE, "DISPATCH"),
     "recall": (YELLOW, "RECALL"),
     "escalate": (YELLOW, "ESCALATE"),
+    "engine": (DIM, "  engine"),
     "specialist": (DIM, "  agent"),
     "evaluate": (BLUE, "GATE"),
     "finding": (RED, "  finding"),

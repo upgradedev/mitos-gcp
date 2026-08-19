@@ -31,6 +31,7 @@ from mitos.chore import run_chore  # noqa: E402
 from mitos.fixtures import PR_4471, PR_4472, SEEDED_HISTORY  # noqa: E402
 from mitos.fleet import CATALOG  # noqa: E402
 from mitos.guard import ROLE_READER, WRITE_TOOLS, is_allowed  # noqa: E402
+from mitos.gemini import build_analyst, build_critic  # noqa: E402
 from mitos.ledger import Entry, build_ledger  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
@@ -84,6 +85,7 @@ def identity() -> dict[str, Any]:
         "project": PROJECT,
         "may_call_write_tools": write_checks,
         "spec_repo_write_credential": _can_reach_write_credential(),
+        "model": os.environ.get("MITOS_MODEL", "stub"),
         "note": (
             "may_call_write_tools is enforced in ADK's before_tool_callback. "
             "spec_repo_write_credential is enforced by Google IAM, outside this "
@@ -145,6 +147,8 @@ def run(req: RunRequest) -> JSONResponse:
         run_id=uuid.uuid4().hex[:8],
         emit=lambda kind, text: transcript.append({"kind": kind, "text": text}),
         approve=(lambda card: req.approve),
+        analyst=build_analyst(PROJECT),
+        critic=build_critic(PROJECT),
     )
     return JSONResponse(
         {

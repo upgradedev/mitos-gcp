@@ -75,6 +75,8 @@ def run_chore(
     emit: Emit = _noop,
     approve: Optional[Callable[[ApprovalCard], bool]] = None,
     today: str = "2026-08-19",
+    analyst: Any = None,
+    critic: Any = None,
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
@@ -146,10 +148,14 @@ def run_chore(
         ).entry_id
         emit("escalate", "the deferral has expired, escalating instead of re-filing")
 
-    # 4. The specialists.
+    # 4. The specialists. Which engine produced each assessment goes in the
+    # thread, so nobody has to guess later whether a finding came from a model
+    # or from a template.
+    engine = getattr(analyst, "model", None) or "template"
+    emit("engine", f"specialists running on {engine}")
     fragments, paths_read, findings = [], [], []
     for name in dispatch.woken:
-        out = fleet.run_specialist(name, pr, dispatch.signals)
+        out = fleet.run_specialist(name, pr, dispatch.signals, analyst=analyst)
         if out is None:
             continue
         fragments.append(out.fragment)
@@ -158,7 +164,11 @@ def run_chore(
         cursor = record(
             "specialist.output",
             name,
-            {"chars": len(out.fragment), "paths_read": out.paths_read},
+            {
+                "chars": len(out.fragment),
+                "paths_read": out.paths_read,
+                "engine": engine,
+            },
             cursor,
         ).entry_id
         emit("specialist", f"{name} produced {len(out.fragment)} chars")
@@ -172,7 +182,7 @@ def run_chore(
     target = "docs/specs/customer-record.md"
 
     # 5. The gate. The draft carries whatever was planted in the diff.
-    verdict = evaluate(draft, known_paths=pr.paths())
+    verdict = evaluate(draft, known_paths=pr.paths(), critic=critic)
     cursor = record(
         "evaluator.verdict", "evaluator-companion", verdict.as_dict(), cursor
     ).entry_id
@@ -187,7 +197,7 @@ def run_chore(
     if not verdict.passed:
         emit("repair", "stripping what the gate objected to and re-submitting")
         draft = redact_for_repair(draft)
-        final_verdict = evaluate(draft, known_paths=pr.paths())
+        final_verdict = evaluate(draft, known_paths=pr.paths(), critic=critic)
         cursor = record(
             "evaluator.verdict",
             "evaluator-companion",

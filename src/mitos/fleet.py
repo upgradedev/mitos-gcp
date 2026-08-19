@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 from .fixtures import PullRequest
 
@@ -295,10 +295,39 @@ SPECIALISTS: dict[str, Specialist] = {
 }
 
 
+class Analyst(Protocol):
+    """Produces a specialist's assessment. Implemented by the deterministic
+    templates below and by `gemini.GeminiAnalyst`."""
+
+    def assess(self, companion: str, pr: PullRequest, signals: list[Signal]) -> dict: ...
+
+
 def run_specialist(
-    name: str, pr: PullRequest, signals: list[Signal]
+    name: str,
+    pr: PullRequest,
+    signals: list[Signal],
+    analyst: Optional[Analyst] = None,
 ) -> Optional[SpecialistOutput]:
-    fn = SPECIALISTS.get(name)
-    if fn is None:
+    """Run one companion.
+
+    With no analyst this is the deterministic template path: no credential, no
+    network, identical output every time. That is what CI runs and what the
+    recorded demo replays, and it is why the video's rejection happens on every
+    take rather than whenever the model misbehaves.
+
+    With an analyst, the same companion is a Gemini agent reading the same diff.
+    The engine used is recorded in the ledger either way, so a reader can always
+    tell which produced a given assessment.
+    """
+    if name not in SPECIALISTS:
         return None
-    return fn(pr, signals)
+    if analyst is None:
+        return SPECIALISTS[name](pr, signals)
+
+    data = analyst.assess(name, pr, signals)
+    return SpecialistOutput(
+        companion=name,
+        fragment=data.get("assessment", ""),
+        paths_read=data.get("paths_read") or pr.paths(),
+        findings=data.get("findings", []),
+    )
