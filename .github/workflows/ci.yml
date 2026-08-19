@@ -56,6 +56,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          # Without this, setup-python looks only for **/requirements.txt or
+          # **/pyproject.toml and fails the job outright when it finds neither.
+          cache-dependency-path: requirements/spike.txt
 
       - name: Install pinned dependencies
         run: pip install -r requirements/spike.txt
