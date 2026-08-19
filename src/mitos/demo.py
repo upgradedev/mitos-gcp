@@ -21,8 +21,9 @@ import time
 import uuid
 from typing import Optional
 
+from .batch import run_batch
 from .chore import ApprovalCard, run_chore
-from .fixtures import PR_4471, PR_4472, SEEDED_HISTORY
+from .fixtures import BACKLOG, PR_4471, PR_4472, SEEDED_HISTORY
 from .fleet import CATALOG
 from .ledger import Entry, InMemoryLedger, Ledger, build_ledger
 
@@ -49,6 +50,7 @@ STYLE = {
     "approval": (BOLD, "APPROVAL"),
     "identity": (DIM, "  identity"),
     "write": (GREEN, "WRITE"),
+    "parked": (YELLOW, "PARKED"),
     "halt": (RED, "HALT"),
 }
 
@@ -181,6 +183,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         emit=_emit, approve=approve, today=args.today,
     )
 
+    _rule("THE REST OF THE MORNING, ten more pull requests, unattended")
+    rest = [pr for pr in BACKLOG if pr.number not in (PR_4471.number, PR_4472.number)]
+    report = run_batch(rest, ledger, approve=lambda card: True, today=args.today)
+    for o in report.outcomes:
+        if o.state == "parked":
+            print(f"  {YELLOW}parked   {RESET} PR {o.pr_number}  {o.title[:44]}")
+            print(f"           {DIM}{o.parked_by}: {o.reason[:96]}{RESET}")
+        elif o.state == "no_action":
+            print(f"  {DIM}no action{RESET} PR {o.pr_number}  {o.title[:44]}")
+        else:
+            print(f"  {GREEN}completed{RESET} PR {o.pr_number}  {o.title[:44]}")
+        sys.stdout.flush()
+        time.sleep(_PACE / 3)
+
     _rule("THE THREAD, walked back from the last entry to the diff that caused it")
     for entry in ledger.thread(second.last_entry_id):
         print(
@@ -189,7 +205,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
     sys.stdout.flush()
 
-    _rule()
+    _rule("THE COUNT")
+    total = report.presented + 2
+    print(f"  {BOLD}{total} presented{RESET}, "
+          f"{BOLD}{report.completed + 2} completed unattended{RESET}, "
+          f"{BOLD}{report.parked} parked for a human{RESET}, "
+          f"{report.no_action} needed nothing")
+    print(f"  {DIM}human interventions before the approval step: 0{RESET}")
+    print()
     for label, r in (("run 1", first), ("run 2", second)):
         state = "published" if r.published else "approved, not published"
         detail = r.receipt.get("compare") or r.receipt.get("reason", "")

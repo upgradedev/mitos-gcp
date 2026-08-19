@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from . import fleet
+from .envelope import Outcome, Response, Status
 from .evaluator import Verdict, evaluate, redact_for_repair
 from .fixtures import PullRequest
 from .guard import ROLE_READER, ROLE_WRITER, is_allowed
@@ -63,6 +64,11 @@ class ChoreResult:
     written: bool
     published: bool = False
     receipt: dict[str, Any] = field(default_factory=dict)
+    # Set when a specialist refused. The whole point of letting an agent refuse
+    # is that the refusal reaches the reader, so it is a first-class result.
+    parked_by: Optional[str] = None
+    parked_reason: str = ""
+    responses: list[Response] = field(default_factory=list)
     root_entry_id: str = ""
     last_entry_id: str = ""
     escalated: bool = False
@@ -163,24 +169,47 @@ def run_chore(
     engine = getattr(analyst, "model", None) or "template"
     emit("engine", f"specialists running on {engine}")
     fragments, paths_read, findings = [], [], []
+    responses: list[Response] = []
     for name in dispatch.woken:
         out = fleet.run_specialist(name, pr, dispatch.signals, analyst=analyst)
         if out is None:
             continue
-        fragments.append(out.fragment)
-        paths_read.extend(out.paths_read)
-        findings.extend(out.findings)
+        responses.append(out)
         cursor = record(
-            "specialist.output",
+            "specialist.response",
             name,
-            {
-                "chars": len(out.fragment),
-                "paths_read": out.paths_read,
-                "engine": engine,
-            },
+            {**out.as_dict(), "engine": engine},
             cursor,
         ).entry_id
-        emit("specialist", f"{name} produced {len(out.fragment)} chars")
+
+        if out.parks_the_item:
+            # A specialist refused. Nothing downstream runs, because producing
+            # a plan on top of a refusal is exactly how an autonomous system
+            # ends up confidently wrong.
+            emit(
+                "parked",
+                f"{name} returned {out.status.value}\n  {out.reason}",
+            )
+            cursor = record(
+                "item.parked",
+                name,
+                {"status": out.status.value, "reason": out.reason},
+                cursor,
+            ).entry_id
+            return ChoreResult(
+                run_id, pr.number, dispatch, recalled, Verdict(passed=False),
+                None, None, False, False, {}, name, out.reason, responses,
+                root.entry_id, cursor, escalated,
+            )
+
+        fragments.append(out.assessment)
+        paths_read.extend(out.paths_read)
+        findings.extend(out.findings)
+        emit(
+            "specialist",
+            f"{name} {out.status.value}, {len(out.assessment)} chars, "
+            f"confidence {out.confidence:.2f}",
+        )
 
     already_known = {
         e.payload.get("finding") for e in recalled if e.payload.get("finding")
@@ -221,7 +250,8 @@ def run_chore(
         emit("halt", "the repaired draft still fails; nothing is written")
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-            None, False, False, {}, root.entry_id, cursor, escalated,
+            None, False, False, {}, None, "", responses,
+            root.entry_id, cursor, escalated,
         )
 
     # 6. The approval card, content-addressed.
@@ -257,7 +287,8 @@ def run_chore(
         emit("halt", "not approved; nothing is written")
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-            card, False, False, {}, root.entry_id, cursor, escalated,
+            card, False, False, {}, None, "", responses,
+            root.entry_id, cursor, escalated,
         )
 
     # 7. The governed write, in the writer identity, against the exact hash.
@@ -292,7 +323,8 @@ def run_chore(
 
     return ChoreResult(
         run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-        card, written, published, receipt, root.entry_id, cursor, escalated,
+        card, written, published, receipt, None, "", responses,
+        root.entry_id, cursor, escalated,
     )
 
 
