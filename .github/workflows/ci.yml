@@ -78,6 +78,13 @@ jobs:
           fi
       # An em dash in the owner's voice reads as machine-written, and this is
       # the surface a judge reads first.
+      # ORG_STANDARDS #6. A hand-maintained spec drifts from the endpoints
+      # within a sprint, so it is generated and the committed copy is checked.
+      - name: OpenAPI spec matches the app
+        run: |
+          pip install -q -r requirements.txt pyyaml
+          PYTHONPATH=src:. python scripts/generate_openapi.py --check
+
       - name: No em dashes in judge-facing text
         run: |
           if grep -n '—' README.md; then
