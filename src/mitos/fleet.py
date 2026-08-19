@@ -420,3 +420,66 @@ def run_specialist(
         findings=data.get("findings", []),
         confidence=0.8,
     )
+
+
+def route_with_model(pr: PullRequest, classifier=None) -> tuple[Dispatch, dict]:
+    """Deterministic routing, optionally widened by a model. Never narrowed.
+
+    THE INVARIANT, and it is the same one the evaluator's critic obeys:
+
+        the model can only TIGHTEN.
+
+    Its signals are unioned with the deterministic ones and it cannot remove
+    any, so a wrong or compromised classifier can make the fleet wake more
+    companions and be more cautious. It can never make it wake fewer.
+
+    Disagreement is returned rather than resolved, so a reader months later can
+    see that the model spotted something the patterns missed, or that it
+    invented something they correctly ignored.
+    """
+    base = route(pr)
+    if classifier is None:
+        return base, {}
+
+    proposal = classifier.classify(pr)
+    deterministic = {s.name for s in base.signals}
+    proposed = set(proposal.get("signals", []))
+
+    # Union only. There is deliberately no branch that discards a deterministic
+    # signal because the model did not report it.
+    added = sorted(proposed - deterministic)
+    missed = sorted(deterministic - proposed)
+
+    signals = list(base.signals)
+    for name in added:
+        signals.append(
+            Signal(name, f"raised by the model: {proposal.get('rationale', '')}", "")
+        )
+
+    # A model saying "this is Article 9" is enough to wake compliance. A model
+    # saying it is NOT cannot stop the deterministic rule from firing.
+    if proposal.get("special_category") and "personal-data" not in {
+        s.name for s in signals
+    }:
+        signals.append(
+            Signal("personal-data", "the model classified this as Article 9 data", "")
+        )
+        added.append("personal-data")
+
+    names = {s.name for s in signals}
+    woken, skipped = [], []
+    for companion in CATALOG:
+        if companion.role in ("router", "critic"):
+            continue
+        (woken if names.intersection(companion.wakes_on) else skipped).append(
+            companion.name
+        )
+
+    divergence = {
+        "model_added": added,
+        "model_missed": missed,
+        "special_category": proposal.get("special_category", False),
+        "rationale": proposal.get("rationale", ""),
+        "agreed": not added and not missed,
+    }
+    return Dispatch(signals=signals, woken=woken, skipped=skipped), divergence
