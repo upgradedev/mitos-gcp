@@ -5,3 +5,8 @@ __pycache__/
 *.log
 dist/
 build/
+.coverage
+coverage.xml
+htmlcov/
+video/build/
+video/run.jsonl

@@ -1,12 +1,20 @@
 # Adapted from the submission kit's ci/ci.yml. The trigger block, the pinned
 # gitleaks step with its sha256 check, the concurrency block and the action SHA
-# pins are copied byte for byte. The build and test jobs are ours.
+# pins are copied byte for byte.
 #
 # `push:` deliberately carries no `branches:` key. Two of our pull requests once
 # sat with zero checks because push was pinned to main.
 #
-# The readiness gate job is NOT here yet. It is added when there is a demo for it
-# to fetch; a readiness gate with no live URL to veto is decoration.
+# The pyramid, widest first:
+#
+#   unit         pure functions, no I/O, no framework
+#   integration  the chore end to end, the ADK dispatcher, the Firestore adapter
+#   e2e          the journey a judge watches, driven the way the README says
+#
+# Security runs beside them: secret scan, SAST and a dependency audit.
+#
+# The video is NOT built here. It has its own workflow, because it needs ffmpeg
+# and an API key and it must not slow down every push.
 
 name: CI
 
@@ -22,6 +30,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.13"
+  COVERAGE_FLOOR: "85"
+
 jobs:
   secret-scan:
     name: Secret scan
@@ -31,6 +43,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+      # No --gitleaks-ignore-path, and no .gitleaksignore in the repo. The
+      # credential-shaped test fixture is assembled at runtime for exactly this
+      # reason: allowlisting a pattern to make a secret scan pass is how secret
+      # scanners stop working.
       - name: gitleaks detect (pinned v8.18.4, redacted)
         run: |
           curl --fail --silent --show-error --location \
@@ -40,63 +56,111 @@ jobs:
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks detect --source . --redact --no-banner
 
-  # The interceptor spike. This is the job that decides whether the entry's
-  # architectural claim is true. It runs entirely offline: the model is a stub,
-  # so there is no API key, no Google Cloud credential and no paid call, and an
-  # expired token cannot turn this red the night before the deadline.
-  interceptor-spike:
-    name: ADK interceptor holds
+  # Unit and e2e need no third-party runtime at all: the product's offline path
+  # is standard library only. Coverage is measured here and gated here.
+  pyramid:
+    name: Unit, e2e and coverage
     needs: secret-scan
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.13"
-          cache: pip
-          # Without this, setup-python looks only for **/requirements.txt or
-          # **/pyproject.toml and fails the job outright when it finds neither.
-          cache-dependency-path: requirements/spike.txt
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install pinned dependencies
-        run: pip install -r requirements/spike.txt
+      - run: pip install pytest==8.3.4 pytest-cov==6.0.0
 
-      - name: Record the resolved ADK version alongside the result
+      - name: Unit
+        env:
+          PYTHONPATH: src:.
+        run: python -m pytest tests/unit -q
+
+      - name: End-to-end journey
+        env:
+          PYTHONPATH: src:.
+        run: python -m pytest tests/e2e -q
+
+      # The floor is deliberately below the number we actually hit, so a real
+      # regression trips it rather than the number drifting down to meet it.
+      - name: Coverage gate
+        env:
+          PYTHONPATH: src:.
         run: |
-          python -c "import importlib.metadata as m; print('google-adk', m.version('google-adk'))"
+          python -m pytest tests/unit tests/e2e tests/integration/test_chore.py -q \
+            --cov=mitos --cov-report=term-missing \
+            --cov-fail-under=${{ env.COVERAGE_FLOOR }}
 
-      - name: Compile
-        run: python -m compileall -q src tests
-
-      - name: The gate blocks, the control permits, the contract is pinned
-        run: python -m pytest tests/spike -q
-
-  # The chore. Stdlib only, so it needs no install at all: the offline path is
-  # the same code the deployed services run, with an in-memory ledger behind the
-  # same interface Firestore implements.
-  chore:
-    name: The chore holds
+  # The Firestore adapter is the backend the deployed services actually use, so
+  # it is exercised against a real Firestore wire protocol rather than trusted
+  # because the in-memory one passes.
+  integration:
+    name: Integration, incl. Firestore adapter
     needs: secret-scan
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "21"
 
-      - name: Install pytest only
-        run: pip install pytest==8.3.4
+      - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0
 
-      - name: Claims a judge is entitled to doubt
+      - name: Start the Firestore emulator
+        run: |
+          gcloud components install cloud-firestore-emulator beta --quiet
+          nohup gcloud emulators firestore start --host-port=127.0.0.1:8089 \
+            > /tmp/firestore.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s http://127.0.0.1:8089 >/dev/null 2>&1; then
+              echo "emulator up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "emulator never came up"; cat /tmp/firestore.log; exit 1
+
+      - name: ADK interceptor, the chore, and the Firestore adapter
         env:
-          PYTHONPATH: src
-        run: python -m pytest tests/test_chore.py -q
+          PYTHONPATH: src:.
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8089
+          GOOGLE_CLOUD_PROJECT: mitos-test
+        run: python -m pytest tests/integration -q
 
-      - name: The demo runs end to end, offline
+      # A skip that becomes permanent is a test that stopped existing. This
+      # fails if the Firestore suite silently stopped running.
+      - name: The Firestore suite must not have been skipped
         env:
-          PYTHONPATH: src
-        run: python -m mitos.demo --ledger memory --yes --fast
+          PYTHONPATH: src:.
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8089
+          GOOGLE_CLOUD_PROJECT: mitos-test
+        run: |
+          python -m pytest tests/integration/test_firestore_ledger.py -q | tee /tmp/fs.txt
+          grep -qE "[0-9]+ passed" /tmp/fs.txt
+          if grep -q "skipped" /tmp/fs.txt; then
+            echo "the Firestore adapter suite skipped; coverage of the live adapter is a fiction"
+            exit 1
+          fi
+
+  security:
+    name: SAST and dependency audit
+    needs: secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: pip install bandit==1.8.0 pip-audit==2.7.3
+
+      - name: SAST
+        run: bandit -r src service video -q
+
+      - name: Known vulnerabilities in what we ship
+        run: pip-audit -r requirements.txt --strict

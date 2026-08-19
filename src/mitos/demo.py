@@ -124,11 +124,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--ledger", choices=("memory", "firestore"), default=None)
     ap.add_argument("--yes", action="store_true", help="auto-approve the write")
     ap.add_argument("--fast", action="store_true", help="no pacing, for CI")
+    ap.add_argument(
+        "--pace",
+        type=float,
+        default=None,
+        help="seconds between beats. The recording uses this so the captured "
+        "run is real time and needs no speed-up in the edit.",
+    )
     ap.add_argument("--today", default="2026-08-19")
     args = ap.parse_args(argv)
 
     if args.fast:
         _PACE = 0.0
+    elif args.pace is not None:
+        _PACE = args.pace
 
     # A Windows console defaults to cp1252 and dies on the box-drawing
     # characters below. A judge following the spin-up instructions on Windows
