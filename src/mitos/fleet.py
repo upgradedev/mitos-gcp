@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
 
+from .envelope import Response, Status
 from .fixtures import PullRequest
 
 
@@ -93,12 +94,49 @@ PERSONAL_DATA_TERMS = (
     "birth",
     "national_id",
     "tax_id",
+) + tuple(
+    # Article 9 terms are personal data too. Without them here the router never
+    # wakes compliance for a special-category field, so the refusal below could
+    # never fire. The backlog is what exposed that.
+    t for t in (
+        "health",
+        "biometric",
+        "genetic",
+        "ethnic",
+        "religio",
+        "political",
+        "union_member",
+        "sexual",
+    )
+)
+
+DESTRUCTIVE = re.compile(
+    r"^\+\s*(?:ALTER\s+TABLE\s+\w+\s+DROP\s+COLUMN|DROP\s+TABLE|TRUNCATE)\b",
+    re.M | re.I,
+)
+
+# GDPR Article 9. The fleet may report ordinary personal data; it must not
+# decide anything about these.
+SPECIAL_CATEGORY = (
+    "health",
+    "biometric",
+    "genetic",
+    "ethnic",
+    "religio",
+    "political",
+    "union_member",
+    "sexual",
 )
 
 SCHEMA_SIGNALS = (
     re.compile(r"^\+\s*(?:private|public|protected)\s+\w+\s+\w+;", re.M),
     re.compile(r"^\+\s*ALTER\s+TABLE\b", re.M | re.I),
     re.compile(r"^\+\s*CREATE\s+(?:TABLE|INDEX)\b", re.M | re.I),
+    # A bare DROP raised no signal at all, so a destructive migration woke
+    # nobody and the item was counted as "nothing to do". A destructive change
+    # being invisible is worse than one that parks. Found by running the
+    # backlog, which is the entire reason for running a backlog.
+    re.compile(r"^\+\s*DROP\s+(?:TABLE|COLUMN)\b", re.M | re.I),
 )
 
 
@@ -194,19 +232,30 @@ def route(pr: PullRequest) -> Dispatch:
 # --------------------------------------------------------------------------
 
 
-@dataclass
-class SpecialistOutput:
-    companion: str
-    fragment: str
-    paths_read: list[str]
-    findings: list[str] = field(default_factory=list)
+Specialist = Callable[[PullRequest, list[Signal]], Response]
 
 
-Specialist = Callable[[PullRequest, list[Signal]], SpecialistOutput]
-
-
-def _schema_specialist(pr: PullRequest, signals: list[Signal]) -> SpecialistOutput:
+def _schema_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
     hits = [s for s in signals if s.name == "schema-change"]
+
+    # An irreversible migration is not something to approve on the fleet's own
+    # authority. Dropping a column cannot be undone by merging a revert.
+    for f in pr.files:
+        m = DESTRUCTIVE.search(f["patch"])
+        if m:
+            return Response(
+                companion="db-architect-leader",
+                status=Status.BLOCKED,
+                reason=(
+                    f"irreversible migration in {f['path']}: "
+                    f"`{m.group(0).strip()}`. Data removed by this cannot be "
+                    f"restored by reverting the pull request, so a human owner "
+                    f"has to decide, not the fleet"
+                ),
+                citations=[f["path"]],
+                paths_read=[f["path"]],
+                confidence=1.0,
+            )
     lines = [f"## Schema impact, PR {pr.number}", ""]
     for s in hits:
         lines.append(f"- `{s.path}` changes the shape of the record: `{s.evidence}`")
@@ -215,14 +264,17 @@ def _schema_specialist(pr: PullRequest, signals: list[Signal]) -> SpecialistOutp
         "The customer document and its table move together in this diff, so any "
         "consumer reading the old shape needs the spec updated before merge."
     )
-    return SpecialistOutput(
+    return Response(
         companion="db-architect-leader",
-        fragment="\n".join(lines),
+        status=Status.OK,
+        assessment="\n".join(lines),
         paths_read=[s.path for s in hits],
+        citations=[s.path for s in hits],
+        confidence=0.9,
     )
 
 
-def _doc_specialist(pr: PullRequest, signals: list[Signal]) -> SpecialistOutput:
+def _doc_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
     spec_files = [f for f in pr.files if f["path"].endswith(".md")]
     paths = [f["path"] for f in pr.files]
     lines = [f"## Specification drift, PR {pr.number}", ""]
@@ -255,17 +307,48 @@ def _doc_specialist(pr: PullRequest, signals: list[Signal]) -> SpecialistOutput:
             lines.append(body.strip())
             lines.append("```")
             lines.append("")
-    return SpecialistOutput(
+    return Response(
         companion="documentation-companion",
-        fragment="\n".join(lines),
+        status=Status.OK,
+        assessment="\n".join(lines),
         paths_read=paths,
+        citations=paths,
+        # Lower confidence when no specification was touched: the companion is
+        # reporting drift it inferred rather than drift it can point at.
+        confidence=0.8 if spec_files else 0.6,
     )
 
 
-def _compliance_specialist(
-    pr: PullRequest, signals: list[Signal]
-) -> SpecialistOutput:
+def _compliance_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
     hits = [s for s in signals if s.name == "personal-data"]
+
+    # Ordinary personal data the fleet can assess and report. Special-category
+    # data under GDPR Article 9 is different in kind: it needs a Data Protection
+    # Impact Assessment and a named owner's decision, and no amount of reading
+    # the diff produces one. So the fleet refuses rather than producing a
+    # confident answer about something it is not entitled to decide.
+    special = [
+        (h, term)
+        for h in hits
+        for term in SPECIAL_CATEGORY
+        if term in h.evidence.lower() or term in h.path.lower()
+    ]
+    if special:
+        hit, term = special[0]
+        return Response(
+            companion="compliance-companion",
+            status=Status.BLOCKED,
+            reason=(
+                f"`{hit.path}` introduces what looks like special-category data "
+                f"under GDPR Article 9 (matched on {term!r}). That requires a "
+                f"Data Protection Impact Assessment and a named owner's "
+                f"decision, which cannot be derived from a diff"
+            ),
+            findings=[f"special-category data added in `{hit.path}`"],
+            citations=[hit.path],
+            paths_read=[h.path for h in hits],
+            confidence=0.7,
+        )
     lines = [f"## Data protection, PR {pr.number}", ""]
     findings = []
     for s in hits:
@@ -280,11 +363,14 @@ def _compliance_specialist(
         "A contact field used for outbound notification needs a lawful basis and "
         "a retention period recorded before the column ships."
     )
-    return SpecialistOutput(
+    return Response(
         companion="compliance-companion",
-        fragment="\n".join(lines),
+        status=Status.OK,
+        assessment="\n".join(lines),
         paths_read=[s.path for s in hits],
+        citations=[s.path for s in hits],
         findings=findings,
+        confidence=0.9,
     )
 
 
@@ -307,7 +393,7 @@ def run_specialist(
     pr: PullRequest,
     signals: list[Signal],
     analyst: Optional[Analyst] = None,
-) -> Optional[SpecialistOutput]:
+) -> Optional[Response]:
     """Run one companion.
 
     With no analyst this is the deterministic template path: no credential, no
@@ -325,9 +411,12 @@ def run_specialist(
         return SPECIALISTS[name](pr, signals)
 
     data = analyst.assess(name, pr, signals)
-    return SpecialistOutput(
+    return Response(
         companion=name,
-        fragment=data.get("assessment", ""),
+        status=Status.OK,
+        assessment=data.get("assessment", ""),
         paths_read=data.get("paths_read") or pr.paths(),
+        citations=data.get("paths_read") or pr.paths(),
         findings=data.get("findings", []),
+        confidence=0.8,
     )
