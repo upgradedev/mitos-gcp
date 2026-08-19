@@ -56,6 +56,36 @@ jobs:
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks detect --source . --redact --no-banner
 
+  # A warning, deliberately not a failure. The video link cannot exist until a
+  # human uploads it, and a gate that is red for a reason nobody can fix teaches
+  # people to ignore red. This keeps the missing link visible on every run
+  # instead.
+  submission-surface:
+    name: Judge-facing surface
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Is the demo video linked yet
+        run: |
+          if grep -q 'PENDING_YOUTUBE_UPLOAD' README.md; then
+            echo "::warning file=README.md::The demo video is still a placeholder. \
+          The master is built and verified; only the upload and the paste are left."
+          else
+            grep -qE 'youtu\.be/|youtube\.com/watch' README.md \
+              || { echo "::error::the placeholder is gone but no video URL replaced it"; exit 1; }
+            echo "video linked"
+          fi
+      # An em dash in the owner's voice reads as machine-written, and this is
+      # the surface a judge reads first.
+      - name: No em dashes in judge-facing text
+        run: |
+          if grep -n '—' README.md; then
+            echo "::error file=README.md::em dash found in the judge-facing README"
+            exit 1
+          fi
+          echo "no em dashes"
+
   # Unit and e2e need no third-party runtime at all: the product's offline path
   # is standard library only. Coverage is measured here and gated here.
   pyramid:
