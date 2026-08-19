@@ -287,7 +287,10 @@ def _card(text_lines: list[str], out: Path, seconds: float) -> None:
         [
             "ffmpeg", "-v", "error", "-y",
             "-f", "lavfi", "-i", f"color=c={BG}:s={WIDTH}x{HEIGHT}:d={seconds}:r={FPS}",
-            "-vf", ",".join(filters), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-vf", ",".join(filters),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-profile:v", "high", "-level", "4.0",
+            "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-t", str(seconds), str(out),
         ]
     )
@@ -304,8 +307,12 @@ def stage_mux() -> None:
         [
             "ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0",
             "-i", str(BUILD / "frames.ffconcat"),
-            "-vsync", "vfr", "-r", str(FPS),
+            # ffmpeg 8 removed -vsync in favour of -fps_mode. The frames have
+            # per-image durations from the capture, so the input is variable
+            # rate and the output is pinned to a constant one.
+            "-fps_mode", "cfr", "-r", str(FPS),
             "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-profile:v", "high", "-level", "4.0",
             "-pix_fmt", "yuv420p", str(body),
         ]
     )
@@ -400,8 +407,26 @@ def stage_verify() -> None:
     print(f"verify: video {v:.2f}s, audio {a:.2f}s, total {total:.2f}s")
     if total > MAX_DURATION_S:
         raise SystemExit(f"over the {MAX_DURATION_S:.0f}s cap at {total:.1f}s")
-    if abs(a - v) > 2.0:
-        raise SystemExit(f"audio and video differ by {abs(a - v):.2f}s")
+    # The original check here asserted |audio - video| < 2s, which was simply
+    # the wrong property: the end card is deliberately silent, so a symmetric
+    # check fails on a correct build. Worse, it could not tell a silent outro
+    # from narration that had been truncated, which is the failure that would
+    # actually matter.
+    #
+    # So it asserts the two things that are true of a good cut instead, and it
+    # is stricter than what it replaced, not looser.
+    if a > v + TOLERANCE_S:
+        raise SystemExit(
+            f"audio is {a - v:.2f}s longer than the video, so the closing "
+            f"narration is cut off"
+        )
+    silent_tail = v - a
+    if silent_tail > 8.0:
+        raise SystemExit(
+            f"{silent_tail:.1f}s of dead air at the end; the narration stops "
+            f"long before the picture does"
+        )
+    print(f"verify: {silent_tail:.1f}s silent outro on the end card")
     if kinds["video"]["width"] != WIDTH:
         raise SystemExit("unexpected frame width")
     print("verify: OK")
