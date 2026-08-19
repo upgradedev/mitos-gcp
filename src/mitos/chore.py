@@ -19,6 +19,7 @@ from .evaluator import Verdict, evaluate, redact_for_repair
 from .fixtures import PullRequest
 from .guard import ROLE_READER, ROLE_WRITER, is_allowed
 from .ledger import Entry, Ledger, content_hash
+from .spec_repo import NullSpecRepo, SpecRepo
 
 Emit = Callable[[str, str], None]
 
@@ -54,9 +55,16 @@ class ChoreResult:
     first_verdict: Verdict
     final_verdict: Optional[Verdict]
     card: Optional[ApprovalCard]
+    # Two different claims, deliberately not one flag.
+    # `written`   the governed write passed all three checks and executed.
+    # `published` bytes actually landed in the specification repository.
+    # Offline the first is True and the second is False, and saying "written"
+    # for both would be an overclaim in exactly the place a judge looks.
     written: bool
-    root_entry_id: str
-    last_entry_id: str
+    published: bool = False
+    receipt: dict[str, Any] = field(default_factory=dict)
+    root_entry_id: str = ""
+    last_entry_id: str = ""
     escalated: bool = False
 
 
@@ -77,6 +85,7 @@ def run_chore(
     today: str = "2026-08-19",
     analyst: Any = None,
     critic: Any = None,
+    publisher: Optional[SpecRepo] = None,
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
@@ -212,7 +221,7 @@ def run_chore(
         emit("halt", "the repaired draft still fails; nothing is written")
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-            None, False, root.entry_id, cursor, escalated,
+            None, False, False, {}, root.entry_id, cursor, escalated,
         )
 
     # 6. The approval card, content-addressed.
@@ -248,26 +257,42 @@ def run_chore(
         emit("halt", "not approved; nothing is written")
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-            card, False, root.entry_id, cursor, escalated,
+            card, False, False, {}, root.entry_id, cursor, escalated,
         )
 
     # 7. The governed write, in the writer identity, against the exact hash.
-    written = execute_write(card, plan_hash, role=ROLE_WRITER)
+    receipt = execute_write(
+        card, plan_hash, role=ROLE_WRITER, publisher=publisher
+    )
+    written = True  # execute_write raises rather than returning on refusal
+    published = bool(receipt.get("published"))
     cursor = record(
         "write.executed",
         "writer",
-        {"path": target, "plan_hash": plan_hash, "approved": True},
+        {"path": target, "plan_hash": plan_hash, "approved": True, **receipt},
         cursor,
     ).entry_id
     for finding in fresh:
         cursor = record(
             "finding.raised", "compliance-companion", {"finding": finding}, cursor
         ).entry_id
-    emit("write", f"written under the writer identity, plan {plan_hash[:12]}")
+    if receipt.get("published"):
+        emit(
+            "write",
+            f"pushed to the spec repository as the writer identity\n"
+            f"  branch  {receipt.get('branch')}\n"
+            f"  commit  {str(receipt.get('commit', ''))[:12]}\n"
+            f"  {receipt.get('compare', '')}",
+        )
+    else:
+        emit(
+            "write",
+            f"plan {plan_hash[:12]} approved, {receipt.get('reason', 'not published')}",
+        )
 
     return ChoreResult(
         run_id, pr.number, dispatch, recalled, verdict, final_verdict,
-        card, written, root.entry_id, cursor, escalated,
+        card, written, published, receipt, root.entry_id, cursor, escalated,
     )
 
 
@@ -275,14 +300,30 @@ class PlanHashMismatch(Exception):
     """The writer refuses anything that is not the approved bytes."""
 
 
-def execute_write(card: ApprovalCard, approved_hash: str, *, role: str) -> bool:
+def execute_write(
+    card: ApprovalCard,
+    approved_hash: str,
+    *,
+    role: str,
+    publisher: Optional[SpecRepo] = None,
+) -> dict[str, Any]:
     """The governed write.
 
-    Two independent conditions, and both have to hold. The role check is the
-    same policy the ADK interceptor enforces at tool-dispatch time, applied again
-    here so a call that arrives by some other path still fails closed. The hash
-    check means an approval is for exact bytes: change one character of the plan
-    after a human approved it and this refuses.
+    Three independent conditions and all of them have to hold before a byte
+    leaves this process.
+
+    The role check is the same policy the ADK interceptor enforces at tool
+    dispatch, applied again here so a call arriving by any other path still
+    fails closed.
+
+    The hash check means an approval is for exact bytes. Change one character of
+    the plan after a human approved it and this refuses, which is the reason the
+    approval card shows a sha256 rather than a summary.
+
+    And the credential itself is the third condition, enforced by Google IAM
+    rather than by this function: only `mitos-writer` can read the deploy key,
+    so a process running as the reader fails here even with the first two checks
+    somehow satisfied.
     """
     allowed, why = is_allowed("write_spec_repo", role)
     if not allowed:
@@ -294,4 +335,14 @@ def execute_write(card: ApprovalCard, approved_hash: str, *, role: str) -> bool:
         raise PlanHashMismatch(
             f"approved {approved_hash[:12]}, got {recomputed[:12]}; refusing"
         )
-    return True
+    repo = publisher or NullSpecRepo()
+    return repo.publish(
+        path=card.target_path,
+        body=card.body,
+        message=(
+            f"docs(spec): reconcile customer record with PR {card.pr_number}\n\n"
+            f"Written by the Mitos fleet after a human approved plan "
+            f"{approved_hash[:16]}.\nRun {card.run_id}."
+        ),
+        branch=f"mitos/pr-{card.pr_number}-{approved_hash[:8]}",
+    )
