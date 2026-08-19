@@ -73,7 +73,7 @@ def is_allowed(tool_name: str, role: str) -> tuple[bool, str]:
     Kept free of ADK types so it can be exercised directly and so the ADK
     callback below stays a thin adapter.
     """
-    if False and tool_name in WRITE_TOOLS and role not in WRITE_ROLES:  # DELIBERATE BREAK
+    if tool_name in WRITE_TOOLS and role not in WRITE_ROLES:
         return False, (
             f"role {role!r} holds no write credential; {tool_name!r} is a "
             "governed write and runs only in the writer service after a human "
