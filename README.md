@@ -224,9 +224,17 @@ this repository either.
 
 ## Pre-existing components
 
-Nothing here predates the submission period. The fleet's *shape* is derived from ARKON, 58 companion
-definitions used as configuration for the authors' own workflow. Five are productised here; none of
-their text is reused verbatim and the definitions are not part of this repository.
+Every line of code in this repository was written during the submission period. Two bodies of
+earlier **design** work by the same author informed it, and both are named here because both
+rulebooks require it.
+
+| Pre-existing work | What it is | What was carried across |
+|---|---|---|
+| **ARKON companion definitions** | 58 agent definitions used as configuration for the author's own development workflow | the fleet's *shape*: leaders, specialists, and a mandatory evaluator between a generator and any real system. Five are productised here. None of their text is reused verbatim and the definitions are not part of this repository |
+| **ARKON platform design notes (ADR-015, "Typed Agent Cards")** | an internal architecture decision record on typed agent contracts and capability-based routing | the idea that an agent publishes a typed input/output contract, that a coordinator routes by declared capability rather than hardcoded dispatch, and that a handoff carries a status a callee can push back with. The document is not in this repository and no code was copied from it |
+
+Neither body of work is or contains a deployable product, and neither is submitted. What is
+submitted is this repository.
 
 ## Licence
 
