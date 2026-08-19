@@ -10,13 +10,9 @@ rather than whenever the model happens to misbehave.
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from mitos.chore import (  # noqa: E402
     PlanHashMismatch,
@@ -24,12 +20,7 @@ from mitos.chore import (  # noqa: E402
     run_chore,
 )
 from mitos.evaluator import evaluate  # noqa: E402
-from mitos.fixtures import (  # noqa: E402
-    PR_4471,
-    PR_4472,
-    SEEDED_HISTORY,
-    _FAKE_ENDPOINT,
-)
+from mitos.fixtures import PR_4471, PR_4472, SEEDED_HISTORY  # noqa: E402
 from mitos.fleet import route  # noqa: E402
 from mitos.guard import ROLE_READER, ROLE_WRITER  # noqa: E402
 from mitos.ledger import Entry, InMemoryLedger  # noqa: E402
@@ -121,7 +112,9 @@ def test_the_gate_can_fail_a_clean_draft_too():
     """Proof the detectors are not no-ops: hand them something bad directly."""
     # Same reason as in fixtures.py: no credential-shaped literal is committed,
     # so the secret scanner stays at full strength with no ignore file.
-    bad = f"See config: {_FAKE_ENDPOINT}"
+    from tests.synthetic_secrets import SERVICE_BUS
+
+    bad = f"See config: {SERVICE_BUS}"
     assert not evaluate(bad).passed
 
 

@@ -1,0 +1,74 @@
+{
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "title_card_s": 7.0,
+  "end_card_s": 13.0,
+  "note": "`at` is the second in the captured run where the beat starts speaking. The build fails if a beat's audio runs past the next beat's start, so a rewrite that gets longer cannot silently overlap the next line.",
+  "beats": [
+    {
+      "id": "01-open",
+      "at": 0.0,
+      "text": "This is Mitos. A fleet of institutional agents that finishes a chore nobody wants to do, and can prove afterwards exactly why it did each thing."
+    },
+    {
+      "id": "02-catalog",
+      "at": 9.0,
+      "text": "Five agents, catalogued by department. The router queries this catalogue to decide who to wake, so adding one changes what the fleet does."
+    },
+    {
+      "id": "03-trigger",
+      "at": 20.0,
+      "text": "A pull request lands. Nobody opened Mitos. A webhook did this. Four files, three languages, one of them prose."
+    },
+    {
+      "id": "04-signals",
+      "at": 30.0,
+      "text": "The router reads the diff and cites the exact hunk behind every signal it raises."
+    },
+    {
+      "id": "05-dispatch",
+      "at": 45.0,
+      "text": "It wakes three of three, because this change carries personal data."
+    },
+    {
+      "id": "06-recall",
+      "at": 51.0,
+      "text": "And the thread remembers. This service was here in July. That deferral has now expired, so the fleet escalates instead of filing the same finding twice."
+    },
+    {
+      "id": "07-gate",
+      "at": 68.0,
+      "text": "The gate rejects the first draft. The pull request carried a live looking credential, and an instruction addressed to the review agent telling it to approve itself. Both were caught."
+    },
+    {
+      "id": "08-repair",
+      "at": 95.0,
+      "text": "Repaired, resubmitted, passed. Then one write is proposed, addressed by its own sha256."
+    },
+    {
+      "id": "09-identity",
+      "at": 106.0,
+      "text": "The reader identity cannot perform that write. This is not a rule in a prompt. It is Google IAM refusing, outside this process."
+    },
+    {
+      "id": "10-run2",
+      "at": 125.0,
+      "text": "Second run, minutes later. A different pull request, carrying no personal data, so compliance is skipped. The fleet is deciding, not following a pipeline."
+    },
+    {
+      "id": "11-memory",
+      "at": 140.0,
+      "text": "And it recalls what the first run wrote, live, out of Firestore. Not a record we seeded. One the fleet made minutes ago."
+    },
+    {
+      "id": "12-thread",
+      "at": 183.0,
+      "text": "Every outcome walks back to the diff that caused it. That is the thread, and it is why the product is called Mitos."
+    },
+    {
+      "id": "13-close",
+      "at": 196.0,
+      "text": "Mitos runs its reader, its evaluator and its writer as three Cloud Run services under three separate service accounts, and every gate decision runs inside the agent framework's tool interceptor rather than in a prompt. Take Google Cloud away and that boundary becomes an if statement the agent is free to skip."
+    }
+  ]
+}

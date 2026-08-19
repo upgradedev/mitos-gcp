@@ -24,13 +24,9 @@ test that cannot fail.
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from google.adk.agents import LlmAgent  # noqa: E402
 from google.adk.models.base_llm import BaseLlm  # noqa: E402

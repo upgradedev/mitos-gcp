@@ -35,7 +35,7 @@ from mitos.ledger import Entry, build_ledger  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "mitos-fleet")
-SECRET = "spec-repo-write-token"
+SECRET = "spec-repo-write-token"  # nosec B105 - the secret's NAME, not its value
 METADATA = "http://metadata.google.internal/computeMetadata/v1"
 
 app = FastAPI(title=f"Mitos · {ROLE}")

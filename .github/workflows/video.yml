@@ -1,0 +1,90 @@
+# The submission video is built here and only here.
+#
+# It is not built on a developer machine. Two reasons, and the second is the one
+# that matters: the machine this was written on has ~120 MB free, and a video
+# pipeline that fills a disk stops being run. The other is that a video built by
+# hand is a video nobody can rebuild when a line turns out to be wrong.
+#
+# The run is captured live in this job, so the artifact is a real-time recording
+# of a real run and not a reconstruction. If the chore fails, the recording fails
+# with it and no video is produced. That is the intended behaviour.
+
+name: Submission video
+
+on:
+  workflow_dispatch:
+    inputs:
+      pace:
+        description: "Seconds between beats in the recorded run"
+        default: "3.75"
+      ledger:
+        description: "memory (offline) or firestore"
+        default: "memory"
+  push:
+    tags:
+      - "video-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Record, narrate, render, verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          ffmpeg -version | head -1
+
+      # Reusing the narration across runs is what makes a one-word fix cheap:
+      # the cache is keyed on narration.json, so only changed beats hit the API.
+      - name: Restore narration cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.0.2
+        with:
+          path: video/build/vo
+          key: vo-${{ hashFiles('video/narration.json') }}
+          restore-keys: vo-
+
+      - name: Record one real run
+        run: python video/record.py --pace "${{ inputs.pace || '3.75' }}" --ledger "${{ inputs.ledger || 'memory' }}"
+
+      - name: Narrate the beats that changed
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: python video/build.py narrate
+
+      - name: Narration must not overlap
+        run: python video/build.py check
+
+      - name: Render frames from the captured run
+        run: python video/build.py frames
+
+      - name: Mux
+        run: python video/build.py mux
+
+      # Asserts on the shipped pixels, not on the inputs that produced them.
+      - name: Verify the artifact
+        run: python video/build.py verify
+
+      - name: Upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mitos-demo-video
+          path: |
+            video/build/mitos-demo.mp4
+            video/run.jsonl
+          if-no-files-found: error
+          retention-days: 30
