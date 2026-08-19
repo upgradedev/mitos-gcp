@@ -50,6 +50,8 @@ STYLE = {
     "approval": (BOLD, "APPROVAL"),
     "identity": (DIM, "  identity"),
     "write": (GREEN, "WRITE"),
+    "divergence": (BLUE, "DIVERGE"),
+    "guard": (RED, "GUARD"),
     "parked": (YELLOW, "PARKED"),
     "halt": (RED, "HALT"),
 }

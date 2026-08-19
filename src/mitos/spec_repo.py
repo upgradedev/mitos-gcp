@@ -29,7 +29,14 @@ from typing import Optional, Protocol
 
 DEFAULT_REPO = "git@github.com:upgradedev/mitos-spec.git"
 DEFAULT_BRANCH = "main"
-SECRET_NAME = "spec-repo-write-token"  # nosec B105 - the secret's NAME
+# ORG_STANDARDS #9: /{Product}/{Stage}/settings/{Service}/{Key}, flattened with
+# "-" the way Secret Manager and Key Vault both require. The stage is a path
+# segment rather than baked into the value, and the service is always present,
+# so a flat name like "spec-repo-write-token" cannot tell you whose key it is.
+SECRET_NAME = os.environ.get(
+    "MITOS_WRITE_SECRET",
+    "mitos-prod-settings-writer-spec-repo-deploy-key",
+)  # nosec B105 - a name, not a secret
 
 
 class SpecRepo(Protocol):
