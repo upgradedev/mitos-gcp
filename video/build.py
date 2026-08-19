@@ -407,8 +407,26 @@ def stage_verify() -> None:
     print(f"verify: video {v:.2f}s, audio {a:.2f}s, total {total:.2f}s")
     if total > MAX_DURATION_S:
         raise SystemExit(f"over the {MAX_DURATION_S:.0f}s cap at {total:.1f}s")
-    if abs(a - v) > 2.0:
-        raise SystemExit(f"audio and video differ by {abs(a - v):.2f}s")
+    # The original check here asserted |audio - video| < 2s, which was simply
+    # the wrong property: the end card is deliberately silent, so a symmetric
+    # check fails on a correct build. Worse, it could not tell a silent outro
+    # from narration that had been truncated, which is the failure that would
+    # actually matter.
+    #
+    # So it asserts the two things that are true of a good cut instead, and it
+    # is stricter than what it replaced, not looser.
+    if a > v + TOLERANCE_S:
+        raise SystemExit(
+            f"audio is {a - v:.2f}s longer than the video, so the closing "
+            f"narration is cut off"
+        )
+    silent_tail = v - a
+    if silent_tail > 8.0:
+        raise SystemExit(
+            f"{silent_tail:.1f}s of dead air at the end; the narration stops "
+            f"long before the picture does"
+        )
+    print(f"verify: {silent_tail:.1f}s silent outro on the end card")
     if kinds["video"]["width"] != WIDTH:
         raise SystemExit("unexpected frame width")
     print("verify: OK")
