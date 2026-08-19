@@ -104,28 +104,20 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: temurin
-          java-version: "21"
-
       - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0
 
+      # The runner disables the gcloud component manager and the emulator is
+      # not in the default apt repos, so it comes from Google's own image.
       - name: Start the Firestore emulator
         run: |
-          # `gcloud components install` is disabled on GitHub runners; the CLI
-          # is apt-managed there and tells you to use this instead.
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq google-cloud-cli-firestore-emulator
-          nohup gcloud emulators firestore start --host-port=127.0.0.1:8089 \
-            > /tmp/firestore.log 2>&1 &
-          for i in $(seq 1 60); do
+          docker run -d --name firestore -p 8089:8089             gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators             gcloud emulators firestore start --host-port=0.0.0.0:8089
+          for i in $(seq 1 90); do
             if curl -s http://127.0.0.1:8089 >/dev/null 2>&1; then
               echo "emulator up after ${i}s"; exit 0
             fi
             sleep 1
           done
-          echo "emulator never came up"; cat /tmp/firestore.log; exit 1
+          echo "emulator never came up"; docker logs firestore; exit 1
 
       - name: ADK interceptor, the chore, and the Firestore adapter
         env:

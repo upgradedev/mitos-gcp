@@ -143,7 +143,7 @@ def stage_narrate() -> None:
             data=payload,
             headers={"xi-api-key": key, "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=120) as resp:  # nosec B310 - scheme and host pinned immediately above
             target.write_bytes(resp.read())
         stamp.write_text(beat.digest)
         made += 1
