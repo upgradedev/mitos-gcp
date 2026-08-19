@@ -23,6 +23,8 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import httpx  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -33,6 +35,7 @@ from mitos.fleet import CATALOG  # noqa: E402
 from mitos.guard import ROLE_READER, WRITE_TOOLS, is_allowed  # noqa: E402
 from mitos.gemini import build_analyst, build_critic  # noqa: E402
 from mitos.ledger import Entry, build_ledger  # noqa: E402
+from mitos.spec_repo import build_spec_repo  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "mitos-fleet")
@@ -110,6 +113,80 @@ def thread(limit: int = 100) -> dict[str, Any]:
     }
 
 
+def _publisher():
+    """Only the writer service holds a credential that can publish.
+
+    The reader orchestrates the chore and then has to ask, because IAM will not
+    give it the deploy key. `MITOS_WRITER_URL` is that request; without it the
+    reader falls back to recording the plan and publishing nothing, which is
+    what the offline demo does.
+    """
+    if ROLE == "writer":
+        return build_spec_repo(PROJECT)
+    url = os.environ.get("MITOS_WRITER_URL")
+    return _RemoteWriter(url) if url else None
+
+
+@dataclass
+class _RemoteWriter:
+    """Delegates the write to the writer service over an authenticated call.
+
+    This is the privilege boundary made concrete: the reader cannot perform the
+    write, so it asks the one identity that can, and the writer re-checks the
+    plan hash itself rather than trusting the caller.
+    """
+
+    url: str
+
+    def publish(self, *, path: str, body: str, message: str, branch: str) -> dict:
+        import google.auth.transport.requests  # noqa: PLC0415
+        import google.oauth2.id_token  # noqa: PLC0415
+
+        try:
+            token = google.oauth2.id_token.fetch_id_token(
+                google.auth.transport.requests.Request(), self.url
+            )
+            r = httpx.post(
+                f"{self.url}/execute",
+                json={"path": path, "body": body, "message": message, "branch": branch},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=120.0,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:
+            return {
+                "published": False,
+                "reason": f"the writer service refused or was unreachable: "
+                f"{type(exc).__name__}",
+            }
+
+
+class ExecuteRequest(BaseModel):
+    path: str
+    body: str
+    message: str
+    branch: str
+
+
+@app.post("/execute")
+def execute(req: ExecuteRequest) -> dict:
+    """Perform the governed write. Writer service only.
+
+    The role check here is not decoration: this endpoint exists on all three
+    deployments because they share one image, and on two of them it refuses.
+    Even if it did not, those two cannot read the deploy key.
+    """
+    if ROLE != "writer":
+        raise HTTPException(
+            status_code=403,
+            detail=f"the {ROLE} service holds no credential that can write",
+        )
+    return build_spec_repo(PROJECT).publish(
+        path=req.path, body=req.body, message=req.message, branch=req.branch
+    )
+
+
 class RunRequest(BaseModel):
     pr: int = 4471
     approve: bool = False
@@ -149,6 +226,7 @@ def run(req: RunRequest) -> JSONResponse:
         approve=(lambda card: req.approve),
         analyst=build_analyst(PROJECT),
         critic=build_critic(PROJECT),
+        publisher=_publisher(),
     )
     return JSONResponse(
         {
@@ -163,6 +241,8 @@ def run(req: RunRequest) -> JSONResponse:
             ),
             "plan_hash": result.card.plan_hash if result.card else None,
             "written": result.written,
+            "published": result.published,
+            "receipt": result.receipt,
             "transcript": transcript,
         }
     )

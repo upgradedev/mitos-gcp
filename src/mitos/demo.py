@@ -190,14 +190,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stdout.flush()
 
     _rule()
+    for label, r in (("run 1", first), ("run 2", second)):
+        state = "published" if r.published else "approved, not published"
+        detail = r.receipt.get("compare") or r.receipt.get("reason", "")
+        print(f"  {label}: governed write {state}")
+        if detail:
+            print(f"         {DIM}{detail}{RESET}")
     print(
-        f"  run 1: gate rejected draft 1 on "
-        f"{len(first.first_verdict.findings)} finding(s), "
-        f"wrote={first.written}"
-    )
-    print(
-        f"  run 2: recalled {len(second.recalled)} prior entr(ies), "
-        f"wrote={second.written}"
+        f"  gate rejected run 1 draft on "
+        f"{len(first.first_verdict.findings)} finding(s); "
+        f"run 2 recalled {len(second.recalled)} prior entr(ies)"
     )
     print(f"  ledger entries: {len(ledger.all())}")
     print()

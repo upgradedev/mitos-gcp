@@ -95,6 +95,23 @@ curl -s https://mitos-writer-696476845998.europe-west1.run.app/identity
 | `mitos-evaluator` | `false` | **PermissionDenied**, from IAM |
 | `mitos-writer` | `true` | yes |
 
+The credential is an **SSH deploy key scoped to a single repository**, not a personal access token.
+A token would carry the whole account. This carries write access to `mitos-spec` and nothing else,
+which is the difference between saying least privilege and doing it.
+
+So the boundary has a consequence rather than being a demonstration. Ask the reader to write and it
+refuses, because it has nothing to write with:
+
+```bash
+curl -s -X POST https://mitos-reader-696476845998.europe-west1.run.app/execute \
+  -H 'content-type: application/json' \
+  -d '{"path":"docs/x.md","body":"x","message":"m","branch":"b"}'
+# {"detail":"the reader service holds no credential that can write"}
+```
+
+The reader orchestrates the whole chore and then has to **ask** the writer service, over an
+authenticated call, and the writer re-checks the plan hash itself rather than trusting the caller.
+
 `/identity` does not read a config flag. It **attempts** the access and reports what came back.
 
 ### The interceptor, and the proof it can fail
@@ -186,11 +203,11 @@ beat is sped up.** If the chore fails, the recording fails and no video is produ
 | three Cloud Run services, three service accounts | **deployed**, verifiable with the two `curl`s above |
 | Firestore provenance thread | **deployed**, append-only |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
-| the spec-repo write | **simulated**. The governed write is proven against a hash and an identity; it does not yet open a real GitHub PR |
+| the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by `mitos-writer@mitos-fleet.iam.gserviceaccount.com` |
 | the webhook | **simulated**. The trigger is a fixture, not a live GitHub webhook |
 
-The last two rows are the honest limits of what is built. They are not claimed anywhere else in this
-repository either.
+The webhook row is the honest limit of what is built, and it is not claimed as done anywhere else in
+this repository either.
 
 ## Pre-existing components
 
