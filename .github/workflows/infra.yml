@@ -141,7 +141,12 @@ jobs:
           workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
           service_account: mitos-tf@upgradegr-mitos.iam.gserviceaccount.com
 
+      # Every terraform command in this job needs the variable, including
+      # import, which is not obvious: import evaluates the configuration before
+      # it touches state.
       - name: Import, then show what genuinely differs
+        env:
+          TF_VAR_image: ${{ inputs.image }}
         run: |
           set -o pipefail
           terraform -chdir=infra init             -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=mitos"
