@@ -29,14 +29,24 @@ PN="${PROJECT_NUMBER:-437828525303}"
 REGION="${REGION:-europe-west1}"
 TF="terraform -chdir=$(dirname "$0")"
 
-have() { $TF state list 2>/dev/null | grep -qx "$1"; }
+# -F matters. A resource address contains ["..."], and without fixed-string
+# matching grep reads the brackets as a character class, so the check never
+# matches and every re-run tries to import what it already imported.
+have() { $TF state list 2>/dev/null | grep -Fqx "$1"; }
 imp() {
   local addr="$1" id="$2"
   if have "$addr"; then
     echo "  already managed: $addr"
   else
     echo "  importing: $addr"
-    $TF import -input=false "$addr" "$id" >/dev/null
+    if ! $TF import -input=false "$addr" "$id" >/dev/null 2>/tmp/imp.err; then
+      if grep -q "already managed by Terraform" /tmp/imp.err; then
+        echo "    (already in state)"
+      else
+        cat /tmp/imp.err >&2
+        return 1
+      fi
+    fi
   fi
 }
 
