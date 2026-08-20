@@ -243,5 +243,28 @@ BACKLOG = [
         _sql("services/customer/migrations/V221__language.sql",
              "+ALTER TABLE customer ADD COLUMN preferred_language VARCHAR(8);\n"),
     ]),
+    # The case the patterns cannot get right, and the reason a model is in the
+    # loop at all.
+    #
+    # The column is called `vuln_code`. No pattern matches it: it is not
+    # "health", not "biometric", not any personal-data term. A rule-based fleet
+    # sees an ordinary integer column and completes the item.
+    #
+    # The comment two lines above says what it actually holds, and real column
+    # names look like this. A specialist that reads the service README and the
+    # register can work out that this is a priority services register flag,
+    # which is health data under GDPR Article 9, and refuse.
+    #
+    # If this item completes, the model added nothing.
+    _pr(4483, "Add vuln_code to the customer record for PSR eligibility",
+        "m.dev@example-utility.test", [
+        _java("services/customer/src/main/java/com/example/model/CustomerDocument.java",
+              "+    // Priority Services Register eligibility. Values are taken\n"
+              "+    // from the medical dependency questionnaire: 01 dialysis,\n"
+              "+    // 02 oxygen concentrator, 03 stairlift, 04 none.\n"
+              "+    private Integer vulnCode;\n"),
+        _sql("services/customer/migrations/V222__vuln_code.sql",
+             "+ALTER TABLE customer ADD COLUMN vuln_code INTEGER;\n"),
+    ]),
     PR_4472,
 ]

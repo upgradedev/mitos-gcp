@@ -35,7 +35,12 @@ from mitos.chore import run_chore  # noqa: E402
 from mitos.fixtures import PR_4471, PR_4472, SEEDED_HISTORY  # noqa: E402
 from mitos.fleet import CATALOG  # noqa: E402
 from mitos.guard import ROLE_READER, WRITE_TOOLS, is_allowed  # noqa: E402
-from mitos.gemini import build_analyst, build_critic  # noqa: E402
+from mitos.gemini import (  # noqa: E402
+    build_agentic_analyst,
+    build_classifier,
+    build_critic,
+    build_doc_agent,
+)
 from mitos.ledger import Entry, build_ledger  # noqa: E402
 from mitos.chore import escalate_on_wake  # noqa: E402
 from mitos.spec_repo import build_spec_repo  # noqa: E402
@@ -334,8 +339,13 @@ def run(req: RunRequest) -> JSONResponse:
         run_id=uuid.uuid4().hex[:8],
         emit=lambda kind, text: transcript.append({"kind": kind, "text": text}),
         approve=(lambda card: req.approve),
-        analyst=build_analyst(PROJECT),
+        # The agentic specialist reads the repository itself and may refuse on
+        # what it finds. The classifier can widen the dispatch and never narrow
+        # it. The doc agent exercises the interceptor in the product path.
+        analyst=build_agentic_analyst(PROJECT, role=ROLE),
         critic=build_critic(PROJECT),
+        classifier=build_classifier(PROJECT),
+        doc_agent=build_doc_agent(PROJECT, role=ROLE),
         publisher=_publisher(),
     )
     return JSONResponse(
