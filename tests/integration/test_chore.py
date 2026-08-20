@@ -240,3 +240,64 @@ def test_the_ledger_has_no_mutation_path():
     """Append-only is a claim about the interface, so assert on the interface."""
     for forbidden in ("update", "delete", "set", "overwrite", "remove"):
         assert not hasattr(InMemoryLedger, forbidden), forbidden
+
+
+def test_a_specialist_may_cite_a_file_it_actually_read():
+    """The hallucination check compares citations against what the fleet opened,
+    not against what happened to be in the diff.
+
+    While specialists only saw a diff those were the same set. Once they began
+    reading the repository they diverged, and every legitimate citation of a
+    specification became a hallucination finding. Eight of thirteen items parked
+    that way on a live run.
+    """
+
+    class _ReadsTheSpec:
+        model = "test-analyst"
+
+        def assess(self, companion, pr, signals):
+            return {
+                "status": "ok",
+                "assessment": "See `docs/specs/billing.md` for the tariff rule.",
+                "findings": [],
+                "citations": ["docs/specs/billing.md"],
+                "paths_read": ["docs/specs/billing.md"],
+                "confidence": 0.9,
+                "read_log": {"tool_calls": 1, "reads": 1, "denied": 0, "sequence": []},
+            }
+
+    result = run_chore(
+        PR_4472, _ledger(), run_id="cite", approve=lambda c: True,
+        analyst=_ReadsTheSpec(),
+    )
+    hallucinations = [
+        f for f in result.first_verdict.findings if f.check == "hallucinated-path"
+    ]
+    assert not hallucinations, (
+        f"a file the specialist read was called a hallucination: {hallucinations}"
+    )
+
+
+def test_a_path_nobody_read_is_still_a_hallucination():
+    """The inverse, so the check is not simply switched off."""
+
+    class _Invents:
+        model = "test-analyst"
+
+        def assess(self, companion, pr, signals):
+            return {
+                "status": "ok",
+                "assessment": "See `docs/specs/invented.md`.",
+                "findings": [],
+                "citations": ["docs/specs/invented.md"],
+                "paths_read": [],
+                "confidence": 0.9,
+                "read_log": {},
+            }
+
+    result = run_chore(
+        PR_4472, _ledger(), run_id="inv", approve=lambda c: True, analyst=_Invents()
+    )
+    assert any(
+        f.check == "hallucinated-path" for f in result.first_verdict.findings
+    ), "an invented path passed the check"

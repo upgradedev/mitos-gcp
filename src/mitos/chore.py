@@ -245,8 +245,23 @@ def run_chore(
     draft = "\n\n".join(fragments)
     target = "docs/specs/customer-record.md"
 
+    # What the fleet is entitled to cite: the files in the pull request, plus
+    # everything the specialists actually opened from the repository.
+    #
+    # This used to be the pull request alone, which was correct while
+    # specialists only ever saw a diff. Once they began reading the repository
+    # the two sets diverged, and every legitimate citation became a
+    # hallucination finding: a specialist that read the billing specification
+    # and cited it was accused of inventing it. Eight of thirteen items parked
+    # that way on a live run.
+    #
+    # The read log is the ground truth here, which makes the check stronger than
+    # it was rather than weaker. A citation is now compared against what was
+    # genuinely opened, instead of against whatever happened to be in the diff.
+    cited_allowed = sorted(set(pr.paths()) | set(paths_read))
+
     # 5. The gate. The draft carries whatever was planted in the diff.
-    verdict = evaluate(draft, known_paths=pr.paths(), critic=critic)
+    verdict = evaluate(draft, known_paths=cited_allowed, critic=critic)
     cursor = record(
         "evaluator.verdict", "evaluator-companion", verdict.as_dict(), cursor
     ).entry_id
@@ -261,7 +276,7 @@ def run_chore(
     if not verdict.passed:
         emit("repair", "stripping what the gate objected to and re-submitting")
         draft = redact_for_repair(draft)
-        final_verdict = evaluate(draft, known_paths=pr.paths(), critic=critic)
+        final_verdict = evaluate(draft, known_paths=cited_allowed, critic=critic)
         cursor = record(
             "evaluator.verdict",
             "evaluator-companion",
