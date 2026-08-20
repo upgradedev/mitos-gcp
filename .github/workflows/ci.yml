@@ -171,6 +171,7 @@ jobs:
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8089
           GOOGLE_CLOUD_PROJECT: mitos-test
         run: |
+          set -o pipefail
           python -m pytest tests/integration/test_firestore_ledger.py             tests/integration/test_watcher_firestore.py -q | tee /tmp/fs.txt
           grep -qE "[0-9]+ passed" /tmp/fs.txt
           if grep -q "skipped" /tmp/fs.txt; then
@@ -215,7 +216,9 @@ jobs:
           MITOS_MODEL: gemini-3.7-flash
           GOOGLE_CLOUD_PROJECT: mitos-fleet
           GOOGLE_CLOUD_LOCATION: global
-        run: python -m pytest tests/integration/test_gemini_live.py -q | tee /tmp/live.txt
+        run: |
+          set -o pipefail
+          python -m pytest tests/integration/test_gemini_live.py -q | tee /tmp/live.txt
 
       # A live suite that silently skips is a mandatory requirement nobody is
       # checking. Gemini 3.5 or newer is required by the rules, so an unproven

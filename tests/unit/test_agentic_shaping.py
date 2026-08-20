@@ -177,3 +177,51 @@ def _pr():
     from mitos.fixtures import PR_4471
 
     return PR_4471
+
+
+# --------------------------------------------------------------------------
+# Retrying transient inference failures.
+# --------------------------------------------------------------------------
+
+
+def test_a_transient_failure_is_retried_and_then_succeeds():
+    """A shared inference endpoint returns 429 under load, and that is not a
+    reason to fail an item. This is why `_run` takes a factory: a coroutine
+    cannot be awaited twice."""
+    from mitos.gemini import _run
+
+    calls = {"n": 0}
+
+    async def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("_ResourceExhaustedError: 429")
+        return "ok"
+
+    assert _run(flaky, attempts=4) == "ok"
+    assert calls["n"] == 3
+
+
+def test_a_permanent_failure_is_not_retried():
+    """Retrying a bad request just makes the same mistake slower."""
+    from mitos.gemini import _run
+
+    calls = {"n": 0}
+
+    async def broken():
+        calls["n"] += 1
+        raise ValueError("invalid argument")
+
+    with pytest.raises(ValueError):
+        _run(broken, attempts=4)
+    assert calls["n"] == 1
+
+
+def test_exhausting_the_retries_raises_the_last_error():
+    from mitos.gemini import _run
+
+    async def always_busy():
+        raise RuntimeError("quota exceeded")
+
+    with pytest.raises(RuntimeError, match="quota"):
+        _run(always_busy, attempts=2)

@@ -133,10 +133,40 @@ async def _ask(agent_name: str, instruction: str, prompt: str, model: str) -> st
     return "".join(chunks)
 
 
-def _run(coro):
-    import asyncio
+# A shared inference endpoint returns 429 under load, and it is not an error in
+# the sense that anything is wrong. Retrying with backoff is what a production
+# caller does; failing the first time a neighbour is busy is not.
+_RETRYABLE = ("resourceexhausted", "429", "unavailable", "deadline", "quota")
+_MAX_ATTEMPTS = 4
 
-    return asyncio.run(coro)
+
+def _run(coro_factory, attempts: int = _MAX_ATTEMPTS):
+    """Run a coroutine, retrying transient inference failures with backoff.
+
+    Takes a factory rather than a coroutine because a coroutine cannot be
+    awaited twice, and the whole point here is to be able to try again.
+    """
+    import asyncio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    if not callable(coro_factory):
+        # Callers that pass a coroutine directly get one attempt, which is the
+        # old behaviour and is still correct for anything not worth retrying.
+        return asyncio.run(coro_factory)
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return asyncio.run(coro_factory())
+        except Exception as exc:  # noqa: BLE001 - re-raised below
+            blob = f"{type(exc).__name__} {exc}".lower()
+            if not any(term in blob for term in _RETRYABLE):
+                raise
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(2**attempt)
+    assert last is not None
+    raise last
 
 
 # --------------------------------------------------------------------------
@@ -188,7 +218,7 @@ class GeminiAnalyst:
             f"Diff:\n\n{pr.diff_text()}\n"
         )
         raw = _run(
-            _ask(
+            lambda: _ask(
                 companion.replace("-", "_"),
                 brief + self.GUARD + "\n\n" + _SPEC_SCHEMA_HINT,
                 prompt,
@@ -233,7 +263,7 @@ class GeminiCritic:
         )
         try:
             raw = _run(
-                _ask(
+                lambda: _ask(
                     "evaluator_critic",
                     self.INSTRUCTION + "\n\n" + _CRITIC_SCHEMA_HINT,
                     prompt,
@@ -338,7 +368,7 @@ class GeminiClassifier:
     def classify(self, pr) -> dict[str, Any]:
         try:
             raw = _run(
-                _ask(
+                lambda: _ask(
                     "router_classifier",
                     self.INSTRUCTION + "\n\n" + _CLASSIFY_HINT,
                     f"Pull request {pr.number}: {pr.title}\n\n{pr.diff_text()}",
@@ -679,7 +709,7 @@ class AgenticSpecialist:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go()))
+            data = _extract_json(_run(go))
         except Exception as exc:
             return unusable_reply(exc, log.as_dict())
 
