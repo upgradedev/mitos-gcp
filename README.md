@@ -126,7 +126,13 @@ only runs while someone happens to be calling you is a poller with extra steps.
 > rather than in a prompt, so the identity that reads production data holds no credential that can
 > write it and no agent in the fleet can talk its way past the gate.
 
-Check it yourself, with no account:
+**Open the thread.** The product is named for a thread you can follow back, so it
+is drawn rather than listed. Click any outcome and the whole path to the pull
+request that caused it lights up:
+
+**https://mitos-reader-437828525303.europe-west1.run.app/thread/view**
+
+Check the rest yourself, with no account:
 
 ```bash
 curl -s https://mitos-reader-437828525303.europe-west1.run.app/identity
