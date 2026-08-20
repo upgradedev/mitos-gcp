@@ -42,10 +42,10 @@ locals {
   roles = ["reader", "evaluator", "writer"]
 
   common_env = {
-    GOOGLE_CLOUD_PROJECT     = var.project_id
-    MITOS_LEDGER             = "firestore"
-    MITOS_MODEL              = var.model
-    GOOGLE_CLOUD_LOCATION    = "global"
+    GOOGLE_CLOUD_PROJECT      = var.project_id
+    MITOS_LEDGER              = "firestore"
+    MITOS_MODEL               = var.model
+    GOOGLE_CLOUD_LOCATION     = "global"
     GOOGLE_GENAI_USE_VERTEXAI = "True"
   }
 }

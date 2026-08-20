@@ -41,7 +41,7 @@ variable "model" {
     # A single backslash is not a valid HCL escape, so the dot is written as a
     # character class instead. Expressing "3.5 or newer" as a regex over a
     # version string is fiddly enough that the readable form is worth it.
-    condition = can(regex("^gemini-(3[.](5|6|7|8|9)|[4-9][.])", var.model))
+    condition     = can(regex("^gemini-(3[.](5|6|7|8|9)|[4-9][.])", var.model))
     error_message = "the hackathon requires Gemini 3.5 or newer; anything lower is a disqualification, not a preference."
   }
 }
