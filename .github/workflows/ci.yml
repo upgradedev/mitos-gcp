@@ -171,12 +171,63 @@ jobs:
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8089
           GOOGLE_CLOUD_PROJECT: mitos-test
         run: |
+          set -o pipefail
           python -m pytest tests/integration/test_firestore_ledger.py             tests/integration/test_watcher_firestore.py -q | tee /tmp/fs.txt
           grep -qE "[0-9]+ passed" /tmp/fs.txt
           if grep -q "skipped" /tmp/fs.txt; then
             echo "the Firestore suites skipped. Coverage of the live adapter is a"
             echo "fiction, and the query-subscription claim the entry leads with"
             echo "is unproven."
+            exit 1
+          fi
+
+  # The claim that a model changes outcomes is only worth anything if a model
+  # actually runs. Authenticated by Workload Identity Federation, so there is no
+  # long-lived service account key in this repository.
+  #
+  # The CI identity holds roles/aiplatform.user and nothing else: it cannot read
+  # Firestore and it cannot reach the spec-repo deploy key. A test run that could
+  # publish would not be a test run.
+  live-model:
+    name: Gemini, live
+    needs: secret-scan
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/696476845998/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-ci@mitos-fleet.iam.gserviceaccount.com
+
+      - run: pip install -r requirements/spike.txt
+
+      - name: The model is reachable and changes outcomes
+        env:
+          PYTHONPATH: src:.
+          MITOS_MODEL: gemini-3.7-flash
+          GOOGLE_CLOUD_PROJECT: mitos-fleet
+          GOOGLE_CLOUD_LOCATION: global
+        run: |
+          set -o pipefail
+          python -m pytest tests/integration/test_gemini_live.py -q | tee /tmp/live.txt
+
+      # A live suite that silently skips is a mandatory requirement nobody is
+      # checking. Gemini 3.5 or newer is required by the rules, so an unproven
+      # claim here is a disqualification risk, not a coverage gap.
+      - name: The live suite must not have been skipped
+        run: |
+          grep -qE "[0-9]+ passed" /tmp/live.txt
+          if grep -q "skipped" /tmp/live.txt; then
+            echo "::error::the live Gemini suite skipped; the mandatory model requirement is unproven"
             exit 1
           fi
 

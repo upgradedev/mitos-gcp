@@ -173,6 +173,57 @@ the tool only when the collected response `is None`, so a non-empty dict from
 
 A gate nobody has watched go red is a gate nobody should believe.
 
+### Is this actually agentic, or a rules engine with a model attached
+
+A fair question, and for most of this project's life the honest answer was the
+second one. Every outcome was decided by a regular expression; the model wrote
+prose. Deleting it would have changed nothing.
+
+**A specialist now gets a repository and a question instead of an answer, and
+decides what to open.** The choice is real and it differs per item:
+
+```
+PR 4473  list_paths(*)  search(supply)  read_file(registers/retention.md)
+         read_file(docs/specs/customer-record.md)  ...          -> ok
+PR 4477  list_paths(*)  search(vulnerability)  read_file(registers/retention.md)
+         read_file(docs/specs/customer-record.md)               -> blocked
+```
+
+That sequence is recorded in the provenance thread, so the agency is inspectable
+rather than claimed. A fixed pipeline produces the same log on every item.
+
+**The case that settles it.** `PR 4483` adds a column called `vuln_code`. No
+pattern matches it, and only a comment says it holds medical dependency data
+from a questionnaire.
+
+| | compliance woken | outcome |
+|---|---|---|
+| deterministic rules alone | **no** | **completed**, and health data ships |
+| with the model reading the repository | yes | **blocked**, citing the register it opened |
+
+Both halves are pinned by tests. [`test_rules_alone_are_not_enough.py`](tests/unit/test_rules_alone_are_not_enough.py)
+asserts the rules miss it and needs no credential;
+[`test_gemini_live.py`](tests/integration/test_gemini_live.py) asserts the model
+catches it. If either stops being true, the build says so.
+
+### Bounded reads, which is why the guard is not decoration
+
+An agent that genuinely decides where to look can decide to look somewhere it
+should not. So the reads are bounded in [`src/mitos/tools.py`](src/mitos/tools.py)
+and enforced in the interceptor, not requested in a prompt:
+
+| Bound | What it refuses |
+|---|---|
+| scope | anything outside `docs/`, `services/`, `registers/` |
+| traversal | `..` and absolute paths |
+| size | a single read is capped |
+| budget | a finite number of successful reads per run |
+
+A refused read does not consume the budget, so an agent that guesses a path
+badly is not locked out of files it is entitled to open. That distinction was a
+real bug: counting refusals inflated the number past the cap, so the limit never
+stopped anything.
+
 ### Why a model is allowed near the gate
 
 The evaluator is deterministic. A Gemini critic sits behind it and **can only add findings**.

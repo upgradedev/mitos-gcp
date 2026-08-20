@@ -133,10 +133,41 @@ async def _ask(agent_name: str, instruction: str, prompt: str, model: str) -> st
     return "".join(chunks)
 
 
-def _run(coro):
-    import asyncio
+# A shared inference endpoint returns 429 under load, and it is not an error in
+# the sense that anything is wrong. Retrying with backoff is what a production
+# caller does; failing the first time a neighbour is busy is not.
+_RETRYABLE = ("resourceexhausted", "429", "unavailable", "deadline", "quota")
+_MAX_ATTEMPTS = 4
 
-    return asyncio.run(coro)
+
+def _run(coro_factory, attempts: int = _MAX_ATTEMPTS):
+    """Run a coroutine, retrying transient inference failures with backoff.
+
+    Takes a factory rather than a coroutine because a coroutine cannot be
+    awaited twice, and the whole point here is to be able to try again.
+    """
+    import asyncio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    if not callable(coro_factory):
+        # Callers that pass a coroutine directly get one attempt, which is the
+        # old behaviour and is still correct for anything not worth retrying.
+        return asyncio.run(coro_factory)
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return asyncio.run(coro_factory())
+        except Exception as exc:  # noqa: BLE001 - re-raised below
+            blob = f"{type(exc).__name__} {exc}".lower()
+            if not any(term in blob for term in _RETRYABLE):
+                raise
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(2**attempt)
+    if last is None:  # pragma: no cover - unreachable while attempts >= 1
+        raise RuntimeError("retry loop ended with no result and no error")
+    raise last
 
 
 # --------------------------------------------------------------------------
@@ -188,7 +219,7 @@ class GeminiAnalyst:
             f"Diff:\n\n{pr.diff_text()}\n"
         )
         raw = _run(
-            _ask(
+            lambda: _ask(
                 companion.replace("-", "_"),
                 brief + self.GUARD + "\n\n" + _SPEC_SCHEMA_HINT,
                 prompt,
@@ -233,7 +264,7 @@ class GeminiCritic:
         )
         try:
             raw = _run(
-                _ask(
+                lambda: _ask(
                     "evaluator_critic",
                     self.INSTRUCTION + "\n\n" + _CRITIC_SCHEMA_HINT,
                     prompt,
@@ -338,7 +369,7 @@ class GeminiClassifier:
     def classify(self, pr) -> dict[str, Any]:
         try:
             raw = _run(
-                _ask(
+                lambda: _ask(
                     "router_classifier",
                     self.INSTRUCTION + "\n\n" + _CLASSIFY_HINT,
                     f"Pull request {pr.number}: {pr.title}\n\n{pr.diff_text()}",
@@ -503,9 +534,16 @@ _AGENTIC_HINT = """When you have finished reading, reply with ONLY a JSON object
   "citations": ["<paths you actually read>"],
   "confidence": 0.0 to 1.0
 }
-Use "blocked" when you found something you are not entitled to decide, or when
-the repository does not contain what you would need to decide it. Blocking with
-a specific reason is more useful than guessing."""
+Block sparingly. A fleet that parks most of a backlog has not removed any
+friction, and the human it hands work back to stops reading. Block ONLY when:
+
+  - the change is irreversible and cannot be undone by reverting the merge, or
+  - it involves special-category data under GDPR Article 9, which needs a
+    Data Protection Impact Assessment and a named owner.
+
+Everything else is a FINDING, including contradictions with a specification,
+missing register entries and absent documentation. A finding travels with the
+work and gets fixed; a block stops it. Report what is wrong and let it proceed."""
 
 
 def shape_agentic_reply(data: dict[str, Any], read_log: dict[str, Any]) -> dict[str, Any]:
@@ -599,12 +637,17 @@ class AgenticSpecialist:
         "db-architect-leader": (
             "You are a database architect. Establish what shape the record had "
             "before this change and what breaks for consumers reading the old "
-            "shape. Read the specification for the service before answering."
+            "shape. Read the specification for the service before answering.\n"
+            "You may block ONLY for an irreversible migration. Data protection "
+            "is not your question: if you notice something, report it as a "
+            "finding and let the compliance specialist decide."
         ),
         "documentation-companion": (
             "You are a technical writer maintaining a specification repository. "
             "Find the specification that this change makes stale, read it, and "
-            "report precisely what is now wrong in it."
+            "report precisely what is now wrong in it.\n"
+            "You never block. Stale documentation is a finding, not a reason to "
+            "stop a change."
         ),
         "compliance-companion": (
             "You are a data protection specialist. A field has been added. "
@@ -679,7 +722,7 @@ class AgenticSpecialist:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go()))
+            data = _extract_json(_run(go))
         except Exception as exc:
             return unusable_reply(exc, log.as_dict())
 
