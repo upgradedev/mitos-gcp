@@ -411,14 +411,27 @@ def run_specialist(
         return SPECIALISTS[name](pr, signals)
 
     data = analyst.assess(name, pr, signals)
+
+    # A specialist that read the repository itself may refuse on what it found.
+    # Under the tighten-only rule (ADR-002) that is permitted, because refusing
+    # is the cautious direction. It can never clear a refusal the deterministic
+    # rules already made: those run first and return before reaching here.
+    reported = str(data.get("status", "ok")).lower()
+    status = Status.BLOCKED if reported == "blocked" else Status.OK
+    reason = str(data.get("reason", "")).strip()
+    if status is Status.BLOCKED and not reason:
+        reason = f"{name} blocked without giving a reason"
+
     return Response(
         companion=name,
-        status=Status.OK,
+        status=status,
         assessment=data.get("assessment", ""),
         paths_read=data.get("paths_read") or pr.paths(),
-        citations=data.get("paths_read") or pr.paths(),
+        citations=data.get("citations") or data.get("paths_read") or pr.paths(),
         findings=data.get("findings", []),
-        confidence=0.8,
+        reason=reason,
+        confidence=float(data.get("confidence", 0.8) or 0.8),
+        read_log=data.get("read_log") or {},
     )
 
 

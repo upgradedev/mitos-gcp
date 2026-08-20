@@ -27,8 +27,15 @@ def _report():
 
 
 def test_the_backlog_produces_a_countable_result():
+    """The count the autonomy criterion asks for.
+
+    Thirteen rather than twelve since PR 4483 was added: the item the rules
+    cannot get right. It completes here, deliberately, because this suite runs
+    without a model. `test_rules_alone_are_not_enough.py` asserts that failure
+    directly and the live suite asserts the model fixes it.
+    """
     r = _report()
-    assert r.presented == len(BACKLOG) == 12
+    assert r.presented == len(BACKLOG) == 13
     assert r.completed + r.parked + r.no_action == r.presented, (
         "items went missing between the queue and the report"
     )

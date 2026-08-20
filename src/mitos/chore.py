@@ -188,12 +188,22 @@ def run_chore(
         if out is None:
             continue
         responses.append(out)
+        # The read log is the evidence of agency. A fixed pipeline produces the
+        # same sequence on every item; an agent that decides what to open
+        # produces a different one, and the difference is inspectable here
+        # rather than claimed in a README.
         cursor = record(
             "specialist.response",
             name,
-            {**out.as_dict(), "engine": engine},
+            {**out.as_dict(), "engine": engine, "reads": out.read_log},
             cursor,
         ).entry_id
+        if out.read_log.get("tool_calls"):
+            emit(
+                "reads",
+                f"{name} chose to open {out.read_log.get('reads', 0)} file(s), "
+                f"{out.read_log.get('denied', 0)} refused by the bound",
+            )
 
         if out.parks_the_item:
             # A specialist refused. Nothing downstream runs, because producing

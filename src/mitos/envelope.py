@@ -87,6 +87,10 @@ class Response:
     citations: list[str] = field(default_factory=list)
     confidence: float = 1.0
     reason: str = ""
+    # What this specialist chose to open, and what the bound refused. Empty for
+    # the deterministic templates, which read nothing, and that difference is
+    # exactly the point: a fixed pipeline produces the same sequence every time.
+    read_log: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # A refusal with no reason is worse than no refusal: it parks an item

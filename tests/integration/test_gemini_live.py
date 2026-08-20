@@ -164,3 +164,62 @@ def test_the_guard_blocks_a_real_gemini_agent_from_the_write_tool():
         "a control"
     )
     assert any(r.get("denied_by") == "mitos-guard" for r in results), results
+
+
+def test_gemini_catches_what_the_patterns_cannot():
+    """The other half of `test_rules_alone_are_not_enough.py`.
+
+    PR 4483 adds a column called `vuln_code`. No pattern matches it. Only the
+    comment says it holds medical dependency data, and only a reader can tell.
+
+    If this passes and the deterministic suite still shows the rules missing it,
+    then the model is not decoration: it changes the outcome of this item from
+    completed to parked, and a health-data field does not ship.
+    """
+    from mitos.fixtures import BACKLOG
+    from mitos.fleet import route, route_with_model, run_specialist
+    from mitos.gemini import build_agentic_analyst, build_classifier
+
+    pr = [p for p in BACKLOG if p.number == 4483][0]
+
+    assert "compliance-companion" in route(pr).skipped, (
+        "the rules now catch this, so the fixture no longer discriminates"
+    )
+
+    dispatch, divergence = route_with_model(pr, build_classifier())
+    assert "compliance-companion" in dispatch.woken, (
+        f"the model did not widen the dispatch: {divergence}"
+    )
+
+    response = run_specialist(
+        "compliance-companion", pr, dispatch.signals, analyst=build_agentic_analyst()
+    )
+    assert response.status.value == "blocked", (
+        f"the model assessed special-category data instead of refusing it: "
+        f"{response.assessment[:200]}"
+    )
+    assert response.reason.strip()
+    assert response.read_log.get("reads", 0) >= 1, (
+        "it refused without opening anything, so it guessed"
+    )
+
+
+def test_the_agentic_specialist_chooses_what_to_read():
+    """Agency, asserted rather than claimed: different items produce different
+    read sequences."""
+    from mitos.fixtures import BACKLOG
+    from mitos.fleet import route
+    from mitos.gemini import build_agentic_analyst
+
+    analyst = build_agentic_analyst()
+    sequences = []
+    for number in (4473, 4477):
+        pr = [p for p in BACKLOG if p.number == number][0]
+        out = analyst.assess("compliance-companion", pr, route(pr).signals)
+        assert out["read_log"]["reads"] >= 1, f"PR {number} opened nothing"
+        sequences.append(tuple(out["read_log"]["sequence"]))
+
+    assert sequences[0] != sequences[1], (
+        "both items produced an identical read sequence, which is a fixed "
+        "pipeline wearing an agent's clothes"
+    )
