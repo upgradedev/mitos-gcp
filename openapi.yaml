@@ -179,6 +179,45 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Run
+  /run/stream:
+    post:
+      description: 'The chore, streamed as it happens.
+
+
+        `/run` returns when the whole thing is finished, and with a model in the
+
+        loop that is minutes rather than seconds: the specialists read the
+
+        repository, and each read is a round trip. A judge who posts to it waits,
+
+        sees nothing, and concludes it is broken. The UAT caught exactly that.
+
+
+        So this streams. Every beat is flushed the moment it occurs, which is both
+
+        the honest fix for the timeout and a better thing to watch: the reads appear
+
+        one at a time, in the order the agent chose them.'
+      operationId: run_stream_run_stream_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Run Stream
   /thread:
     get:
       operationId: thread_thread_get

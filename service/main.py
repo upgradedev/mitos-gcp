@@ -28,7 +28,11 @@ import httpx  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
-from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel  # noqa: E402
 
 from mitos.chore import run_chore  # noqa: E402
@@ -306,6 +310,84 @@ class RunRequest(BaseModel):
     pr: int = 4471
     approve: bool = False
     seed: bool = False
+
+
+@app.post("/run/stream")
+def run_stream(req: RunRequest) -> StreamingResponse:
+    """The chore, streamed as it happens.
+
+    `/run` returns when the whole thing is finished, and with a model in the
+    loop that is minutes rather than seconds: the specialists read the
+    repository, and each read is a round trip. A judge who posts to it waits,
+    sees nothing, and concludes it is broken. The UAT caught exactly that.
+
+    So this streams. Every beat is flushed the moment it occurs, which is both
+    the honest fix for the timeout and a better thing to watch: the reads appear
+    one at a time, in the order the agent chose them.
+    """
+    if ROLE != ROLE_READER:
+        raise HTTPException(status_code=403, detail=f"the {ROLE} service does not orchestrate chores")
+    pr = {4471: PR_4471, 4472: PR_4472}.get(req.pr)
+    if pr is None:
+        raise HTTPException(status_code=404, detail=f"no fixture for PR {req.pr}")
+
+    def beats():
+        import queue as _queue  # noqa: PLC0415
+        import threading as _threading  # noqa: PLC0415
+
+        q: "_queue.Queue[Optional[dict]]" = _queue.Queue()
+
+        def work():
+            led = ledger()
+            if req.seed:
+                for item in SEEDED_HISTORY:
+                    led.append(
+                        Entry(
+                            kind=item["kind"], actor=item["actor"],
+                            subject=item["subject"], payload=item["payload"],
+                            run_id="seed",
+                        )
+                    )
+            try:
+                result = run_chore(
+                    pr, led, run_id=uuid.uuid4().hex[:8],
+                    emit=lambda kind, text: q.put({"kind": kind, "text": text}),
+                    approve=(lambda card: req.approve),
+                    analyst=build_agentic_analyst(PROJECT, role=ROLE),
+                    critic=build_critic(PROJECT),
+                    classifier=build_classifier(PROJECT),
+                    doc_agent=build_doc_agent(PROJECT, role=ROLE),
+                    publisher=_publisher(),
+                )
+                q.put({
+                    "kind": "done",
+                    "text": "",
+                    "written": result.written,
+                    "published": result.published,
+                    "plan_hash": result.card.plan_hash if result.card else None,
+                    "parked_by": result.parked_by,
+                })
+            except Exception as exc:  # noqa: BLE001 - reported to the client
+                q.put({"kind": "error", "text": f"{type(exc).__name__}: {exc}"})
+            finally:
+                q.put(None)
+
+        _threading.Thread(target=work, daemon=True).start()
+        # A comment frame immediately, so a proxy cannot sit on the response
+        # waiting for the first byte and reintroduce the very problem this
+        # endpoint exists to solve.
+        yield ": mitos\n\n"
+        while True:
+            beat = q.get()
+            if beat is None:
+                return
+            yield f"data: {json.dumps(beat)}\n\n"
+
+    return StreamingResponse(
+        beats(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/run")
