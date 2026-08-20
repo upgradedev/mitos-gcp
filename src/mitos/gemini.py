@@ -165,7 +165,8 @@ def _run(coro_factory, attempts: int = _MAX_ATTEMPTS):
             last = exc
             if attempt < attempts - 1:
                 time.sleep(2**attempt)
-    assert last is not None
+    if last is None:  # pragma: no cover - unreachable while attempts >= 1
+        raise RuntimeError("retry loop ended with no result and no error")
     raise last
 
 
@@ -533,9 +534,16 @@ _AGENTIC_HINT = """When you have finished reading, reply with ONLY a JSON object
   "citations": ["<paths you actually read>"],
   "confidence": 0.0 to 1.0
 }
-Use "blocked" when you found something you are not entitled to decide, or when
-the repository does not contain what you would need to decide it. Blocking with
-a specific reason is more useful than guessing."""
+Block sparingly. A fleet that parks most of a backlog has not removed any
+friction, and the human it hands work back to stops reading. Block ONLY when:
+
+  - the change is irreversible and cannot be undone by reverting the merge, or
+  - it involves special-category data under GDPR Article 9, which needs a
+    Data Protection Impact Assessment and a named owner.
+
+Everything else is a FINDING, including contradictions with a specification,
+missing register entries and absent documentation. A finding travels with the
+work and gets fixed; a block stops it. Report what is wrong and let it proceed."""
 
 
 def shape_agentic_reply(data: dict[str, Any], read_log: dict[str, Any]) -> dict[str, Any]:
@@ -629,12 +637,17 @@ class AgenticSpecialist:
         "db-architect-leader": (
             "You are a database architect. Establish what shape the record had "
             "before this change and what breaks for consumers reading the old "
-            "shape. Read the specification for the service before answering."
+            "shape. Read the specification for the service before answering.\n"
+            "You may block ONLY for an irreversible migration. Data protection "
+            "is not your question: if you notice something, report it as a "
+            "finding and let the compliance specialist decide."
         ),
         "documentation-companion": (
             "You are a technical writer maintaining a specification repository. "
             "Find the specification that this change makes stale, read it, and "
-            "report precisely what is now wrong in it."
+            "report precisely what is now wrong in it.\n"
+            "You never block. Stale documentation is a finding, not a reason to "
+            "stop a change."
         ),
         "compliance-companion": (
             "You are a data protection specialist. A field has been added. "
