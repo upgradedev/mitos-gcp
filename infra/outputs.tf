@@ -10,7 +10,11 @@ output "identities" {
 
 output "write_credential_readable_by" {
   description = "The entry's central claim as a single value: exactly one identity."
-  value       = google_service_account.fleet["writer"].email
+  # try() because Terraform evaluates every output after every single import,
+  # and during a partial import this map has one key in it. Indexing a
+  # half-populated for_each is an error, and the error names the output rather
+  # than the import that was actually running, which is a confusing half hour.
+  value = try(google_service_account.fleet["writer"].email, "not yet created")
 }
 
 output "workload_identity_provider" {
