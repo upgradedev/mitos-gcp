@@ -38,6 +38,9 @@ class ApprovalCard:
     target_path: str
     body: str
     findings: list[str] = field(default_factory=list)
+    # What the model critic raised. Not gating, but the human approving this
+    # plan is the right person to weigh it, so it is on the card.
+    advisories: list[str] = field(default_factory=list)
     plan_hash: str = ""
 
     def compute_hash(self) -> str:
@@ -270,7 +273,13 @@ def run_chore(
         final_verdict = verdict
 
     if not final_verdict.passed:
-        emit("halt", "the repaired draft still fails; nothing is written")
+        # Name what failed. "The gate could not be satisfied" parks an item and
+        # tells the human nothing, which is the failure this project bans
+        # everywhere else.
+        why = "; ".join(
+            f"{f.check}: {f.detail}" for f in final_verdict.findings
+        ) or "the repaired draft still fails"
+        emit("halt", f"nothing is written. {why}")
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
             None, False, False, {}, None, "", responses,
@@ -302,6 +311,10 @@ def run_chore(
         target_path=target,
         body=draft,
         findings=fresh,
+        advisories=[
+            f"{f.detail} ({f.evidence})" if f.evidence else f.detail
+            for f in (final_verdict.advisories if final_verdict else [])
+        ],
     )
     plan_hash = card.compute_hash()
     cursor = record(

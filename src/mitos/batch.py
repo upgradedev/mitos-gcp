@@ -147,7 +147,17 @@ def run_batch(
                 pr_number=pr.number,
                 title=pr.title,
                 state="completed" if result.card else "parked",
-                reason="" if result.card else "the gate could not be satisfied",
+                reason=(
+                    ""
+                    if result.card
+                    else "; ".join(
+                        f"{f.check}: {f.detail}"
+                        for f in (
+                            result.final_verdict.findings if result.final_verdict else []
+                        )
+                    )
+                    or "the repaired draft still failed the deterministic gate"
+                ),
                 parked_by=None if result.card else "evaluator-companion",
                 findings=len(result.card.findings) if result.card else 0,
                 plan_hash=result.card.plan_hash if result.card else "",

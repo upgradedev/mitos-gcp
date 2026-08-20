@@ -217,7 +217,11 @@ def test_an_unreachable_critic_reports_itself_rather_than_staying_silent(
 
     from mitos.evaluator import evaluate
 
-    assert not evaluate("a clean draft", critic=gemini.GeminiCritic(model="m")).passed
+    # It surfaces to the human rather than parking the item: an outage is not
+    # evidence that the draft is bad, but it must not read as a clean pass.
+    verdict = evaluate("a clean draft", critic=gemini.GeminiCritic(model="m"))
+    assert verdict.advisories
+    assert "unreachable" in verdict.advisories[0].detail
 
 
 def test_a_malformed_critic_reply_also_fails_closed(monkeypatch, no_env):
