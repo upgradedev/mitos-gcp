@@ -17,10 +17,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "plan or apply"
+        description: "what to do"
         default: "plan"
         type: choice
-        options: [plan, apply]
+        options: [plan, import, apply, teardown-rebuild]
       image:
         description: "Container image to deploy"
         default: "europe-west1-docker.pkg.dev/upgradegr-mitos/cloud-run-source-deploy/mitos-reader:latest"
@@ -118,6 +118,102 @@ jobs:
           else
             echo "::warning::the project and the code disagree; read the plan above"
           fi
+
+  # Bring the hand-built platform under management, once. Everything was created
+  # with gcloud before this code existed, so an empty state plans "33 to add"
+  # and would try to recreate what is already running.
+  import:
+    name: Import the existing platform
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'import'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-tf@upgradegr-mitos.iam.gserviceaccount.com
+
+      - name: Import, then show what genuinely differs
+        run: |
+          set -o pipefail
+          terraform -chdir=infra init             -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=mitos"
+          bash infra/import.sh
+          terraform -chdir=infra plan -no-color             -var="image=${{ inputs.image }}" | tee /tmp/plan.txt
+          echo "---"
+          grep -E "^Plan:|^No changes" /tmp/plan.txt || true
+
+  # The proof that "reproducible setup" is not a word in a README.
+  #
+  # Destroys the three Cloud Run services and rebuilds them from the code. They
+  # hold no state, the URLs come back identical because a Cloud Run URL carries
+  # the project number, and the ledger, the identities and the write credential
+  # are deliberately untouched: destroying an audit trail to show that an audit
+  # trail can be recreated is not a good trade.
+  teardown-rebuild:
+    name: Teardown, rebuild, and prove it
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'teardown-rebuild'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-tf@upgradegr-mitos.iam.gserviceaccount.com
+
+      - name: init
+        run: |
+          terraform -chdir=infra init             -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=mitos"
+
+      - name: The services are gone
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -o pipefail
+          bash infra/teardown_services.sh
+          # Verified rather than assumed: the URL must stop answering.
+          code=$(curl -o /dev/null -s -w "%{http_code}" --max-time 30             https://mitos-reader-437828525303.europe-west1.run.app/identity || true)
+          echo "reader answers with: $code"
+          if [ "$code" = "200" ]; then
+            echo "::error::the service still answers after a destroy, so nothing was torn down"
+            exit 1
+          fi
+
+      - name: Rebuild from the code alone
+        run: |
+          set -o pipefail
+          terraform -chdir=infra apply -auto-approve -var="image=${{ inputs.image }}"
+          terraform -chdir=infra output -json
+
+      # A rebuilt fleet that does not pass the judge suite is a rebuilt fleet
+      # that does not work, whatever Terraform reported.
+      - name: A judge, on the rebuilt fleet
+        run: |
+          set -o pipefail
+          for i in $(seq 1 20); do
+            curl -sf --max-time 20 https://mitos-reader-437828525303.europe-west1.run.app/identity >/dev/null && break
+            echo "waiting for the fleet to come up (${i})"; sleep 15
+          done
+          python scripts/judge_uat.py             --base-reader    https://mitos-reader-437828525303.europe-west1.run.app             --base-evaluator https://mitos-evaluator-437828525303.europe-west1.run.app             --base-writer    https://mitos-writer-437828525303.europe-west1.run.app
 
   apply:
     name: Apply
