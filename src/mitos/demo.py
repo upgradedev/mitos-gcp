@@ -24,7 +24,8 @@ from typing import Optional
 from .batch import run_batch
 from .chore import ApprovalCard, run_chore
 from .fixtures import BACKLOG, PR_4471, PR_4472, SEEDED_HISTORY
-from .fleet import CATALOG
+from .fleet import CATALOG, route, route_with_model, run_specialist
+from .gemini import build_agentic_analyst, build_classifier
 from .ledger import Entry, InMemoryLedger, Ledger, build_ledger
 
 RESET = "\033[0m"
@@ -204,6 +205,50 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"  {GREEN}completed{RESET} PR {o.pr_number}  {o.title[:44]}")
         sys.stdout.flush()
         time.sleep(_PACE / 3)
+
+    # The closing argument, and the only part of this demo that needs a model.
+    #
+    # PR 4483 completed in the backlog above. That is the honest deterministic
+    # result and it is also the failure: the column is called `vuln_code`, no
+    # pattern matches it, and only a comment says it holds medical dependency
+    # data. A rules-only fleet ships health data.
+    _rule("THE ONE THE RULES CANNOT SEE")
+    target = [pr for pr in BACKLOG if pr.number == 4483][0]
+    print(f"  PR {target.number}  {target.title}")
+    print(f"  {DIM}the column is called vuln_code. Only a comment says what it holds.{RESET}")
+    sys.stdout.flush()
+    time.sleep(_PACE)
+
+    rules_only = route(target)
+    print(f"  {RED}rules alone {RESET} compliance-companion "
+          f"{'woken' if 'compliance-companion' in rules_only.woken else 'NEVER WOKEN'}"
+          f"{DIM}, so the change ships{RESET}")
+    sys.stdout.flush()
+    time.sleep(_PACE)
+
+    classifier = build_classifier(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    analyst = build_agentic_analyst(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    if classifier is None:
+        print(f"  {DIM}with the model  not run here; no model configured.{RESET}")
+        print(f"  {DIM}                proven in CI: tests/integration/test_gemini_live.py{RESET}")
+    else:
+        widened, divergence = route_with_model(target, classifier)
+        print(f"  {GREEN}with the model{RESET} the router widened: "
+              f"added {divergence.get('model_added')}, Article 9 "
+              f"{divergence.get('special_category')}")
+        sys.stdout.flush()
+        if "compliance-companion" in widened.woken:
+            out = run_specialist(
+                "compliance-companion", target, widened.signals, analyst=analyst
+            )
+            print(f"  {GREEN}              {RESET} compliance opened "
+                  f"{out.read_log.get('reads', 0)} file(s) and returned "
+                  f"{BOLD}{out.status.value}{RESET}")
+            for line in (out.reason or "")[:150].split(". ")[:2]:
+                if line.strip():
+                    print(f"                {DIM}{line.strip()}{RESET}")
+    sys.stdout.flush()
+    time.sleep(_PACE)
 
     _rule("THE THREAD, walked back from the last entry to the diff that caused it")
     for entry in ledger.thread(second.last_entry_id):

@@ -29,6 +29,10 @@ def record(pace: float, out: Path, ledger: str) -> dict:
     env["PYTHONPATH"] = str(ROOT / "src")
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # MITOS_MODEL and the project pass through from the environment, so the
+    # recorded run can end on the comparison that needs a model. Everything
+    # before it stays deterministic, which is what keeps the rejection
+    # repeatable on every take.
 
     cmd = [
         sys.executable,

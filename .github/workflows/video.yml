@@ -26,6 +26,10 @@ on:
 
 permissions:
   contents: read
+  # The recording ends on a comparison that needs a model: the item the
+  # deterministic rules cannot see. Authenticated by Workload Identity
+  # Federation, so no key exists to leak.
+  id-token: write
 
 concurrency:
   group: video-${{ github.ref }}
@@ -58,8 +62,20 @@ jobs:
           key: vo-${{ hashFiles('video/narration.json') }}
           restore-keys: vo-
 
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-ci@upgradegr-mitos.iam.gserviceaccount.com
+
+      - name: Install the model client
+        run: pip install -r requirements/spike.txt
+
       - name: Record one real run
-        run: python video/record.py --pace "${{ inputs.pace || '3.75' }}" --ledger "${{ inputs.ledger || 'memory' }}"
+        env:
+          MITOS_MODEL: gemini-3.7-flash
+          GOOGLE_CLOUD_PROJECT: upgradegr-mitos
+          GOOGLE_CLOUD_LOCATION: global
+        run: python video/record.py --pace "${{ inputs.pace || '3.4' }}" --ledger "${{ inputs.ledger || 'memory' }}"
 
       - name: Narrate the beats that changed
         env:

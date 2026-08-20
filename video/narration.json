@@ -2,13 +2,13 @@
   "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "title_card_s": 7.0,
-  "end_card_s": 22.0,
-  "note": "`at` is the second in the captured run where the beat starts speaking, so each line lands on what is actually on screen. The build fails if a beat runs past the next beat's start. Measured rate for this voice is about 0.09 s per character, which is what the anchors are spaced against; a rewrite that gets longer trips the check rather than quietly talking over the next line.",
+  "end_card_s": 16.0,
+  "note": "`at` is the second in the captured run where the beat starts speaking, so each line lands on what is actually on screen. The build fails if a beat runs past the next beat's start. Measured rate for this voice is about 0.09 s per character, which is what the anchors are spaced against; a rewrite that gets longer trips the check rather than quietly talking over the next line. Anchors set against a run captured at --pace 3.4, total 199.7s.",
   "beats": [
     {
       "id": "01-open",
       "at": 0.0,
-      "text": "This is Mitos. A fleet of institutional agents that finishes a chore, and can prove afterwards why it did each thing."
+      "text": "A schema change ships on Tuesday. In March, a regulator asks who approved it. This is Mitos, the fleet that answers that."
     },
     {
       "id": "02-catalog",
@@ -18,62 +18,67 @@
     {
       "id": "03-trigger",
       "at": 21.0,
-      "text": "A pull request lands. Nobody opened Mitos. A webhook did this."
+      "text": "A pull request lands. Nobody opened Mitos."
     },
     {
       "id": "04-signals",
-      "at": 28.0,
+      "at": 27.0,
       "text": "Every signal cites the exact hunk that raised it."
     },
     {
       "id": "05-dispatch",
-      "at": 45.0,
+      "at": 41.0,
       "text": "Three of three wake, because this change carries personal data."
     },
     {
       "id": "06-recall",
-      "at": 52.0,
+      "at": 48.0,
       "text": "The thread remembers. This service was here in July, and that deferral has now expired."
     },
     {
       "id": "07-gate",
-      "at": 68.0,
+      "at": 65.0,
       "text": "The gate rejects the first draft. The pull request carried a live looking credential, and an instruction telling the review agent to approve itself."
     },
     {
       "id": "08-repair",
-      "at": 93.0,
+      "at": 89.0,
       "text": "Repaired, resubmitted, passed."
     },
     {
       "id": "09-approval",
-      "at": 101.0,
+      "at": 96.0,
       "text": "One write is proposed, addressed by its own sha256."
     },
     {
       "id": "10-identity",
-      "at": 107.0,
+      "at": 103.0,
       "text": "The reader identity cannot perform it. That is Google IAM refusing, outside this process."
     },
     {
       "id": "11-run2",
-      "at": 124.0,
+      "at": 116.0,
       "text": "Second run. No personal data this time, so compliance is skipped. The fleet is deciding, not following a pipeline."
     },
     {
       "id": "12-memory",
-      "at": 140.0,
+      "at": 130.0,
       "text": "And it recalls what the first run wrote, live, out of Firestore."
     },
     {
-      "id": "13-thread",
-      "at": 189.0,
-      "text": "Every outcome walks back to the diff that caused it. That is the thread."
+      "id": "13-backlog",
+      "at": 178.0,
+      "text": "Then the rest of the morning, unattended. Some complete, some are parked, and each names who refused and why."
     },
     {
-      "id": "14-close",
-      "at": 198.0,
-      "text": "Three Cloud Run services under three separate service accounts, and every gate decision runs inside the agent framework's tool interceptor rather than in a prompt. Take Google Cloud away and that boundary becomes an if statement the agent is free to skip."
+      "id": "14-decisive",
+      "at": 191.0,
+      "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model reads the register, and refuses."
+    },
+    {
+      "id": "15-close",
+      "at": 209.0,
+      "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so a finding deferred until the twelfth of August wakes the fleet on the twelfth of August, because the query itself is the subscription."
     }
   ]
 }
