@@ -508,6 +508,65 @@ the repository does not contain what you would need to decide it. Blocking with
 a specific reason is more useful than guessing."""
 
 
+def shape_agentic_reply(data: dict[str, Any], read_log: dict[str, Any]) -> dict[str, Any]:
+    """Turn a model reply into the envelope the fleet expects.
+
+    Extracted from `AgenticSpecialist.assess` so it can be exercised without a
+    model: everything interesting about the reply happens here, and everything
+    around it is ADK plumbing. A specialist that blocks without a reason, or
+    invents a status, or returns a confidence outside the range, is corrected
+    here rather than at the point somebody reads it.
+    """
+    status = str(data.get("status", "ok")).lower()
+    if status not in ("ok", "blocked"):
+        status = "ok"
+
+    reason = str(data.get("reason", "")).strip()
+    if status == "blocked" and not reason:
+        # A refusal with no reason parks an item and tells the human nothing.
+        # Saying so is more useful than inventing a rationale on its behalf.
+        reason = "the specialist blocked without giving a reason"
+
+    try:
+        confidence = float(data.get("confidence", 0.7))
+    except (TypeError, ValueError):
+        confidence = 0.7
+    confidence = min(1.0, max(0.0, confidence))
+
+    citations = [str(c) for c in data.get("citations", []) if str(c).strip()]
+    return {
+        "status": status,
+        "assessment": str(data.get("assessment", "")).strip(),
+        "findings": [str(f) for f in data.get("findings", []) if str(f).strip()],
+        "reason": reason,
+        "citations": citations,
+        "paths_read": citations,
+        "confidence": confidence,
+        "read_log": read_log,
+    }
+
+
+def unusable_reply(exc: Exception, read_log: dict[str, Any]) -> dict[str, Any]:
+    """What a specialist returns when its own reply could not be understood.
+
+    Blocked, not empty. Failing to parse must never quietly become "nothing to
+    report", because that is indistinguishable from a clean bill of health.
+    """
+    return {
+        "status": "blocked",
+        "assessment": "",
+        "findings": [],
+        "reason": (
+            f"the specialist did not return a usable answer "
+            f"({type(exc).__name__}); a human should look at this item"
+        ),
+        "citations": [],
+        "paths_read": [],
+        "confidence": 0.0,
+        "read_log": read_log,
+    }
+
+
 @dataclass
 class AgenticSpecialist:
     """A companion that reads the repository itself.
@@ -622,36 +681,9 @@ class AgenticSpecialist:
         try:
             data = _extract_json(_run(go()))
         except Exception as exc:
-            # Failing to parse must not silently become "nothing to report".
-            return {
-                "status": "blocked",
-                "assessment": "",
-                "findings": [],
-                "reason": (
-                    f"the specialist did not return a usable answer "
-                    f"({type(exc).__name__}); a human should look at this item"
-                ),
-                "citations": [],
-                "confidence": 0.0,
-                "read_log": log.as_dict(),
-            }
+            return unusable_reply(exc, log.as_dict())
 
-        status = str(data.get("status", "ok")).lower()
-        if status not in ("ok", "blocked"):
-            status = "ok"
-        reason = str(data.get("reason", "")).strip()
-        if status == "blocked" and not reason:
-            reason = "the specialist blocked without giving a reason"
-        return {
-            "status": status,
-            "assessment": str(data.get("assessment", "")).strip(),
-            "findings": [str(f) for f in data.get("findings", []) if str(f).strip()],
-            "reason": reason,
-            "citations": [str(c) for c in data.get("citations", [])],
-            "paths_read": [str(c) for c in data.get("citations", [])],
-            "confidence": float(data.get("confidence", 0.7) or 0.7),
-            "read_log": log.as_dict(),
-        }
+        return shape_agentic_reply(data, log.as_dict())
 
 
 def build_agentic_analyst(project: Optional[str] = None, role: str = "reader"):
