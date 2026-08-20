@@ -4,7 +4,7 @@
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
 [![coverage 93%](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
-[![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=mitos-fleet)
+[![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -112,7 +112,7 @@ Watch it, with no account. `wakeups` only increments when Firestore delivered a 
 deferral had expired:
 
 ```bash
-curl -s https://mitos-reader-696476845998.europe-west1.run.app/watch
+curl -s https://mitos-reader-437828525303.europe-west1.run.app/watch
 ```
 
 Cloud Run throttles CPU to zero between requests by default, which would suspend a subscription
@@ -129,8 +129,8 @@ only runs while someone happens to be calling you is a poller with extra steps.
 Check it yourself, with no account:
 
 ```bash
-curl -s https://mitos-reader-696476845998.europe-west1.run.app/identity
-curl -s https://mitos-writer-696476845998.europe-west1.run.app/identity
+curl -s https://mitos-reader-437828525303.europe-west1.run.app/identity
+curl -s https://mitos-writer-437828525303.europe-west1.run.app/identity
 ```
 
 | Identity | may call `write_spec_repo` | reaches the write credential |
@@ -147,7 +147,7 @@ So the boundary has a consequence rather than being a demonstration. Ask the rea
 refuses, because it has nothing to write with:
 
 ```bash
-curl -s -X POST https://mitos-reader-696476845998.europe-west1.run.app/execute \
+curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute \
   -H 'content-type: application/json' \
   -d '{"path":"docs/x.md","body":"x","message":"m","branch":"b"}'
 # {"detail":"the reader service holds no credential that can write"}
@@ -256,7 +256,7 @@ PYTHONPATH=src python -m mitos.demo --ledger memory --yes
 Against the real stack:
 
 ```bash
-export GOOGLE_CLOUD_PROJECT=mitos-fleet MITOS_LEDGER=firestore MITOS_MODEL=gemini-3.7-flash
+export GOOGLE_CLOUD_PROJECT=upgradegr-mitos MITOS_LEDGER=firestore MITOS_MODEL=gemini-3.7-flash
 PYTHONPATH=src python -m mitos.demo
 ```
 
@@ -298,7 +298,7 @@ beat is sped up.** If the chore fails, the recording fails and no video is produ
 | three Cloud Run services, three service accounts | **deployed**, verifiable with the two `curl`s above |
 | Firestore provenance thread | **deployed**, append-only |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
-| the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by `mitos-writer@mitos-fleet.iam.gserviceaccount.com` |
+| the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by `mitos-writer@upgradegr-mitos.iam.gserviceaccount.com` |
 | the webhook | **simulated**. The trigger is a fixture, not a live GitHub webhook |
 
 The webhook row is the honest limit of what is built, and it is not claimed as done anywhere else in

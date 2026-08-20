@@ -205,8 +205,8 @@ jobs:
 
       - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
         with:
-          workload_identity_provider: projects/696476845998/locations/global/workloadIdentityPools/github/providers/github-oidc
-          service_account: mitos-ci@mitos-fleet.iam.gserviceaccount.com
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-ci@upgradegr-mitos.iam.gserviceaccount.com
 
       - run: pip install -r requirements/spike.txt
 
@@ -214,7 +214,7 @@ jobs:
         env:
           PYTHONPATH: src:.
           MITOS_MODEL: gemini-3.7-flash
-          GOOGLE_CLOUD_PROJECT: mitos-fleet
+          GOOGLE_CLOUD_PROJECT: upgradegr-mitos
           GOOGLE_CLOUD_LOCATION: global
         run: |
           set -o pipefail
