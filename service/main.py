@@ -49,7 +49,7 @@ from mitos.watcher import build_watcher  # noqa: E402
 from .thread_view import render as render_thread  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
-PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "mitos-fleet")
+PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "upgradegr-mitos")
 SECRET = os.environ.get(
     "MITOS_WRITE_SECRET", "mitos-prod-settings-writer-spec-repo-deploy-key"
 )  # nosec B105 - the secret's NAME, not its value

@@ -9,8 +9,8 @@ access to `mitos-spec` and nothing else, which is the difference between saying
 least privilege and doing it. It lives in Secret Manager and exactly one service
 account can read it:
 
-    gcloud secrets get-iam-policy spec-repo-write-token --project mitos-fleet
-    -> serviceAccount:mitos-writer@mitos-fleet.iam.gserviceaccount.com
+    gcloud secrets get-iam-policy spec-repo-write-token --project upgradegr-mitos
+    -> serviceAccount:mitos-writer@upgradegr-mitos.iam.gserviceaccount.com
 
 The reader and the evaluator can ask for it and receive PermissionDenied from
 Google IAM. That is why the reader cannot perform this write even if every line
@@ -127,7 +127,7 @@ class GitSpecRepo:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
 
-            _run(["git", "config", "user.email", "mitos-writer@mitos-fleet.iam.gserviceaccount.com"], cwd=repo, env=env)
+            _run(["git", "config", "user.email", "mitos-writer@upgradegr-mitos.iam.gserviceaccount.com"], cwd=repo, env=env)
             _run(["git", "config", "user.name", "Mitos writer"], cwd=repo, env=env)
             _run(["git", "add", "--", path], cwd=repo, env=env)
             _run(["git", "commit", "-m", message], cwd=repo, env=env)

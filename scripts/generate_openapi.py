@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MITOS_LEDGER", "memory")
-os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "mitos-fleet")
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "upgradegr-mitos")
 
 HEADER = (
     "# Generated from the running FastAPI app by scripts/generate_openapi.py.\n"
@@ -31,15 +31,15 @@ HEADER = (
 
 SERVERS = [
     {
-        "url": "https://mitos-reader-696476845998.europe-west1.run.app",
+        "url": "https://mitos-reader-437828525303.europe-west1.run.app",
         "description": "reader, holds the Firestore query subscription",
     },
     {
-        "url": "https://mitos-evaluator-696476845998.europe-west1.run.app",
+        "url": "https://mitos-evaluator-437828525303.europe-west1.run.app",
         "description": "evaluator",
     },
     {
-        "url": "https://mitos-writer-696476845998.europe-west1.run.app",
+        "url": "https://mitos-writer-437828525303.europe-west1.run.app",
         "description": "writer, the only identity that can publish",
     },
 ]
