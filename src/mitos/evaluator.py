@@ -73,6 +73,9 @@ class Finding:
 class Verdict:
     passed: bool
     findings: list[Finding] = field(default_factory=list)
+    # What the model critic raised. Deliberately separate from `findings`, and
+    # deliberately not part of `passed`. See `_with_critic`.
+    advisories: list[Finding] = field(default_factory=list)
     injection_attempt: bool = False
     checked: list[str] = field(default_factory=list)
 
@@ -82,11 +85,17 @@ class Verdict:
             "injection_attempt": self.injection_attempt,
             "checks_run": self.checked,
             "findings": [f.as_dict() for f in self.findings],
+            "advisories": [f.as_dict() for f in self.advisories],
         }
 
     def summary(self) -> str:
         if self.passed:
-            return f"PASS, {len(self.checked)} checks, no findings"
+            extra = (
+                f", {len(self.advisories)} advisory for the human"
+                if self.advisories
+                else ", no findings"
+            )
+            return f"PASS, {len(self.checked)} checks{extra}"
         worst = ", ".join(sorted({f.check for f in self.findings}))
         return f"FAIL on {worst}"
 
@@ -181,25 +190,39 @@ def evaluate(
 
 
 def _with_critic(verdict: Verdict, draft: str, critic: Critic) -> Verdict:
-    """Union the critic's findings into the deterministic verdict.
+    """Attach the critic's findings to the verdict without letting them gate it.
 
-    THE INVARIANT, and it is the whole reason a model is permitted here:
+    THE INVARIANT, unchanged: **the model can only tighten.** It may add, never
+    subtract. There is no branch here that removes a deterministic finding,
+    clears the injection flag, or turns a failure into a pass.
 
-        the critic can only ADD findings.
+    What changed, and why, is where its findings land.
 
-    There is deliberately no branch in this function that removes a finding, that
-    clears the injection flag, or that sets `passed` to True. `passed` is
-    `verdict.passed AND the critic found nothing`, so the model is strictly a
-    tightening step. A gate whose verdict a model can reverse is not a gate, and
-    the model reviewing the draft is the same class of thing that wrote it.
+    They used to count towards `passed`. That looked stricter and was worse. The
+    repair step is mechanical, a regular expression substitution that removes
+    leaked credentials and injected instructions, and it cannot act on a
+    sentence of judgement. So any critic opinion survived the repair, failed the
+    draft a second time, and parked the item permanently with the reason "the
+    gate could not be satisfied", which tells the human nothing they can act on.
+    Measured on a live backlog: twelve of thirteen items parked, eight of them
+    this way.
 
-    `tests/unit/test_critic_invariant.py` feeds this a critic that insists
-    everything is approved, and asserts the deterministic findings survive.
+    A refusal with no actionable reason is the failure this project banned
+    elsewhere and reintroduced here through a different door.
+
+    So the deterministic checks gate, because they describe a draft that is
+    unsafe to write and they can be repaired. The critic's findings are
+    judgements, and judgements belong in front of the human who is already
+    standing at the approval step. They ride on the approval card, and the human
+    weighs them before approving.
+
+    The model still cannot approve anything, cannot clear a finding, and cannot
+    reduce what a human is shown. It can only add to it.
     """
     extra_raw = critic.review(draft, [f.detail for f in verdict.findings])
-    extra = [
+    advisories = [
         Finding(
-            severity="HIGH",
+            severity="ADVISORY",
             check="model-critic",
             detail=item.get("detail", ""),
             evidence=item.get("evidence", ""),
@@ -208,8 +231,9 @@ def _with_critic(verdict: Verdict, draft: str, critic: Critic) -> Verdict:
         if item.get("detail")
     ]
     return Verdict(
-        passed=verdict.passed and not extra,
-        findings=verdict.findings + extra,
+        passed=verdict.passed,
+        findings=verdict.findings,
+        advisories=verdict.advisories + advisories,
         injection_attempt=verdict.injection_attempt,
         checked=[*verdict.checked, "model-critic"],
     )

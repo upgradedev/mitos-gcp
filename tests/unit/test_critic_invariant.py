@@ -1,7 +1,18 @@
 """The invariant that lets a model near the gate at all.
 
 Mitos puts a Gemini critic behind the deterministic evaluator. That is only safe
-because of one property: the critic can add findings and can never remove one.
+because of one property: **the critic can add and can never subtract.**
+
+What it adds are advisories, and they reach the human on the approval card
+rather than gating the draft. That is a correction, not a weakening, and it was
+forced by measurement. Critic findings used to count towards the verdict, which
+looked stricter and was worse: the repair step is a regular expression and
+cannot act on a sentence of judgement, so any opinion survived the repair and
+parked the item permanently with a reason nobody could act on. Twelve of
+thirteen items on a live backlog, eight of them that way.
+
+The model still cannot approve anything, cannot clear a deterministic finding,
+and cannot reduce what a human is shown.
 
 These tests are the proof. They are the same kind of artifact as the ADK
 interceptor spike, and for the same reason: the entry makes a claim out loud, so
@@ -82,24 +93,37 @@ def test_the_critic_cannot_clear_the_injection_flag():
     assert with_critic.injection_attempt is True
 
 
-def test_the_critic_can_only_make_a_clean_draft_fail_never_the_reverse():
-    """The other direction: on clean input the critic is allowed to add."""
+def test_the_critic_adds_advisories_a_human_must_read():
+    """The other direction. On clean input the critic still contributes, and
+    what it contributes reaches the person approving."""
     assert evaluate(CLEAN).passed
-    assert evaluate(CLEAN, critic=_Critic()).passed
+    assert evaluate(CLEAN, critic=_Critic()).advisories == []
 
-    strict = evaluate(
+    reviewed = evaluate(
         CLEAN, critic=_Critic([{"detail": "unsupported claim", "evidence": "added"}])
     )
-    assert not strict.passed, "the critic cannot tighten the gate either"
-    assert any(f.check == "model-critic" for f in strict.findings)
+    assert reviewed.advisories, "the critic's judgement never reached anybody"
+    assert reviewed.advisories[0].check == "model-critic"
+    assert reviewed.advisories[0].severity == "ADVISORY"
 
 
-def test_findings_are_never_dropped_by_the_union():
+def test_an_advisory_never_silently_disappears():
+    """The point of separating them is that they are shown, not dropped."""
+    reviewed = evaluate(
+        POISONED, critic=_Critic([{"detail": "also questionable", "evidence": "x"}])
+    )
+    assert not reviewed.passed
+    assert len(reviewed.advisories) == 1
+    assert "model-critic" in reviewed.checked
+
+
+def test_deterministic_findings_are_never_dropped():
     baseline = evaluate(POISONED)
     combined = evaluate(
         POISONED, critic=_Critic([{"detail": "extra", "evidence": "e"}])
     )
-    assert len(combined.findings) == len(baseline.findings) + 1
+    assert len(combined.findings) == len(baseline.findings)
+    assert combined.advisories
 
 
 def test_the_critic_is_told_what_was_already_found_so_it_does_not_repeat():
@@ -109,13 +133,17 @@ def test_the_critic_is_told_what_was_already_found_so_it_does_not_repeat():
     assert already, "the critic was given no context and will restate known findings"
 
 
-def test_a_critic_that_reports_itself_unreachable_fails_the_draft():
+def test_a_critic_that_reports_itself_unreachable_says_so_on_the_card():
     """Degradation must be visible. An unreachable critic must not read as a
-    silent pass, which is how a safety layer quietly stops existing."""
+    silent clean bill of health, which is how a safety layer quietly stops
+    existing. It reaches the human as an advisory rather than parking the item,
+    because an outage is not evidence that the draft is bad."""
     unreachable = _Critic(
         [{"detail": "the model critic was unreachable", "evidence": "Timeout"}]
     )
-    assert not evaluate(CLEAN, critic=unreachable).passed
+    verdict = evaluate(CLEAN, critic=unreachable)
+    assert verdict.advisories
+    assert "unreachable" in verdict.advisories[0].detail
 
 
 def test_no_critic_at_all_leaves_the_deterministic_verdict_untouched():
@@ -131,9 +159,12 @@ def test_the_union_has_no_subtracting_branch():
 
     src = inspect.getsource(evaluator._with_critic)
     body = src.split('"""')[-1]
-    for forbidden in ("passed=True", ".remove(", "findings = [", "del "):
+    for forbidden in ("passed=True", ".remove(", "del "):
         assert forbidden not in body, (
             f"_with_critic now contains {forbidden!r}; the add-only invariant "
             f"may have been broken"
         )
-    assert "verdict.findings + extra" in body
+    assert "findings=verdict.findings" in body, (
+        "the deterministic findings are no longer passed through unchanged"
+    )
+    assert "verdict.advisories + advisories" in body

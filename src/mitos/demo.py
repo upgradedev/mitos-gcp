@@ -110,6 +110,12 @@ def _approver(auto: bool):
         print(f"  │ target   {card.target_path:<47}│")
         print(f"  │ sha256   {card.plan_hash[:48]:<48}│")
         print(f"  │ findings {str(len(card.findings)) + ' new':<47}│")
+        if card.advisories:
+            print(
+                f"  │ advisory {str(len(card.advisories)) + ' from the model critic':<47}│"
+            )
+            for a in card.advisories[:2]:
+                print(f"  │   {a[:53]:<53}│")
         print(f"{BOLD}  └──────────────────────────────────────────────────────────┘{RESET}")
         sys.stdout.flush()
         if auto:
