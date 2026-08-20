@@ -1,0 +1,41 @@
+# Treat the deployment the way a judge will.
+#
+# Deliberately unauthenticated. Every check runs against the public URLs with no
+# credentials, because a readiness gate that authenticates is testing a
+# different system from the one being judged.
+#
+# Runs on a schedule as well as on demand: a demo that was working when it was
+# submitted and is broken when it is judged has failed, and nobody finds that
+# out by reading the repository.
+
+name: Judge UAT
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every six hours through the judging window.
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  judge:
+    name: A stranger with no account
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      # No auth step, on purpose. Standard library only, so nothing is
+      # installed either.
+      - name: Judge treatment
+        run: |
+          set -o pipefail
+          python scripts/judge_uat.py \
+            --base-reader    https://mitos-reader-437828525303.europe-west1.run.app \
+            --base-evaluator https://mitos-evaluator-437828525303.europe-west1.run.app \
+            --base-writer    https://mitos-writer-437828525303.europe-west1.run.app

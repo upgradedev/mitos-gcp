@@ -1,0 +1,152 @@
+# Infrastructure is planned in a pipeline, never changed from a laptop.
+#
+# `validate` runs on every push, so a broken change is caught before anyone
+# reads it. `plan` runs against the real project so the diff between what is
+# written down and what actually exists is visible on a pull request, which is
+# the only way to find out that somebody fixed something with gcloud at 2am.
+#
+# `apply` is manual on purpose. Nothing here should surprise anybody.
+
+name: Infrastructure
+
+on:
+  push:
+    paths: [infra/**, .github/workflows/infra.yml]
+  pull_request:
+    paths: [infra/**, .github/workflows/infra.yml]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "plan or apply"
+        default: "plan"
+        type: choice
+        options: [plan, apply]
+      image:
+        description: "Container image to deploy"
+        default: "europe-west1-docker.pkg.dev/upgradegr-mitos/cloud-run-source-deploy/mitos-reader:latest"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two applies at once against one state file is how state gets corrupted.
+  group: infra-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.9.8"
+  PROJECT: upgradegr-mitos
+  STATE_BUCKET: upgradegr-mitos-tfstate
+
+jobs:
+  validate:
+    name: Format and validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Formatting is not a style opinion here. An unformatted file means the
+      # plan somebody reviewed is not the file somebody wrote.
+      - name: terraform fmt
+        run: terraform -chdir=infra fmt -check -diff
+
+      # No backend, so this validates the code without touching any state or
+      # needing a credential. It runs on forks too.
+      - name: terraform validate
+        run: |
+          terraform -chdir=infra init -backend=false
+          terraform -chdir=infra validate
+
+      # The claims this repository makes out loud, asserted against the code
+      # that creates them rather than against a diagram.
+      - name: The infrastructure says what the README says
+        run: |
+          set -o pipefail
+          cd infra
+          grep -q 'google_secret_manager_secret_iam_member" "only_the_writer"' main.tf \
+            || { echo "::error::the write credential is no longer bound to a single identity"; exit 1; }
+          test "$(grep -c 'google_secret_manager_secret_iam_member' main.tf)" -eq 1 \
+            || { echo "::error::more than one identity can read the write credential"; exit 1; }
+          grep -q 'cpu_idle = each.value != "reader"' main.tf \
+            || { echo "::error::the reader may be CPU-throttled, which suspends the query subscription"; exit 1; }
+          grep -q 'min_instance_count = each.value == "reader" ? 1 : 0' main.tf \
+            || { echo "::error::the reader may scale to zero, so the subscription would not exist"; exit 1; }
+          grep -q 'attribute_condition' main.tf \
+            || { echo "::error::the CI identity is assumable by any repository on GitHub"; exit 1; }
+          echo "the four load-bearing settings are present"
+
+  plan:
+    name: Plan against the real project
+    needs: validate
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-tf@upgradegr-mitos.iam.gserviceaccount.com
+
+      - name: terraform plan
+        run: |
+          set -o pipefail
+          terraform -chdir=infra init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="prefix=mitos"
+          terraform -chdir=infra plan -no-color \
+            -var="image=${{ inputs.image || 'europe-west1-docker.pkg.dev/upgradegr-mitos/cloud-run-source-deploy/mitos-reader:latest' }}" \
+            | tee /tmp/plan.txt
+
+      # Drift is the interesting output, not the plan itself. If the code and
+      # the project disagree, somebody changed something by hand.
+      - name: Report drift
+        run: |
+          if grep -qE "^No changes\." /tmp/plan.txt; then
+            echo "the project matches the code"
+          else
+            echo "::warning::the project and the code disagree; read the plan above"
+          fi
+
+  apply:
+    name: Apply
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
+        with:
+          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: mitos-tf@upgradegr-mitos.iam.gserviceaccount.com
+
+      - name: terraform apply
+        run: |
+          set -o pipefail
+          terraform -chdir=infra init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="prefix=mitos"
+          terraform -chdir=infra apply -auto-approve \
+            -var="image=${{ inputs.image }}"
+          terraform -chdir=infra output -json > /tmp/outputs.json
+          cat /tmp/outputs.json
