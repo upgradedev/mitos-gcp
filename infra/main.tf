@@ -65,6 +65,11 @@ resource "google_project_service" "enabled" {
     "secretmanager.googleapis.com",
     "iamcredentials.googleapis.com",
     "sts.googleapis.com",
+    # Terraform's google provider reads project services through Resource
+    # Manager, so managing APIs at all requires this one to be on first. It is
+    # not in the list because the product needs it; it is here because the
+    # thing that manages the list needs it.
+    "cloudresourcemanager.googleapis.com",
   ])
 
   service = each.value

@@ -14,6 +14,10 @@ gcloud projects describe "$PROJECT" >/dev/null 2>&1 \
   || gcloud projects create "$PROJECT" --name="Upgrade Mitos"
 
 gcloud billing projects link "$PROJECT" --billing-account="$BILLING"
+# Resource Manager first, and the ordering is not cosmetic: the google
+# provider reads project services through it, so Terraform cannot enable the
+# API it needs in order to enable APIs.
+gcloud services enable cloudresourcemanager.googleapis.com --project "$PROJECT"
 gcloud services enable storage.googleapis.com --project "$PROJECT"
 
 gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1 || {
