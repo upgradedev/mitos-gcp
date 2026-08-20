@@ -82,7 +82,15 @@ jobs:
   plan:
     name: Plan against the real project
     needs: validate
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Only when planning is what was asked for. `plan`, `import` and
+    # `teardown-rebuild` all take the same state lock, and running two of them
+    # from one dispatch produces a 412 on the lock file rather than a useful
+    # error. Forks are excluded because they cannot authenticate anyway.
+    if: >-
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
+       (github.event_name == 'workflow_dispatch' && inputs.action == 'plan'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
