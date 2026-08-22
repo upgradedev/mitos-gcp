@@ -6,8 +6,13 @@ different pull requests, and the second run recalls what the first one wrote.
 That is the difference between proving the memory works and proving we can parse
 a date we seeded ourselves.
 
-    python -m mitos.demo --ledger memory     # offline, no credential
-    python -m mitos.demo                     # against Firestore
+    python -m mitos.demo        # the real system: Firestore and Gemini
+    python -m mitos.demo --ledger memory   # what CI runs, and it says so on screen
+
+The default is the real thing, deliberately. A demo that quietly falls back to an
+in-memory ledger shows a stub and nobody watching can tell, which is worse than
+failing. When it cannot reach Firestore it says THIS IS NOT THE REAL SYSTEM in
+red and points at the deployed URL.
 
 Pacing exists so a human can read it. `--fast` removes it for CI.
 """
@@ -161,12 +166,42 @@ def main(argv: Optional[list[str]] = None) -> int:
         except (ValueError, OSError):  # pragma: no cover - exotic streams
             pass
 
-    backend = args.ledger or os.environ.get("MITOS_LEDGER", "memory")
-    ledger = InMemoryLedger() if backend == "memory" else build_ledger(backend)
+    # The default is the real thing. A demo that quietly runs on a stub is a
+    # demo that shows a stub, and nobody watching can tell the difference, which
+    # is the worst of both.
+    backend = args.ledger or os.environ.get("MITOS_LEDGER", "firestore")
+    ledger: Ledger
+    if backend == "memory":
+        ledger = InMemoryLedger()
+    else:
+        try:
+            ledger = build_ledger(backend)
+        except Exception as exc:
+            # Loudly, and not as a footnote. Falling back in silence is how a
+            # stub gets mistaken for the product.
+            print()
+            print(f"{RED}{BOLD}  THIS IS NOT THE REAL SYSTEM{RESET}")
+            print(f"  Firestore is unreachable: {type(exc).__name__}")
+            print(f"  {DIM}Running on an in-memory ledger instead. The fleet logic is")
+            print(f"  identical, the control plane is not: there is no query")
+            print(f"  subscription, so nothing wakes on its own.{RESET}")
+            print()
+            print(f"  {DIM}For the real system, open:{RESET}")
+            print(f"  https://mitos-reader-437828525303.europe-west1.run.app/thread/view")
+            print()
+            backend = "memory (fallback)"
+            ledger = InMemoryLedger()
 
     print()
     print(f"{BOLD}MITOS{RESET}  a fleet of institutional agents, one governed write")
-    print(f"{DIM}ledger backend: {backend}{RESET}")
+    engine = os.environ.get("MITOS_MODEL", "stub")
+    marker = GREEN if backend.startswith("firestore") else YELLOW
+    print(f"{DIM}ledger {marker}{backend}{RESET}{DIM}  ·  model {marker}{engine}{RESET}")
+    if engine == "stub":
+        print(
+            f"  {YELLOW}no model configured, so the specialists use templates.{RESET}\n"
+            f"  {DIM}Set MITOS_MODEL=gemini-3.7-flash for the agentic path.{RESET}"
+        )
     _print_catalog()
 
     _rule("SEED, synthetic history so the fleet has weeks to remember")
