@@ -331,10 +331,16 @@ beat is sped up.** If the chore fails, the recording fails and no video is produ
 | Firestore provenance thread | **deployed**, append-only |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
 | the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by `mitos-writer@upgradegr-mitos.iam.gserviceaccount.com` |
-| the webhook | **simulated**. The trigger is a fixture, not a live GitHub webhook |
+| the webhook | **real.** A GitHub webhook on [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) posts to `/webhook/github`. Signature verified with HMAC-SHA256 over the raw body, repository allowlisted, and the fleet wakes with nobody calling anything |
 
-The webhook row is the honest limit of what is built, and it is not claimed as done anywhere else in
-this repository either.
+Nothing in this product is simulated any more. The trigger was the last one, and
+it closed on 2026-08-21: a real pull request on the specification repository woke
+the fleet, which read the diff from the public GitHub API, dispatched, exercised
+the interceptor and produced a plan. GitHub's own delivery log shows `202 OK`.
+
+A webhook never approves a write. It produces a plan and stops at the approval,
+because the one thing a human is there for is the thing an automatic trigger must
+not do on their behalf.
 
 ## Pre-existing components
 
