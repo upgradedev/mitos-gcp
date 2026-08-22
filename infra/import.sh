@@ -67,6 +67,12 @@ done
 imp "google_project_iam_member.ci_model" \
     "$P roles/aiplatform.user serviceAccount:mitos-ci@$P.iam.gserviceaccount.com"
 
+echo "Image pull"
+for role in reader evaluator writer; do
+  imp "google_project_iam_member.fleet_can_pull_the_image[\"$role\"]"       "$P roles/artifactregistry.reader serviceAccount:mitos-$role@$P.iam.gserviceaccount.com"
+done
+imp "google_project_iam_member.run_agent_can_pull_the_image"     "$P roles/artifactregistry.reader serviceAccount:service-$PN@serverless-robot-prod.iam.gserviceaccount.com"
+
 echo "The write credential"
 SECRET="mitos-prod-settings-writer-spec-repo-deploy-key"
 imp "google_secret_manager_secret.spec_repo_key" "projects/$P/secrets/$SECRET"
