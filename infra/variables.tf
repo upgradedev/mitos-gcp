@@ -69,3 +69,9 @@ variable "project_number" {
   type        = string
   default     = "437828525303"
 }
+
+variable "webhook_repositories" {
+  description = "Repositories whose pull requests may wake the fleet. A signature proves who sent a delivery, not that we asked for it."
+  type        = list(string)
+  default     = ["upgradedev/mitos-spec"]
+}
