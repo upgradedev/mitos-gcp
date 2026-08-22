@@ -632,6 +632,11 @@ class AgenticSpecialist:
     model: str = DEFAULT_MODEL
     project: Optional[str] = None
     role: str = "reader"
+    # Which repository the specialists read. None keeps the demo corpus, so the
+    # offline path is unchanged; a name points them at real code.
+    repository: Optional[str] = None
+    ref: str = "HEAD"
+    scope: Optional[tuple] = None
 
     BRIEFS = {
         "db-architect-leader": (
@@ -678,10 +683,11 @@ class AgenticSpecialist:
         from google.genai import types  # noqa: PLC0415
 
         from .guard import make_before_tool_guard  # noqa: PLC0415
-        from .tools import DictCorpus, ReadLog, make_tools  # noqa: PLC0415
+        from .tools import ReadLog, build_corpus, make_tools  # noqa: PLC0415
 
         log = ReadLog()
-        tools = make_tools(DictCorpus(), log)
+        corpus = build_corpus(self.repository, ref=self.ref, scope=self.scope)
+        tools = make_tools(corpus, log, scope=self.scope)
 
         agent = LlmAgent(
             name=companion.replace("-", "_"),
@@ -729,12 +735,26 @@ class AgenticSpecialist:
         return shape_agentic_reply(data, log.as_dict())
 
 
-def build_agentic_analyst(project: Optional[str] = None, role: str = "reader"):
-    """The agentic specialist, when a model is configured."""
+def build_agentic_analyst(
+    project: Optional[str] = None,
+    role: str = "reader",
+    repository: Optional[str] = None,
+    ref: str = "HEAD",
+    scope: Optional[tuple] = None,
+):
+    """The agentic specialist, when a model is configured.
+
+    `repository` is what makes the findings about your code rather than about
+    the demo corpus. Without it the specialists read the built-in sample, which
+    is right for the recorded demo and wrong for anything else.
+    """
     if os.environ.get("MITOS_MODEL", "stub") == "stub":
         return None
     return AgenticSpecialist(
         model=os.environ.get("MITOS_MODEL", DEFAULT_MODEL),
         project=project,
         role=role,
+        repository=repository,
+        ref=ref,
+        scope=scope,
     )

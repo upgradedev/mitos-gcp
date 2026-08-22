@@ -265,3 +265,26 @@ def test_a_delivery_becomes_a_pull_request_the_fleet_can_read():
     assert pr.number == d.number
     assert pr.title == d.title.value
     assert "ALTER TABLE" in pr.diff_text()
+
+
+def test_the_delivery_carries_the_head_commit():
+    """Reading the repository at HEAD reads whatever main happens to be, which
+    is not what the pull request proposed."""
+    body = payload(
+        pull_request={
+            "number": 1,
+            "title": "t",
+            "user": {"login": "u"},
+            "head": {"sha": "a" * 40},
+        }
+    )
+    d = call(body, headers(body))
+    assert d.head_sha == "a" * 40
+    assert d.as_dict()["head_sha"] == "a" * 40
+
+
+def test_a_missing_head_sha_does_not_break_the_delivery():
+    """Older payloads and hand-made test deliveries do not always carry it. The
+    corpus falls back to HEAD, which is worse but not broken."""
+    body = payload()
+    assert call(body, headers(body)).head_sha == ""
