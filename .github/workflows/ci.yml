@@ -93,6 +93,36 @@ jobs:
           fi
           echo "no em dashes"
 
+      # The README carried "coverage 93%" in the badge and "94% coverage" in the
+      # prose for three days, and both were stale: the real number on main was
+      # 86%. A human found it by reading. This is that reader, on every push.
+      # The badge percent, the prose percent and the floor the prose claims all
+      # have to agree, and the floor has to be the one the coverage gate uses.
+      #
+      # The `|| true` is deliberate: the runner shell is `bash -e`, so a grep
+      # that matches nothing would kill the step before the message below can
+      # say which of the three went missing.
+      - name: The coverage badge, the prose and the floor agree
+        run: |
+          badge=$(grep -oE 'badge/coverage-[0-9]+%25' README.md | grep -oE '[0-9]+' | head -1 || true)
+          claim=$(grep -oE '[0-9]+% coverage against an? [0-9]+% floor' README.md | head -1 || true)
+          prose=$(printf '%s' "$claim" | grep -oE '^[0-9]+' || true)
+          floor=$(printf '%s' "$claim" | grep -oE '[0-9]+% floor' | grep -oE '[0-9]+' || true)
+          echo "badge=${badge:-<none>} prose=${prose:-<none>} floor=${floor:-<none>} gate=${{ env.COVERAGE_FLOOR }}"
+          if [ -z "$badge" ] || [ -z "$prose" ] || [ -z "$floor" ]; then
+            echo "::error file=README.md::could not read the coverage badge, the prose number and the floor. One of them changed shape, so this check stopped checking."
+            exit 1
+          fi
+          if [ "$badge" != "$prose" ]; then
+            echo "::error file=README.md::the coverage badge says ${badge}% and the prose says ${prose}%. One README, one number."
+            exit 1
+          fi
+          if [ "$floor" != "${{ env.COVERAGE_FLOOR }}" ]; then
+            echo "::error file=README.md::the README claims an ${floor}% floor and the coverage gate enforces ${{ env.COVERAGE_FLOOR }}%."
+            exit 1
+          fi
+          echo "badge and prose agree at ${badge}%, floor ${floor}% matches the gate"
+
   # Unit and e2e need no third-party runtime at all: the product's offline path
   # is standard library only. Coverage is measured here and gated here.
   pyramid:

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
-[![coverage 93%](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
+[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
 [![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
@@ -306,10 +306,31 @@ That cost an hour to find and `test_gemini_live.py` pins it.
 | `tests/integration` | the chore end to end, the ADK dispatcher, Firestore against the emulator, live Gemini |
 | `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
 
-**94% coverage against an 85% floor.** The floor is deliberately below the real number so a
-regression trips it rather than the number drifting down to meet it. The Firestore adapter is
-exercised against the emulator rather than trusted because the in-memory one passes, and a separate
-CI step fails the build if that suite ever skips.
+**86% coverage against an 85% floor**, measured on `main` by
+[CI run 32577912740](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740):
+85.98%, 1369 statements, 192 missed. The command that produced it, and the whole
+of what it covers:
+
+```bash
+python -m pytest tests/unit tests/e2e tests/integration/test_chore.py \
+  --cov=mitos --cov-report=term-missing --cov-fail-under=85
+```
+
+The unit suite, the end-to-end journey and the chore integration test. The
+Firestore adapter suite and the live Gemini suite run as separate CI jobs and sit
+outside that number, so read it as coverage of the offline path rather than of
+everything that runs.
+
+**The margin is 0.98 points, and that is the honest number rather than a
+comfortable one.** Coverage has sat near 86% on `main` since 2026-08-20
+([run 32400213647](https://github.com/upgradedev/mitos-gcp/actions/runs/32400213647),
+86.06%) while the model, webhook and corpus layers landed. The floor stays at 85
+and the number comes up to meet it. Widening the floor to make the margin look
+wider would delete the only thing that notices.
+
+The Firestore adapter is exercised against the emulator rather than trusted because
+the in-memory one passes, and a separate CI step fails the build if that suite ever
+skips.
 
 gitleaks runs over history with **no ignore file**. Every credential-shaped test value is assembled
 at runtime in [`tests/synthetic_secrets.py`](tests/synthetic_secrets.py), because allowlisting a
