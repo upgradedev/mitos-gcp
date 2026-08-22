@@ -63,3 +63,9 @@ variable "github_repo" {
   type        = string
   default     = "mitos-gcp"
 }
+
+variable "project_number" {
+  description = "Needed to name Google-managed service agents, which are addressed by number rather than by id."
+  type        = string
+  default     = "437828525303"
+}

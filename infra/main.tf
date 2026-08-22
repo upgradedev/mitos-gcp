@@ -143,6 +143,30 @@ resource "google_project_iam_member" "ci_model" {
   member  = "serviceAccount:${google_service_account.ci.email}"
 }
 
+# Pulling the image is a permission, and it is one `gcloud run deploy` grants
+# quietly on your behalf. Terraform does not, so an apply against a project that
+# was first built by hand fails with a 403 on downloadArtifacts and the message
+# names the repository rather than the identity that lacks access.
+#
+# This is exactly the kind of thing that only surfaces the first time the
+# infrastructure is applied from code rather than typed, which is the argument
+# for doing that at all.
+resource "google_project_iam_member" "fleet_can_pull_the_image" {
+  for_each = toset(local.roles)
+
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.fleet[each.value].email}"
+}
+
+# The Cloud Run service agent is what actually pulls, and it is created by
+# Google rather than by us, so it is referenced and never managed.
+resource "google_project_iam_member" "run_agent_can_pull_the_image" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:service-${var.project_number}@serverless-robot-prod.iam.gserviceaccount.com"
+}
+
 # --------------------------------------------------------------------------
 # The one credential that changes anything outside the ledger.
 #
