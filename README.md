@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
-[![coverage 87%](https://img.shields.io/badge/coverage-87%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740)
+[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
 [![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
