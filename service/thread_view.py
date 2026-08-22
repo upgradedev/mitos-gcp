@@ -34,16 +34,50 @@ KIND_STYLE = {
     "finding.raised": ("#ff9e64", "finding"),
     "finding.deferred": ("#ffd75f", "deferred"),
     "finding.escalated": ("#ffd75f", "escalated"),
+    # The three the webhook produces. Without them a real delivery rendered in
+    # the fallback grey, so a failed trigger looked exactly like a routine step
+    # on the one page where colour is the whole point.
+    "trigger.webhook": ("#5fd7d7", "trigger"),
+    "trigger.ignored": ("#8a8790", "ignored"),
+    "trigger.failed": ("#ff6b6b", "failed"),
 }
+
+
+def _json_for_script(value: Any) -> str:
+    """JSON safe to embed inside a `<script>` element.
+
+    `json.dumps` escapes what JSON needs and nothing HTML needs, so a string
+    containing `</script>` survives it intact and closes the block early. The
+    payload here carries a pull request title, which on the webhook path is
+    written by whoever opened the pull request, arrives wrapped in `Tainted`,
+    and is therefore exactly the input that must not be trusted.
+
+    Escaping to `\\uXXXX` keeps the value byte-identical once parsed while
+    leaving nothing the HTML tokenizer will act on. U+2028 and U+2029 are here
+    because they terminate a line in JavaScript but not in JSON.
+    """
+    blob = json.dumps(value)
+    for char, escaped in (
+        ("<", "\\u003c"),
+        (">", "\\u003e"),
+        ("&", "\\u0026"),
+        (" ", "\\u2028"),
+        (" ", "\\u2029"),
+    ):
+        blob = blob.replace(char, escaped)
+    return blob
 
 
 def render(entries: list[dict[str, Any]], role: str, wakeups: int) -> str:
     """One page. `entries` is exactly what GET /thread returns."""
-    payload = json.dumps(entries)
-    return _PAGE.replace("__DATA__", payload).replace(
-        "__ROLE__", html.escape(role)
-    ).replace("__WAKEUPS__", str(wakeups)).replace(
-        "__STYLE__", json.dumps(KIND_STYLE)
+    # The data substitution goes last. Done first, a pull request titled
+    # `__ROLE__` would be rewritten by the next replace, which is untrusted
+    # input steering the template.
+    return (
+        _PAGE.replace("__ROLE__", html.escape(role))
+        .replace("__WAKEUPS__", str(wakeups))
+        .replace("__STYLE__", _json_for_script(KIND_STYLE))
+        .replace("__DATA__", _json_for_script(entries))
     )
 
 
@@ -98,6 +132,16 @@ const DATA = __DATA__, STYLE = __STYLE__;
 const byId = Object.fromEntries(DATA.map(e => [e.entry_id, e]));
 const list = document.getElementById('list'), side = document.getElementById('side');
 
+// Everything below builds markup by concatenation, so anything interpolated
+// has to come through here first. Most of these values are set by the fleet,
+// but the entry kind reaches a colour lookup and the row is one refactor away
+// from carrying a title, and the cost of being consistent is one function.
+function esc(v){
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
 function ancestry(id){
   const path = [], seen = new Set();
   let cur = id;
@@ -110,10 +154,10 @@ DATA.forEach(e => {
   const row = document.createElement('div');
   row.className = 'row'; row.dataset.id = e.entry_id;
   row.innerHTML =
-    `<span class=dot style="background:${colour}"></span>` +
-    `<span class=k style="color:${colour}">${label}</span>` +
-    `<span class=who>${(e.actor||'')}</span>` +
-    `<span class=t>${(e.recorded_at||'').slice(11,19)}</span>`;
+    `<span class=dot style="background:${esc(colour)}"></span>` +
+    `<span class=k style="color:${esc(colour)}">${esc(label)}</span>` +
+    `<span class=who>${esc(e.actor||'')}</span>` +
+    `<span class=t>${esc((e.recorded_at||'').slice(11,19))}</span>`;
   row.onclick = () => select(e.entry_id);
   list.appendChild(row);
 });
@@ -130,10 +174,13 @@ function select(id){
     return l;
   }).join(' -> ');
   side.innerHTML =
-    `<div><b>${e.kind}</b></div>` +
-    `<div class=sub>${e.actor} &middot; ${e.recorded_at}</div>` +
-    `<div class=sub style="margin-top:.6rem">retraced: ${chain}</div>` +
-    `<pre>${JSON.stringify(e.payload, null, 1)}</pre>`;
+    `<div><b>${esc(e.kind)}</b></div>` +
+    `<div class=sub>${esc(e.actor)} &middot; ${esc(e.recorded_at)}</div>` +
+    `<div class=sub style="margin-top:.6rem">retraced: ${esc(chain)}</div>` +
+    `<pre></pre>`;
+  // textContent, not innerHTML. The payload carries the pull request title,
+  // which on the webhook path is written by whoever opened it.
+  side.querySelector('pre').textContent = JSON.stringify(e.payload, null, 1);
 }
 
 const last = DATA.filter(e => e.kind === 'write.executed').pop() || DATA[DATA.length-1];
