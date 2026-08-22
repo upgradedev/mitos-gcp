@@ -299,6 +299,27 @@ paths:
                 type: object
           description: Successful Response
       summary: Watch
+  /webhook/github:
+    post:
+      description: 'The trigger. Nobody opens Mitos; this does.
+
+
+        Answers immediately and works afterwards. GitHub gives a webhook ten seconds
+
+        and disables one that keeps timing out, and this chore takes minutes with
+        a
+
+        model reading the repository, so doing the work inside the request would
+
+        guarantee the trigger stops firing.'
+      operationId: github_webhook_webhook_github_post
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Github Webhook
 servers:
 - description: reader, holds the Firestore query subscription
   url: https://mitos-reader-437828525303.europe-west1.run.app

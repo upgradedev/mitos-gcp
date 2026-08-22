@@ -196,6 +196,27 @@ resource "google_secret_manager_secret_iam_member" "only_the_writer" {
   member    = "serviceAccount:${google_service_account.fleet["writer"].email}"
 }
 
+# The webhook secret. Same reasoning as the deploy key: the container is managed
+# and the value is not, because a secret in a plan is a secret in a log.
+#
+# Only the reader holds the subscription and only the reader receives
+# deliveries, so only the reader can read this.
+resource "google_secret_manager_secret" "webhook_secret" {
+  secret_id = "mitos-${var.stage}-settings-reader-github-webhook-secret"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_secret_manager_secret_iam_member" "only_the_reader" {
+  secret_id = google_secret_manager_secret.webhook_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
+}
+
 # --------------------------------------------------------------------------
 # CI authentication, without a long-lived key
 # --------------------------------------------------------------------------

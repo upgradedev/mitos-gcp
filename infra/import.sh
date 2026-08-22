@@ -89,6 +89,10 @@ imp "google_secret_manager_secret.spec_repo_key" "projects/$P/secrets/$SECRET"
 imp "google_secret_manager_secret_iam_member.only_the_writer" \
     "projects/$P/secrets/$SECRET roles/secretmanager.secretAccessor serviceAccount:mitos-writer@$P.iam.gserviceaccount.com"
 
+WHSECRET="mitos-prod-settings-reader-github-webhook-secret"
+imp "google_secret_manager_secret.webhook_secret" "projects/$P/secrets/$WHSECRET"
+imp "google_secret_manager_secret_iam_member.only_the_reader"     "projects/$P/secrets/$WHSECRET roles/secretmanager.secretAccessor serviceAccount:mitos-reader@$P.iam.gserviceaccount.com"
+
 echo "Workload Identity"
 imp "google_iam_workload_identity_pool.github" \
     "projects/$P/locations/global/workloadIdentityPools/github"
