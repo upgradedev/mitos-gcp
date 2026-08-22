@@ -92,6 +92,9 @@ class Delivery:
     title: Tainted
     author: str
     action: str
+    # The commit the pull request is at. Reading the repository at HEAD would
+    # read whatever main happens to be, which is not what was proposed.
+    head_sha: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +108,7 @@ class Delivery:
             "title_trust": self.title.trust.value,
             "author": self.author,
             "action": self.action,
+            "head_sha": self.head_sha,
         }
 
 
@@ -163,6 +167,7 @@ def parse(
         title=Tainted(value=str(pr.get("title", ""))[:300]),
         author=str((pr.get("user") or {}).get("login", ""))[:100],
         action=action,
+        head_sha=str((pr.get("head") or {}).get("sha", ""))[:40],
     )
 
 

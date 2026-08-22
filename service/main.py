@@ -316,6 +316,14 @@ class RunRequest(BaseModel):
     seed: bool = False
 
 
+# What a specialist may open in a customer repository. A property of their
+# layout, not of ours, so it is configuration.
+READ_SCOPE = tuple(
+    p.strip()
+    for p in os.environ.get("MITOS_READ_SCOPE", "docs/,services/,registers/").split(",")
+    if p.strip()
+)
+
 ALLOWED_REPOS = frozenset(
     r.strip()
     for r in os.environ.get("MITOS_WEBHOOK_REPOS", "upgradedev/mitos-spec").split(",")
@@ -423,7 +431,17 @@ async def github_webhook(request: Request) -> JSONResponse:
                 wh.to_pull_request(delivery, files), led,
                 run_id=delivery.delivery_id,
                 approve=lambda card: False,  # a webhook never approves a write
-                analyst=build_agentic_analyst(PROJECT, role=ROLE),
+                # The specialists read the repository the pull request came
+                # from. Without this they read the built-in demo corpus, and
+                # produce confident findings about a repository that does not
+                # exist.
+                analyst=build_agentic_analyst(
+                    PROJECT,
+                    role=ROLE,
+                    repository=delivery.repository,
+                    ref=delivery.head_sha or "HEAD",
+                    scope=READ_SCOPE,
+                ),
                 critic=build_critic(PROJECT),
                 classifier=build_classifier(PROJECT),
                 doc_agent=build_doc_agent(PROJECT, role=ROLE),
