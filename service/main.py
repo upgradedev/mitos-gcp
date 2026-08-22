@@ -323,6 +323,14 @@ ALLOWED_REPOS = frozenset(
 )
 
 
+# Not a secret. The deliberate absence of one, which is a distinct state worth
+# naming: while this is the value every delivery is refused with 503. Bandit
+# flags a bare "" here as a hardcoded password, which is a fair rule and a wrong
+# reading, so the intent is in the name rather than in a suppression nobody
+# reads.
+NO_SECRET_CONFIGURED = ""  # nosec B105 - the absence of a secret, not a secret
+
+
 def _webhook_secret() -> str:
     """Read once, cached on the module, like every other client here."""
     global _WEBHOOK_SECRET
@@ -342,7 +350,7 @@ def _webhook_secret() -> str:
             # Empty means every delivery is refused with 503, which is the only
             # safe behaviour: an endpoint that accepts everything when
             # misconfigured fails invisibly.
-            _WEBHOOK_SECRET = ""
+            _WEBHOOK_SECRET = NO_SECRET_CONFIGURED
     return _WEBHOOK_SECRET
 
 
