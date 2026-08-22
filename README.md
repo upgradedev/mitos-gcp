@@ -251,26 +251,52 @@ class of thing that wrote it.
 
 ## Run it
 
-The offline path needs **no credential, no API key and no paid call**. It is standard library only.
+**Nothing to install.** It is deployed, and these are live right now:
+
+| | |
+|---|---|
+| **Watch the thread** | https://mitos-reader-437828525303.europe-west1.run.app/thread/view |
+| Who each service is, and what it cannot reach | [`/identity`](https://mitos-reader-437828525303.europe-west1.run.app/identity) |
+| The subscription, and how many times it woke | [`/watch`](https://mitos-reader-437828525303.europe-west1.run.app/watch) |
+| The catalogue the router queries | [`/catalog`](https://mitos-reader-437828525303.europe-west1.run.app/catalog) |
+| The API | [`/openapi.json`](https://mitos-reader-437828525303.europe-west1.run.app/openapi.json) |
+
+**Watch the chore happen.** It streams, so the first beat arrives in under a
+second even though the whole thing takes a minute or two with a model reading the
+repository:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -r requirements/spike.txt
-PYTHONPATH=src python -m mitos.demo --ledger memory --yes
+curl -N -X POST https://mitos-reader-437828525303.europe-west1.run.app/run/stream   -H 'content-type: application/json' -d '{"pr":4471,"seed":true}'
 ```
 
-Against the real stack:
+**Ask the reader to write, and watch it refuse:**
 
 ```bash
-export GOOGLE_CLOUD_PROJECT=upgradegr-mitos MITOS_LEDGER=firestore MITOS_MODEL=gemini-3.7-flash
+curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute   -H 'content-type: application/json'   -d '{"path":"docs/x.md","body":"x","message":"m","branch":"b"}'
+# {"detail":"the reader service holds no credential that can write"}
+```
+
+### From source, against the same stack
+
+```bash
+pip install -r requirements/spike.txt
+export GOOGLE_CLOUD_PROJECT=upgradegr-mitos MITOS_MODEL=gemini-3.7-flash
 PYTHONPATH=src python -m mitos.demo
 ```
 
+The default is Firestore and Gemini, deliberately. If it cannot reach them it
+prints **THIS IS NOT THE REAL SYSTEM** in red and points back at the deployed
+URL, because a demo that quietly falls back to an in-memory ledger shows a stub
+and nobody watching can tell.
+
+`--ledger memory` exists for CI, where a test suite must not need a cloud
+account. It announces itself on screen.
+
 Python 3.10+; CI runs 3.13.
 
-**Gemini 3.x is served on Vertex's `global` endpoint, not the regional ones.** Every regional
-endpoint returns 404 for a 3.x model id while serving 2.5 happily. That cost an hour to find and
-`test_gemini_live.py` pins it.
+**Gemini 3.x is served on Vertex's `global` endpoint, not the regional ones.**
+Every regional endpoint returns 404 for a 3.x model id while serving 2.5 happily.
+That cost an hour to find and `test_gemini_live.py` pins it.
 
 ## Tests
 
