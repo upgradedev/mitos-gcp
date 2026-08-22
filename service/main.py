@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import httpx  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 
-from fastapi import FastAPI, HTTPException  # noqa: E402
+import threading  # noqa: E402
+
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
     HTMLResponse,
     JSONResponse,
@@ -49,6 +51,7 @@ from mitos.ledger import Entry, build_ledger  # noqa: E402
 from mitos.chore import escalate_on_wake  # noqa: E402
 from mitos.spec_repo import build_spec_repo  # noqa: E402
 from mitos.watcher import build_watcher  # noqa: E402
+from mitos import webhook as wh  # noqa: E402
 
 from .thread_view import render as render_thread  # noqa: E402
 
@@ -107,6 +110,7 @@ _WATCHER = None
 # time. Declaring a client per request is always wrong; it is built once per
 # process and shared.
 _LEDGER = None
+_WEBHOOK_SECRET: Optional[str] = None
 
 
 def ledger():
@@ -310,6 +314,144 @@ class RunRequest(BaseModel):
     pr: int = 4471
     approve: bool = False
     seed: bool = False
+
+
+ALLOWED_REPOS = frozenset(
+    r.strip()
+    for r in os.environ.get("MITOS_WEBHOOK_REPOS", "upgradedev/mitos-spec").split(",")
+    if r.strip()
+)
+
+
+# Not a secret. The deliberate absence of one, which is a distinct state worth
+# naming: while this is the value every delivery is refused with 503. Bandit
+# flags a bare "" here as a hardcoded password, which is a fair rule and a wrong
+# reading, so the intent is in the name rather than in a suppression nobody
+# reads.
+NO_SECRET_CONFIGURED = ""  # nosec B105 - the absence of a secret, not a secret
+
+
+def _webhook_secret() -> str:
+    """Read once, cached on the module, like every other client here."""
+    global _WEBHOOK_SECRET
+    if _WEBHOOK_SECRET is None:
+        try:
+            from google.cloud import secretmanager  # noqa: PLC0415
+
+            client = secretmanager.SecretManagerServiceClient()
+            name = (
+                f"projects/{PROJECT}/secrets/"
+                f"mitos-prod-settings-reader-github-webhook-secret/versions/latest"
+            )
+            _WEBHOOK_SECRET = client.access_secret_version(
+                name=name
+            ).payload.data.decode("utf-8").strip()
+        except Exception:
+            # Empty means every delivery is refused with 503, which is the only
+            # safe behaviour: an endpoint that accepts everything when
+            # misconfigured fails invisibly.
+            _WEBHOOK_SECRET = NO_SECRET_CONFIGURED
+    return _WEBHOOK_SECRET
+
+
+def _fetch_diff(repository: str, number: int) -> list[dict]:
+    """The files in the pull request, from the public GitHub API.
+
+    No credential: the specification repository is public, and a read path that
+    needs a token is a read path that can be used to write.
+    """
+    r = httpx.get(
+        f"https://api.github.com/repos/{repository}/pulls/{number}/files",
+        headers={"Accept": "application/vnd.github+json"},
+        timeout=30.0,
+    )
+    r.raise_for_status()
+    return [
+        {"path": f["filename"], "patch": f.get("patch", "")}
+        for f in r.json()
+        if f.get("patch")
+    ]
+
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request) -> JSONResponse:
+    """The trigger. Nobody opens Mitos; this does.
+
+    Answers immediately and works afterwards. GitHub gives a webhook ten seconds
+    and disables one that keeps timing out, and this chore takes minutes with a
+    model reading the repository, so doing the work inside the request would
+    guarantee the trigger stops firing.
+    """
+    body = await request.body()
+    try:
+        delivery = wh.parse(
+            body,
+            dict(request.headers),
+            secret=_webhook_secret(),
+            allowed_repositories=ALLOWED_REPOS,
+        )
+    except wh.Rejected as rej:
+        # 202 for "understood, not acting" so GitHub does not disable the hook
+        # over deliveries we simply do not care about.
+        return JSONResponse({"accepted": False, "reason": str(rej)}, status_code=rej.status)
+
+    led = ledger()
+    entry = led.append(
+        Entry(
+            kind="trigger.webhook",
+            actor="github",
+            subject=f"{delivery.repository}#{delivery.number}",
+            payload=delivery.as_dict(),
+            run_id=delivery.delivery_id,
+        )
+    )
+
+    def work() -> None:
+        try:
+            files = _fetch_diff(delivery.repository, delivery.number)
+            if not files:
+                led.append(
+                    Entry(
+                        kind="trigger.ignored", actor="github",
+                        subject=entry.subject, parent_id=entry.entry_id,
+                        payload={"reason": "no readable patch in this pull request"},
+                        run_id=delivery.delivery_id,
+                    )
+                )
+                return
+            run_chore(
+                wh.to_pull_request(delivery, files), led,
+                run_id=delivery.delivery_id,
+                approve=lambda card: False,  # a webhook never approves a write
+                analyst=build_agentic_analyst(PROJECT, role=ROLE),
+                critic=build_critic(PROJECT),
+                classifier=build_classifier(PROJECT),
+                doc_agent=build_doc_agent(PROJECT, role=ROLE),
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
+            led.append(
+                Entry(
+                    kind="trigger.failed", actor="github", subject=entry.subject,
+                    parent_id=entry.entry_id, run_id=delivery.delivery_id,
+                    payload={"error": f"{type(exc).__name__}: {str(exc)[:300]}"},
+                )
+            )
+
+    threading.Thread(target=work, daemon=True).start()
+
+    return JSONResponse(
+        {
+            "accepted": True,
+            "delivery": delivery.delivery_id,
+            "pr": delivery.number,
+            "thread": entry.entry_id,
+            "note": (
+                "the fleet is working. A webhook never approves a write: it "
+                "produces a plan and stops at the approval."
+            ),
+        },
+        status_code=202,
+    )
 
 
 @app.post("/run/stream")
