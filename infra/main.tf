@@ -41,6 +41,11 @@ locals {
   # it with and MITOS_ROLE, and the process can change neither.
   roles = ["reader", "evaluator", "writer"]
 
+  # A Cloud Run URL is deterministic: service, project number, region. It is
+  # built rather than referenced because both services come from one for_each,
+  # and one instance referencing another inside the same resource is a cycle.
+  writer_url = "https://mitos-writer-${var.project_number}.${var.region}.run.app"
+
   common_env = {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     MITOS_LEDGER              = "firestore"
@@ -302,6 +307,29 @@ resource "google_cloud_run_v2_service" "fleet" {
       env {
         name  = "MITOS_ROLE"
         value = each.value
+      }
+
+      # The reader orchestrates and cannot write, so it has to know who to ask.
+      # Without this it silently produces a plan and publishes nothing, which
+      # looks like success. Found by comparing a running service against what
+      # this file would recreate, before a teardown rather than after.
+      dynamic "env" {
+        for_each = each.value == "reader" ? [1] : []
+        content {
+          name  = "MITOS_WRITER_URL"
+          value = local.writer_url
+        }
+      }
+
+      # Which repositories may wake the fleet. A valid signature proves who sent
+      # a delivery, not that we asked for it, so the allowlist is explicit here
+      # rather than left to a default in the code.
+      dynamic "env" {
+        for_each = each.value == "reader" ? [1] : []
+        content {
+          name  = "MITOS_WEBHOOK_REPOS"
+          value = join(",", var.webhook_repositories)
+        }
       }
 
       # Only the writer is told where the specification repository is. The
