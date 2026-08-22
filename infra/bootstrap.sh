@@ -28,6 +28,14 @@ gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1 || {
   gcloud storage buckets update "gs://${BUCKET}" --versioning
 }
 
+# The Terraform identity needs to READ the image, not just deploy it. Cloud Run
+# validates the image reference against the caller, so an identity that can
+# create services but cannot read the repository fails with a 403 naming the
+# repository rather than itself. That is a confusing hour, and it is separate
+# from the runtime service accounts, which need the same permission for the
+# different reason that they are the ones actually running it.
+gcloud projects add-iam-policy-binding "$PROJECT"   --member="serviceAccount:mitos-tf@${PROJECT}.iam.gserviceaccount.com"   --role=roles/artifactregistry.reader --condition=None -q >/dev/null 2>&1 || true
+
 cat <<MSG
 
 Bootstrap complete.
