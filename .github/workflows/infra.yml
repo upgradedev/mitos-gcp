@@ -75,6 +75,8 @@ jobs:
             || { echo "::error::the reader may be CPU-throttled, which suspends the query subscription"; exit 1; }
           grep -q 'min_instance_count = each.value == "reader" ? 1 : 0' main.tf \
             || { echo "::error::the reader may scale to zero, so the subscription would not exist"; exit 1; }
+          grep -q 'MITOS_WRITER_URL' main.tf \
+            || { echo "::error::the reader would not know who to ask for a write, so it would publish nothing and still look fine"; exit 1; }
           grep -q 'attribute_condition' main.tf \
             || { echo "::error::the CI identity is assumable by any repository on GitHub"; exit 1; }
           echo "the four load-bearing settings are present"
