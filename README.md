@@ -30,6 +30,22 @@ someone external asks.
 
 Mitos does that chase unattended and returns **one diff to approve**.
 
+## Why this is worse than it was
+
+The number of changes is rising sharply, because models write them now. The work
+that hangs off a change did not scale with it. Somebody who chased four
+specification updates and four retention entries a week does not chase forty.
+They stop, and nobody decides to stop, so nobody notices.
+
+Mitos governs a change whoever or whatever wrote it. It does not detect that a
+change came from a model and it does not supervise anybody's agents. What it
+does is keep the paperwork attached to the code at the speed the code now moves.
+
+The same discipline is turned on Mitos itself, which is the part worth checking
+rather than believing: its guard refuses its own agent at the tool call, its
+model may add findings and never remove one, and its single write needs a human
+and is bound to exact bytes.
+
 ## The one thing it does
 
 A pull request lands carrying a schema change on a field that holds personal data. Nobody opens
@@ -293,6 +309,34 @@ and nobody watching can tell.
 account. It announces itself on screen.
 
 Python 3.10+; CI runs 3.13.
+
+### Point it at your own repository
+
+The specialists read the repository the change came from, not a fixture. Add the
+repository to the allowlist, put a webhook on it, and they read your code:
+
+```bash
+export MITOS_WEBHOOK_REPOS=your-org/your-repo
+export MITOS_READ_SCOPE=docs/,src/,registers/     # your layout, not ours
+```
+
+**Verified against a real, unrelated repository.** Pointed at
+[upgradedev/archon-gcp-agentic](https://github.com/upgradedev/archon-gcp-agentic),
+which shares no code and no conventions with this one, the documentation
+companion listed 28 files, chose to `search(AnalysisRecord)`, opened
+`src/archon/domain/models.py`, and reported:
+
+> The target class `AnalysisRecord` does not exist in `src/archon/domain/models.py`.
+
+That is a true statement about somebody else's code, arrived at by an agent that
+decided where to look. It is not reachable from a fixture.
+
+**Two honest limits.** Reads use the public GitHub API with no credential,
+deliberately, because a read path that needs a token is a read path that can be
+used to write. So **private repositories are not supported yet**. And there is
+**no Azure DevOps adapter**; the corpus is a protocol with two implementations,
+so it is an adapter's worth of work rather than a redesign, but it is not
+written.
 
 **Gemini 3.x is served on Vertex's `global` endpoint, not the regional ones.**
 Every regional endpoint returns 404 for a 3.x model id while serving 2.5 happily.
