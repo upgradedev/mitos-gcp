@@ -58,6 +58,8 @@ from mitos.tools import MAX_BYTES_PER_READ, MAX_READS_PER_RUN  # noqa: E402
 from mitos.standards import AUDIT_SCOPE, check_repository  # noqa: E402
 from mitos.tools import build_corpus  # noqa: E402
 
+from .metrics import summarise  # noqa: E402
+
 from .dashboard import (  # noqa: E402
     render_fleet,
     render_overview,
@@ -759,4 +761,5 @@ def index(limit: int = 300) -> str:
         entries,
         total=total,
         config=config(),
+        metrics=summarise(entries),
     )
