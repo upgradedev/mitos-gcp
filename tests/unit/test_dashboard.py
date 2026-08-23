@@ -512,3 +512,83 @@ def test_no_page_contains_an_em_dash():
         # tree stays empty, which is how the rule is actually checked.
         assert "\u2014" not in page
         assert "\u2013" not in page
+
+
+# --------------------------------------------------------------------------
+# Regressions from an adversarial review. Both are the page asserting something
+# the thread does not say.
+# --------------------------------------------------------------------------
+
+
+def test_a_guard_probe_that_could_not_run_is_not_a_zero():
+    """`attempt_write` omits `tool_executed` when the ADK run raises.
+
+    `chore.py` records that payload anyway and branches three ways on it:
+    refused, could not run, reachable. Reading the missing key as False
+    collapsed the middle into the first and printed "the tool ran 0 times",
+    which asserts something about a tool the probe never reached.
+    """
+    entries = [
+        entry(
+            "guard.exercised",
+            "documentation-companion",
+            "r1",
+            "2026-08-22T18:00:05+00:00",
+            attempted=False,
+            denied=False,
+            error="TimeoutError: deadline exceeded",
+        )
+    ]
+
+    for page in (
+        render_fleet(a_catalog(), entries, "reader", now=NOW),
+        render_runs(entries, "reader", now=NOW),
+    ):
+        assert "the tool ran 0 times" not in page
+        assert "could not run" in page
+
+
+def test_a_needs_changes_response_does_not_park_a_run():
+    """`envelope.is_terminal` is blocked or error. `needs_changes` proceeds.
+
+    The page called any status other than ok a park, so a run that carried a
+    needs_changes response, passed the gate, proposed a plan and published was
+    reported as parked with nothing in the thread saying so.
+    """
+    at = "2026-08-22T18:00:0"
+    entries = [
+        entry("trigger.pull_request", "webhook", "r9", at + "1", pr=1, title="t"),
+        entry(
+            "specialist.response",
+            "documentation-companion",
+            "r9",
+            at + "2",
+            status="needs_changes",
+        ),
+        entry("evaluator.verdict", "evaluator", "r9", at + "3", passed=True),
+        entry("plan.proposed", "architect-leader", "r9", at + "4"),
+        entry("write.executed", "writer", "r9", at + "5"),
+    ]
+
+    page = render_runs(entries, "reader", now=NOW)
+
+    assert rows(page)["parked"] == "0 parked in this window"
+    assert "stopped at" not in page or "parked by" not in page.lower()
+
+
+def test_a_blocked_response_still_parks_a_run():
+    """The other direction, so the fix above is not just a deletion."""
+    at = "2026-08-22T18:00:0"
+    entries = [
+        entry("trigger.pull_request", "webhook", "r8", at + "1", pr=2, title="t"),
+        entry(
+            "specialist.response",
+            "compliance-companion",
+            "r8",
+            at + "2",
+            status="blocked",
+            reason="Article 9 data is not mine to decide",
+        ),
+    ]
+
+    assert "compliance-companion" in render_runs(entries, "reader", now=NOW)
