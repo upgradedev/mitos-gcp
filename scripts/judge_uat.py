@@ -41,15 +41,19 @@ class Result:
         return [c for c in self.checks if not c[0]]
 
 
-def get(url: str, method: str = "GET", body: dict | None = None):
-    """Fetch with no credentials, which is the whole point."""
+def get(url: str, method: str = "GET", body: dict | None = None, token: str | None = None):
+    """Fetch, with no credentials unless one is passed.
+
+    Anonymous is the default and the point: most of this suite is what a judge
+    with no Google account can see. `token` exists for the handful of checks
+    that are about what an authenticated caller gets, which cannot be observed
+    any other way now that two of the three services refuse strangers.
+    """
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json"} if data else {},
-    )
+    headers = {"Content-Type": "application/json"} if data else {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # nosec B310
             return resp.status, resp.read().decode("utf-8", "replace")
@@ -66,36 +70,108 @@ def as_json(raw: str):
         return None
 
 
+def _id_token(audience: str):
+    """An OIDC token for a Cloud Run audience, or None if none can be minted.
+
+    Returns None rather than raising, so this suite still runs for a judge with
+    no Google account. What it must never do is pretend the checks that need a
+    credential passed.
+    """
+    try:
+        import google.auth.transport.requests  # noqa: PLC0415
+        import google.oauth2.id_token  # noqa: PLC0415
+
+        return google.oauth2.id_token.fetch_id_token(
+            google.auth.transport.requests.Request(), audience
+        )
+    except Exception:
+        return None
+
+
 def run(reader: str, evaluator: str, writer: str) -> int:
     r = Result()
     print("\n== The three identities, as a stranger sees them")
 
     seen: dict[str, dict] = {}
-    for name, base in (("reader", reader), ("evaluator", evaluator), ("writer", writer)):
-        status, raw = get(f"{base}/identity")
-        doc = as_json(raw) or {}
-        seen[name] = doc
-        r.record(status == 200, f"{name} /identity answers", f"HTTP {status}")
+
+    # The reader is the public surface, on purpose.
+    status, raw = get(f"{reader}/identity")
+    seen["reader"] = as_json(raw) or {}
+    r.record(status == 200, "reader /identity answers with no account", f"HTTP {status}")
+    r.record(
+        seen["reader"].get("running_as", "").startswith("mitos-reader@"),
+        "reader runs as its own service account",
+        seen["reader"].get("running_as", raw[:120]),
+    )
+
+    # The other two are not, and this is the check that was missing. Both were
+    # bound to allUsers, and `POST /execute` on the writer publishes a path, a
+    # body and a branch taken from the request, so anonymous invoke on that
+    # service was an unauthenticated arbitrary write to the specification
+    # repository. Nothing in this suite would have noticed.
+    print("\n== The two services a stranger must not reach")
+    for name, base in (("evaluator", evaluator), ("writer", writer)):
+        status, _ = get(f"{base}/identity")
         r.record(
-            doc.get("running_as", "").startswith(f"mitos-{name}@"),
-            f"{name} runs as its own service account",
-            doc.get("running_as", raw[:120]),
+            status in (401, 403),
+            f"{name} refuses an anonymous caller",
+            f"HTTP {status}",
+        )
+    status, _ = get(f"{writer}/execute", method="POST", body={
+        "path": "docs/probe.md", "body": "probe", "message": "probe", "branch": "main",
+    })
+    r.record(
+        status in (401, 403),
+        "an anonymous write to the writer is refused before it is parsed",
+        f"HTTP {status}",
+    )
+
+    # The privilege boundary itself can only be read with a credential, which is
+    # the point. Announced rather than skipped: a suite that quietly drops half
+    # its checks when it cannot authenticate reports green over an untested
+    # boundary, and this repository has been bitten by a silently skipping suite
+    # before.
+    token = _id_token(writer)
+    if token is None:
+        print(
+            "\n== The writer's own view of the boundary: NOT CHECKED.\n"
+            "   No credential available here. Run with application default\n"
+            "   credentials, or read it from the authenticated CI job."
+        )
+    else:
+        status, raw = get(f"{writer}/identity", token=token)
+        seen["writer"] = as_json(raw) or {}
+        r.record(status == 200, "writer answers an authenticated caller", f"HTTP {status}")
+        r.record(
+            seen["writer"].get("running_as", "").startswith("mitos-writer@"),
+            "writer runs as its own service account",
+            seen["writer"].get("running_as", raw[:120]),
         )
 
     # The central claim. Not a config flag: the service attempts the access.
-    for name in ("reader", "evaluator"):
+    for name in [n for n in ("reader", "evaluator") if n in seen]:
         cred = seen[name].get("spec_repo_write_credential", {})
         r.record(
             cred.get("reachable") is False,
             f"{name} cannot reach the write credential",
             f"{cred.get('detail')}",
         )
-    wcred = seen["writer"].get("spec_repo_write_credential", {})
-    r.record(
-        wcred.get("reachable") is True,
-        "writer can reach it, so the boundary is a boundary and not an outage",
-        str(wcred.get("detail")),
-    )
+    # Only asserted when the writer was actually read. Written as
+    # `"writer" not in seen or ...` for one commit, which made it pass without
+    # looking at anything: a check that cannot fail, reported as a pass, in the
+    # suite whose job is to prove the boundary.
+    if "writer" in seen:
+        wcred = seen["writer"].get("spec_repo_write_credential", {})
+        r.record(
+            wcred.get("reachable") is True,
+            "writer can reach it, so the boundary is a boundary and not an outage",
+            str(wcred.get("detail")),
+        )
+    else:
+        print(
+            "  NOT CHECKED  writer can reach the credential\n"
+            "               needs a credential; the writer no longer answers strangers"
+        )
 
     # The mandatory model requirement, reported by the running service.
     model = seen["reader"].get("model", "")

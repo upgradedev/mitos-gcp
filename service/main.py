@@ -270,8 +270,12 @@ class _RemoteWriter:
     """Delegates the write to the writer service over an authenticated call.
 
     This is the privilege boundary made concrete: the reader cannot perform the
-    write, so it asks the one identity that can, and the writer re-checks the
-    plan hash itself rather than trusting the caller.
+    write, so it asks the one identity that can.
+
+    It does NOT yet re-check the plan hash. That was claimed here and in the
+    README and was not true: `/execute` publishes the path, body and branch
+    it is given. Cloud Run IAM is the whole control today, and until an
+    approval artifact is verified inside the writer, this docstring says so.
     """
 
     url: str

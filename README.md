@@ -176,7 +176,8 @@ curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute \
 ```
 
 The reader orchestrates the whole chore and then has to **ask** the writer service, over an
-authenticated call, and the writer re-checks the plan hash itself rather than trusting the caller.
+authenticated call. **The writer does not yet re-check the plan hash**: this said it did, and it
+did not. `POST /execute` publishes what it is handed, so the control is Cloud Run IAM alone.
 
 `/identity` does not read a config flag. It **attempts** the access and reports what came back.
 
