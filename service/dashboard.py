@@ -217,10 +217,17 @@ _NAV = (
     ("/fleet", "fleet"),
     ("/runs", "runs"),
     ("/standards", "standards"),
+    ("/connect", "connect"),
     ("/thread/view", "thread"),
 )
 
 _CSS = """
+.ask{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.3rem 0 .6rem}
+.ask label{flex:1 0 100%;color:var(--dim);font-size:.8rem}
+.ask input{flex:1 1 18rem;min-width:0;padding:.55rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+.ask button{padding:.55rem 1rem;border:1px solid var(--accent);border-radius:6px;background:transparent;color:var(--accent);font:inherit;cursor:pointer}
+.ask button:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.step{margin:.2rem 0 .6rem;max-width:70ch;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 :root{--bg:#0f0f12;--fg:#e8e6ea;--dim:#8a8790;--line:#2a2a31;--card:#17171c;
  --good:#5fd75f;--bad:#ff6b6b;--warn:#ffd75f}
 /* The index page hardcoded #b3261e and #146c2e, which read well on white and
@@ -1192,6 +1199,7 @@ def render_standards(
     *,
     repository: Optional[str] = None,
     note: str = "",
+    form: str = "",
 ) -> str:
     """Page 4. `findings` and `summary` are what GET /standards.json returns.
 
@@ -1208,7 +1216,7 @@ def render_standards(
         )
     )
 
-    body = _audit_summary_panel(summary or {}, repository)
+    body = form + _audit_summary_panel(summary or {}, repository)
     if note:
         body += _panel("about this run", _row("note", _unknown(note)))
     body += _panel(
@@ -1222,5 +1230,109 @@ def render_standards(
         sub_html=_esc(repository) if repository else "the demo corpus",
         role=role,
         active="/standards",
+        body_html=body,
+    )
+
+
+# --------------------------------------------------------------------------
+# Page 5. Pointing it at your own repository
+# --------------------------------------------------------------------------
+
+# The one thing a visitor can do without asking anybody. A GET form, so the
+# result is a URL somebody can paste to a colleague, and no JavaScript is
+# needed to submit it.
+def audit_form(repository: Optional[str] = None, error: str = "") -> str:
+    problem = (
+        f'<div class="r"><div class="l">that did not work</div>'
+        f'<div class="v">{_tone(error, "bad")}</div></div>'
+        if error
+        else ""
+    )
+    return _panel(
+        "point it at a repository",
+        '<form method=get action="/standards" class="ask">'
+        '<label for=repository>a public GitHub repository</label>'
+        '<input id=repository name=repository inputmode=url spellcheck=false '
+        'placeholder="owner/name" value="' + _esc(repository or "") + '">'
+        "<button type=submit>audit it</button>"
+        "</form>" + problem,
+        note=(
+            "Read over the public GitHub API with no credential, which allows 60 "
+            "requests an hour shared by everyone using this page. A repository "
+            "large enough to exhaust it has its remaining rules reported as could "
+            "not be determined rather than passed. Public repositories only: a "
+            "read path holding a token is a read path that could write."
+        ),
+    )
+
+
+_CONNECT_STEPS = (
+    (
+        "1. Audit it, now",
+        "/standards",
+        "Type a public repository into the form and get a real answer in about a "
+        "second. Thirteen rules are decided from the contents, five are handed to "
+        "an agent that opens files and decides, and six cannot be answered from a "
+        "repository at all and say so. Nothing to install, no account.",
+    ),
+    (
+        "2. Wake it on a pull request",
+        "",
+        "Add a webhook to your repository pointing at POST /webhook/github, "
+        "content type application/json, event: pull requests. The signature is "
+        "verified with HMAC-SHA256 over the raw body before anything is parsed. "
+        "The repository also has to be on the allowlist, which is deployment "
+        "configuration rather than something this page can grant, so this step "
+        "needs somebody with access to the service. That is a real limit and not "
+        "a coming-soon.",
+    ),
+    (
+        "3. Read what it did",
+        "/runs",
+        "Every run appears with where it stopped. Open the thread and click any "
+        "outcome to light up the path back to the pull request that caused it. "
+        "Nothing is written to your repository: the one write this fleet can "
+        "make goes to a separate specification repository and needs a person to "
+        "approve the exact bytes.",
+    ),
+)
+
+
+def render_connect(role: str, *, base: str = "") -> str:
+    """Page 5. What somebody does with this, in three steps.
+
+    Written for a reader who has decided the idea is interesting and wants to
+    know what using it involves. The second step names a limit rather than
+    hiding it: self-service connection does not exist, because the allowlist is
+    deployment configuration and pretending otherwise would waste the reader's
+    afternoon.
+    """
+    body = ""
+    for title, href, text in _CONNECT_STEPS:
+        link = (
+            f'<div class="r"><div class="l">where</div><div class="v">'
+            f'<a href="{_esc(href)}">{_esc(href)}</a></div></div>'
+            if href
+            else ""
+        )
+        body += _panel(title, f'<p class="step">{_esc(text)}</p>{link}')
+
+    endpoint = f"{base}/webhook/github" if base else "/webhook/github"
+    body += _panel(
+        "what you would be pointing at",
+        _row("endpoint", f"<code>{_esc(endpoint)}</code>")
+        + _row("signature", "HMAC-SHA256 over the raw body, checked before parsing")
+        + _row("events", "pull_request, opened and synchronize")
+        + _row(
+            "what it may do to your repository",
+            _tone("nothing. It reads.", "good"),
+        ),
+    )
+    return _shell(
+        title="Mitos · connect",
+        heading="Mitos · connect a repository",
+        sub_html="three steps, and the second one has a limit",
+        role=role,
+        active="/connect",
         body_html=body,
     )

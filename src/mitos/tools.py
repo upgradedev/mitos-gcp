@@ -27,6 +27,7 @@ runs. An agent that decides to read the whole repository does not get to.
 from __future__ import annotations
 
 import fnmatch
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
@@ -299,6 +300,45 @@ class GitHubCorpus:
     TREE = "https://api.github.com/repos/{repo}/git/trees/{ref}?recursive=1"
     RAW = "https://raw.githubusercontent.com/{repo}/{ref}/{path}"
 
+    # GitHub's own rules, and narrower than the URL would tolerate. An owner is
+    # alphanumeric with single hyphens, a repository name adds dot and
+    # underscore. A ref is a branch, tag or sha.
+    OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+    NAME = re.compile(r"[A-Za-z0-9_.-]{1,100}")
+    REF = re.compile(r"[A-Za-z0-9_./-]{1,255}")
+
+    @classmethod
+    def check(cls, repository: str, ref: str = "HEAD") -> tuple[str, str]:
+        """Validate before either value reaches a URL, or raise.
+
+        Both are interpolated into an api.github.com path, and both were taken
+        on trust. `repository="../../user"` normalises to
+        `https://api.github.com/user/git/trees/HEAD`, which leaves the intended
+        prefix entirely; `#` truncates the path and `?` appends parameters. No
+        credential is sent today, so the blast radius is a wrong public read,
+        but `repository` arrives from a query string on a public page and the
+        README already contemplates a token for private repositories. A token
+        would turn this into a credentialed request to an endpoint the caller
+        chose.
+
+        Rejecting at construction rather than at the web layer, so every caller
+        is covered and not only the one that prompted this.
+        """
+        repo = str(repository or "").strip()
+        owner, slash, name = repo.partition("/")
+        if not slash or not cls.OWNER.fullmatch(owner) or not cls.NAME.fullmatch(name):
+            raise ValueError(
+                f"{repository!r} is not a repository. Expected owner/name, "
+                f"letters, digits, hyphen, underscore and dot only"
+            )
+        # `..` is legal in a repository name and never legal as a whole segment.
+        if name in (".", ".."):
+            raise ValueError(f"{repository!r} is not a repository")
+        clean_ref = str(ref or "HEAD").strip()
+        if not cls.REF.fullmatch(clean_ref) or ".." in clean_ref:
+            raise ValueError(f"{ref!r} is not a branch, tag or commit")
+        return repo, clean_ref
+
     def __init__(
         self,
         repository: str,
@@ -306,8 +346,7 @@ class GitHubCorpus:
         scope: Optional[tuple[str, ...]] = None,
         timeout: float = 20.0,
     ) -> None:
-        self.repository = repository
-        self.ref = ref
+        self.repository, self.ref = self.check(repository, ref)
         self.scope = tuple(scope) if scope else DEFAULT_PREFIXES
         self.timeout = timeout
         self._paths: Optional[list[str]] = None
