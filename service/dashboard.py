@@ -268,6 +268,35 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;
 """
 
 
+def _guard_attempts(
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Guard probes that produced a result, and guard probes that did not.
+
+    `GuardedDocAgent.attempt_write` returns a payload with no `tool_executed`
+    key when the run itself raised, and `chore.py` records that dict anyway. It
+    draws a three way distinction on purpose: refused, could not run, reachable.
+
+    Reading the missing key as `False` collapsed the middle case into the first
+    and printed "the tool ran 0 times", which asserts something about the tool
+    from a probe that never reached it. That is the zero-versus-unknown collapse
+    this module exists to avoid, in the module itself.
+    """
+    probes = [e for e in entries if e.get("kind") == "guard.exercised"]
+    settled, unknown = [], []
+    for entry in probes:
+        (settled if "tool_executed" in _payload(entry) else unknown).append(entry)
+    return settled, unknown
+
+
+def _guard_unknown(count: int) -> str:
+    noun = "probe" if count == 1 else "probes"
+    return (
+        f"{count} guard {noun} could not run, so whether the tool was reachable "
+        f"is not known from here"
+    )
+
+
 def _shell(
     *,
     title: str,
@@ -666,7 +695,7 @@ def _companion_card(
                 else _zero("no specialist response in this window"),
             )
         )
-        attempts = [e for e in mine if e.get("kind") == "guard.exercised"]
+        attempts, unknown = _guard_attempts(mine)
         denied = sum(1 for e in attempts if _payload(e).get("denied"))
         executed = sum(1 for e in attempts if _payload(e).get("tool_executed"))
         if attempts:
@@ -678,10 +707,14 @@ def _companion_card(
                     "good" if executed == 0 and denied == len(attempts) else "bad",
                 ),
             )
-        elif companion.get("writes"):
+        elif not unknown and companion.get("writes"):
+            # Only claim zero when there were no probes at all. With a probe
+            # that could not run, zero is not what happened.
             observed += _row(
                 "write attempts", _zero("0 attempts in this window")
             )
+        if unknown:
+            observed += _row("guard probes", _unknown(_guard_unknown(len(unknown))))
 
     return (
         f'<section class="item{" first" if first else ""}">'
@@ -780,25 +813,36 @@ def _group_by_run(
     return order, groups
 
 
+# The statuses that stop an item, taken from `envelope.Status.is_terminal`
+# rather than restated. `needs_changes` is documented there as "it can proceed",
+# and `chore.py` appends `item.parked` only when `parks_the_item` is true. This
+# used to treat any status other than ok as a park, so a run that carried a
+# needs_changes response, passed the gate, proposed a plan and published was
+# reported as parked. The thread said one thing and the page said another.
+_PARKING_STATUSES = ("blocked", "error")
+
+
 def _is_parked(group: list[dict[str, Any]]) -> Optional[str]:
-    """Who parked this run, or None. A refusal is the outcome that matters most
-    and it arrives two ways: an explicit `item.parked`, or a specialist response
-    whose status is not ok."""
+    """Who parked this run, or None.
+
+    An explicit `item.parked` settles it. Failing that, a specialist response
+    carrying a terminal status is the same event seen one entry earlier, which
+    matters for a thread truncated by the window.
+    """
     for entry in group:
         if entry.get("kind") == "item.parked":
             return str(entry.get("actor") or "a companion")
     for entry in group:
         if entry.get("kind") != "specialist.response":
             continue
-        status = _payload(entry).get("status")
-        if status and status != "ok":
+        if str(_payload(entry).get("status") or "") in _PARKING_STATUSES:
             return str(entry.get("actor") or "a companion")
     return None
 
 
 def _totals_panel(entries: list[dict[str, Any]], parked_runs: int) -> str:
     counts = Counter(str(e.get("kind") or "") for e in entries)
-    attempts = [e for e in entries if e.get("kind") == "guard.exercised"]
+    attempts, unknown = _guard_attempts(entries)
     denied = sum(1 for e in attempts if _payload(e).get("denied"))
     executed = sum(1 for e in attempts if _payload(e).get("tool_executed"))
     verdicts = [e for e in entries if e.get("kind") == "evaluator.verdict"]
@@ -812,11 +856,18 @@ def _totals_panel(entries: list[dict[str, Any]], parked_runs: int) -> str:
             "guard denials",
             _tone(
                 f"{denied} of {len(attempts)} attempts, the tool ran {executed} times",
-                "bad" if executed
-                else ("good" if denied == len(attempts) else "z"),
+                # A write attempt that happened and was not refused is never
+                # the "has not happened" tone. That style is documented as
+                # meaning it can happen here and has not.
+                "bad" if executed else ("good" if denied == len(attempts) else "warn"),
             )
             if attempts
             else _zero("0 write attempts in this window"),
+        )
+        + (
+            _row("guard probes", _unknown(_guard_unknown(len(unknown))))
+            if unknown
+            else ""
         )
         + _row(
             "evaluator verdicts",
