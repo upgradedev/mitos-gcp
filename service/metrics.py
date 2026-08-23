@@ -122,7 +122,7 @@ PRIMARY = ("median_to_card", "runs_triggered", "unattended_to_card", "writes")
 SHORT = {
     "runs_triggered": "pull requests the fleet was woken for",
     "cards": "one per run, addressed by the hash of the bytes it proposes",
-    "median_to_card": "from the pull request landing to a reviewed card, unattended",
+    "median_to_card": "from the pull request landing to an approval card",
     "unattended_to_card": "no human touched these before the card existed",
     "parked": "a specialist refused and handed the item to a person",
     # `writes` is deliberately absent. Its short caption depends on the value:
@@ -142,17 +142,38 @@ def _short_for(key: str, value: str) -> str:
     printing the first over a write that happened is a false statement on the
     most load-bearing tile on the page.
     """
-    if key != "writes":
+    text = value.strip()
+    # A value that is not a number at all is already a refusal to answer, and
+    # the tile's own method sentence says why. A cheerful static line over it
+    # would be the page talking past its own data.
+    nothing = text.startswith("0") or not text[:1].isdigit()
+    if key == "writes":
+        # Handled by `_writes_tile`, which knows the card count. Reaching
+        # here at all means a caller skipped it, so say the safe thing.
+        return "" if nothing else "approved by a person, bound to the exact bytes"
+    if not nothing:
         return ""
-    return (
-        "the approval gate holding, not an outage"
-        if value.strip().startswith("0")
-        else "approved by a person, bound to the exact bytes on the card"
-    )
+    # Every one of these read as a description of something that happened, over
+    # a number saying it did not.
+    return {
+        "parked": "nothing was refused in this window",
+        "refusals": "no write was attempted here, so nothing was refused",
+        "unattended_to_card": "no run here reached the point of having a card",
+        "unattended_wakes": "no deferral expired in this window",
+        "runs_triggered": "no pull request reached the fleet in this window",
+        "cards": "no run here produced one",
+        "deferrals_unescalated": "no deferral is recorded in this window",
+    }.get(key, "")
 
 
 def _tile(
-    key: str, label: str, value: str, unit: str, caption: str, tone: str
+    key: str,
+    label: str,
+    value: str,
+    unit: str,
+    caption: str,
+    tone: str,
+    short: str = "",
 ) -> dict[str, Any]:
     """One headline figure.
 
@@ -165,7 +186,11 @@ def _tile(
     Nothing is dropped. The full sentence is still rendered, still on the same
     page, and still says exactly how the figure was counted.
     """
-    short = SHORT.get(key) or _short_for(key, value) or caption
+    # A builder that knows something the key and the value do not can say
+    # so. Zero writes is the gate holding when there were cards to approve
+    # and nothing at all when there were none, and only the builder has the
+    # card count to tell those apart.
+    short = short or _short_for(key, value) or SHORT.get(key) or caption
     # The long form is always kept, even when it repeats the short one, because
     # the page renders it as the record of how the figure was counted.
     method = caption
@@ -526,18 +551,22 @@ def _parked_tile(parked: int) -> dict[str, Any]:
 
 
 def _writes_tile(executed: int, published: int, cards: int) -> dict[str, Any]:
+    short = ""
     if executed == 0 and cards:
         caption = (
             f"0 against {cards} approval cards. That is the approval gate "
             f"holding rather than an outage: every run in this window stopped at "
             f"the card, and nothing was approved through the API."
         )
+        short = "the approval gate holding, not an outage"
         tone = "good"
     elif executed == 0:
         caption = (
             "0 in this window, and no approval card was produced here for "
             "anyone to approve."
         )
+        # Not "the gate holding". Nothing was proposed, so nothing held.
+        short = "nothing was proposed here for anyone to approve"
         tone = "plain"
     else:
         caption = (
@@ -545,8 +574,11 @@ def _writes_tile(executed: int, published: int, cards: int) -> dict[str, Any]:
             f"check and the credential, of which {published} landed bytes in the "
             f"specification repository. The two are not the same claim."
         )
+        short = "approved by a person, bound to the exact bytes on the card"
         tone = "plain"
-    return _tile("writes", "writes executed", str(executed), "", caption, tone)
+    return _tile(
+        "writes", "writes executed", str(executed), "", caption, tone, short=short
+    )
 
 
 def _refusals_tile(

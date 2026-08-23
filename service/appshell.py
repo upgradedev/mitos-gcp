@@ -589,6 +589,11 @@ def explainer(
 # the existing page has a single text size, which is why it reads as a log file
 # even where the content is not one.
 APP_CSS = """
+.explain,.explain-lead,.tile-label,.tile-caption,.fn-note,.spark-caption,.method-k,.method-v,.counted summary{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:0}
+.explain-lead{max-width:66ch}
+@media(min-width:58rem){.explain{display:grid;grid-template-columns:minmax(0,32rem) 1fr;gap:1.6rem;align-items:start}.explain-points{display:grid;gap:.9rem}}
+.funnel-strip{mask-image:linear-gradient(90deg,#000 calc(100% - 2.2rem),transparent);-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 2.2rem),transparent);scrollbar-width:thin}
+@media(min-width:46rem){.funnel-strip{mask-image:none;-webkit-mask-image:none}}
 :root{--accent:#7aa2f7;--accent-soft:#7aa2f722;
  --t-kpi:clamp(1.9rem,6.4vw,2.7rem);--t-num:clamp(1.3rem,4vw,1.7rem);
  --t-mid:1.15rem;--t-lead:.98rem;--t-cap:.76rem;--t-micro:.68rem}

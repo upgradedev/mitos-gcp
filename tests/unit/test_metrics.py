@@ -629,3 +629,68 @@ def test_the_writes_caption_follows_the_number_above_it():
         "a write happened and the page still called it the gate holding"
     )
     assert "approved by a person" in some["caption"]
+
+
+def test_no_caption_describes_something_that_did_not_happen():
+    """On an empty window every static caption was a false statement.
+
+    "a specialist refused", "an agent asked for the write tool", "the approval
+    gate holding": each written for a number greater than zero and each printed
+    over a zero, because the static table was consulted before the branch that
+    exists to handle exactly this. The tile said one thing and its own method
+    line, on the same card, said the opposite.
+    """
+    summary = summarise([])
+
+    forbidden = (
+        "a specialist refused",
+        "an agent asked for the write tool",
+        "no human touched these",
+        "a deferral expired and",
+        "gate holding",
+    )
+    for item in summary["headline"]:
+        for phrase in forbidden:
+            assert phrase not in item["caption"], (
+                f"{item['key']} shows {item['value']!r} and claims {phrase!r}"
+            )
+        assert item["caption"], item["key"]
+
+
+def test_zero_writes_only_means_the_gate_held_when_there_was_something_to_hold():
+    """Three states, three sentences, and the middle one is the product working.
+
+    Zero writes against three cards is the approval gate holding. Zero writes
+    against no cards is nothing having been proposed, and calling that the gate
+    holding credits the system for an outcome it never faced.
+    """
+
+    def thread(cards: int, writes: int) -> list:
+        out = [
+            {
+                "entry_id": "t", "kind": "trigger.pull_request", "actor": "webhook",
+                "run_id": "r1", "recorded_at": "2026-08-23T10:00:00+00:00",
+                "payload": {}, "parent_id": None,
+            }
+        ]
+        for i in range(cards):
+            out.append({
+                "entry_id": f"c{i}", "kind": "plan.proposed", "actor": "architect-leader",
+                "run_id": "r1", "recorded_at": "2026-08-23T10:01:00+00:00",
+                "payload": {}, "parent_id": "t",
+            })
+        for i in range(writes):
+            out.append({
+                "entry_id": f"w{i}", "kind": "write.executed", "actor": "writer",
+                "run_id": "r1", "recorded_at": "2026-08-23T10:02:00+00:00",
+                "payload": {"published": True}, "parent_id": "t",
+            })
+        return out
+
+    nothing_proposed = tile(summarise(thread(0, 0)), "writes")["caption"]
+    gate_held = tile(summarise(thread(3, 0)), "writes")["caption"]
+    approved = tile(summarise(thread(3, 1)), "writes")["caption"]
+
+    assert "gate holding" not in nothing_proposed
+    assert "gate holding" in gate_held
+    assert "approved by a person" in approved
