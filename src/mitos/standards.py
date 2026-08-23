@@ -90,13 +90,20 @@ class YamlSubsetError(Exception):
 # --------------------------------------------------------------------------
 
 _UNMODELLED = re.compile(r"(?m)(^\s*<<\s*:|(?::|^\s*-)[ \t]+[&*][A-Za-z_])")
+# The same two tokens, inside a flow collection. The pattern above anchors on a
+# colon or a leading dash, so `needs: *scan` was refused and `needs: [*scan]`
+# was not: the alias survived as the literal string "*scan", the dependency
+# graph came out wrong, and the critical secret-scan rule reported that jobs
+# which do depend on the scan do not. A misparse that produces a confident
+# false finding is worse than refusing the file.
+_UNMODELLED_IN_FLOW = re.compile(r"[\[{,][ \t]*[&*][A-Za-z_]")
 _DOC_MARKER = re.compile(r"(?m)^---\s*$")
 _BLOCK_SCALAR = ("|", "|-", "|+", ">", ">-", ">+")
 
 
 def _prepare(text: str) -> list[str]:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    if _UNMODELLED.search(text):
+    if _UNMODELLED.search(text) or _UNMODELLED_IN_FLOW.search(text):
         raise YamlSubsetError("anchors, aliases and merge keys are not modelled")
     markers = [i for i, ln in enumerate(lines) if _DOC_MARKER.fullmatch(ln)]
     if markers:
@@ -784,10 +791,32 @@ def _stage_name(entry: Any) -> str:
     return str(entry)
 
 
+# A scan is a scan whatever it is called. Requiring the literal name
+# `SecretScan` meant a GitHub job with id `gitleaks`, running gitleaks, gated by
+# `needs` from build and test, was reported as "no secret scan job in the same
+# workflow". That sentence was false about the tree. The stage name is part of
+# the standard for Azure Pipelines; for Actions the job id is not, and asserting
+# a falsehood is worse either way.
+_SCANNERS = ("gitleaks", "trufflehog", "detectsecrets", "gitguardian", "ggshield")
+_DEPENDENCY_KEYS = ("needs", "dependson")
+
+
 def _is_scan(name: str, node: Any) -> bool:
-    return "secretscan" in _norm(name) or "secretscan" in _norm(
-        _mapping(node).get("name", "")
+    labels = _norm(name) + _norm(_mapping(node).get("name", ""))
+    if "secretscan" in labels:
+        return True
+    # The job's own body, with its dependency declarations removed. Flattening
+    # the whole node made every job that waited on a scan look like a scan,
+    # because `needs: gitleaks` puts the tool's name inside the dependent job.
+    # What makes a job a scan is that it runs the scanner, not that it mentions
+    # something that does.
+    mapping = _mapping(node)
+    body = (
+        {k: v for k, v in mapping.items() if _norm(str(k)) not in _DEPENDENCY_KEYS}
+        if mapping
+        else node
     )
+    return any(tool in _norm(_flatten(body)) for tool in _SCANNERS)
 
 
 _GATED_WORK = ("build", "test")
@@ -976,12 +1005,13 @@ def _check_gitleaks_gate(reader: _Reader, rule: Rule) -> Optional[Finding]:
                 f"gitleaks in {path} is run with --exit-code 0, so a leak does "
                 f"not fail the build"
             )
-        # Both spellings. `continueOnError` is Azure Pipelines and
-        # `continue-on-error` is GitHub Actions, and checking only the first
-        # meant this could never fire on a GitHub repository.
-        flags = _values_for_key(node, "continueOnError") + _values_for_key(
-            node, "continue-on-error"
-        )
+        # One lookup covers both spellings. `_values_for_key` compares through
+        # `_norm`, which strips every non-alphanumeric character, so
+        # `continueOnError` and `continue-on-error` are the same key to it. An
+        # earlier version of this line called it twice, once per spelling, on
+        # the belief that the GitHub form was being missed. It was not, and the
+        # second call was dead.
+        flags = _values_for_key(node, "continueOnError")
         if any(str(flag).strip().lower() == "true" for flag in flags):
             missing.append(
                 f"the scan in {path} is allowed to continue on error, which "
@@ -1050,8 +1080,15 @@ _PLACEHOLDER_WORD = re.compile(
     r"redacted|replace|replaceme|your\w*|xxx+|\*+|-+|\.\.\.)$",
     re.I,
 )
+# A value that points somewhere else instead of holding the thing. Terraform and
+# Bicep were missing, so `password = var.db_password`, which is the correct
+# pattern, was reported as a committed credential at critical severity. That
+# asks the reader to replace a correct reference with a different provider's
+# syntax, which is the kind of advice that gets a tool switched off.
 _REFERENCE = re.compile(
-    r"^(\$\{?[\w.]+\}?|<[^>]*>|\{\{[^}]*\}\}|@Microsoft\.KeyVault\(|!\w+\s|%\w+%)"
+    r"^(\$\{?[\w.]+\}?|<[^>]*>|\{\{[^}]*\}\}|@Microsoft\.KeyVault\(|!\w+\s|%\w+%"
+    r"|(?:var|local|data|module|each)\.[\w.\[\]\"-]+$"
+    r"|keyVault\.getSecret\(|listKeys\(|reference\()"
 )
 _CREDENTIAL_SHAPE = (
     (re.compile(r"AKIA[0-9A-Z]{16}"), "an AWS access key id"),
@@ -1166,7 +1203,19 @@ def _check_secrets_never_committed(reader: _Reader, rule: Rule) -> Optional[Find
                 Verdict.UNDETERMINED,
                 f"{path} is an IaC template and {handle.error}",
             )
-        for key, value in _template_settings(path, handle.text):
+        try:
+            settings = _template_settings(path, handle.text)
+        except YamlSubsetError as exc:
+            # Named here rather than left to the backstop, so the report says
+            # which file and which construct instead of "something went wrong".
+            return _finding(
+                reader,
+                rule,
+                Verdict.UNDETERMINED,
+                f"{path} is an IaC template and could not be parsed: {exc}. A "
+                f"secret inlined in it would not have been seen",
+            )
+        for key, value in settings:
             if not _SECRET_KEY.search(key) or _SECRET_REFERENCE_KEY.search(key):
                 continue
             if _SSM_REF.search(value) or "@Microsoft.KeyVault(" in value:
@@ -1284,10 +1333,14 @@ def _template_settings(path: str, text: str) -> list[tuple[str, str]]:
             if match:
                 pairs.append((match.group(1), match.group(2).strip("'\"")))
         return pairs
-    try:
-        doc = parse_yaml_subset(text)
-    except YamlSubsetError:
-        return _assignments(path, text)
+    # No fallback. This used to drop to `_assignments`, whose regex is built for
+    # KEY=value env files and finds nothing in a YAML template, so an
+    # unparseable template produced an empty key list and the caller read that
+    # as "nothing wrong here". Two lines of YAML anchor were enough to turn a
+    # committed credential from a critical failure into a pass. The exception
+    # propagates now, and `_check_secrets_never_committed` turns it into
+    # `undetermined`, which is the honest answer for a file we cannot read.
+    doc = parse_yaml_subset(text)
     pairs = []
 
     def walk(node: Any) -> None:
@@ -1910,6 +1963,29 @@ _QUALITY_WORDS = (
 )
 
 
+def _mentions(blob: str, words: tuple[str, ...]) -> bool:
+    """Is any of these words present as a word, rather than inside another one.
+
+    Two rules, because the two kinds of entry behave differently:
+
+    A word must not be part of a longer word or a hyphenated token. `test` in
+    `ubuntu-latest` is the whole reason this function exists, and `deploy` in
+    `deploy-cloudrun@v2` is the same mistake reading the other way.
+
+    A flag may be the prefix of a longer flag, so `--cov` still matches
+    `--cov-report`. Flags are distinctive enough that this cannot collide the
+    way a bare word can.
+    """
+    for word in words:
+        pattern = re.escape(word)
+        if word[:1].isalnum():
+            pattern = r"(?<![\w-])" + pattern
+        pattern += r"(?![\w-])" if word[-1:].isalnum() and word[:1].isalnum() else r"(?!\w)"
+        if re.search(pattern, blob):
+            return True
+    return False
+
+
 def _check_heavy_work_offloaded(reader: _Reader, rule: Rule) -> Optional[Finding]:
     pipes = _pipelines(reader)
     if not pipes.any_at_all:
@@ -1924,6 +2000,13 @@ def _check_heavy_work_offloaded(reader: _Reader, rule: Rule) -> Optional[Finding
     # Raw text, not the parsed tree. Whether a build step exists is a question a
     # grep settles, and grepping keeps this rule answerable on a pipeline file
     # the subset reader cannot parse.
+    #
+    # Word bounded, and that is not cosmetic. Plain `"test" in blob` matched
+    # inside `ubuntu-latest`, so on any workflow using a `-latest` runner, which
+    # is most of them, the "no test step" branch could never fire. Every fixture
+    # in the suite pinned `ubuntu-24.04`, so no test caught it. It ran the other
+    # way too: `"deploy" in blob` matched inside `deploy-cloudrun@v2`, and a
+    # repository was told its pipeline deploys with no IaC to invoke.
     blob = ""
     for path in pipes.modelled + pipes.unmodelled:
         handle = reader.read(path)
@@ -1937,11 +2020,11 @@ def _check_heavy_work_offloaded(reader: _Reader, rule: Rule) -> Optional[Finding
             "a pipeline definition exists but none of its files could be read",
         )
     absent = []
-    if not any(word in blob for word in _BUILD_WORDS):
+    if not _mentions(blob, _BUILD_WORDS):
         absent.append("no build step")
-    if not any(word in blob for word in _TEST_WORDS):
+    if not _mentions(blob, _TEST_WORDS):
         absent.append("no test step")
-    if not any(word in blob for word in _QUALITY_WORDS):
+    if not _mentions(blob, _QUALITY_WORDS):
         absent.append("no lint or coverage step")
 
     paths = [p for p in reader.paths() if not _vendored(p)]
@@ -1955,7 +2038,7 @@ def _check_heavy_work_offloaded(reader: _Reader, rule: Rule) -> Optional[Finding
         absent.append(
             f"{', '.join(loose)} deploys but no pipeline definition calls it"
         )
-    if "deploy" in blob and not iac:
+    if _mentions(blob, ("deploy",)) and not iac:
         absent.append(
             "the pipeline deploys and no IaC template (SAM, Bicep, ARM or Terraform) "
             "is in the tree for it to invoke"

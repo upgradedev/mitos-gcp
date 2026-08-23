@@ -1115,3 +1115,126 @@ def test_scalars_are_left_as_text_rather_than_coerced():
 def test_the_reader_refuses_what_it_does_not_model(text):
     with pytest.raises(YamlSubsetError):
         parse_yaml_subset(text)
+
+
+# --------------------------------------------------------------------------
+# Regressions from an adversarial review. Each of these passed silently before
+# the fix, which is why they are here as inputs rather than as comments.
+# --------------------------------------------------------------------------
+
+
+ANCHORED_INLINE_SECRET = "Defaults: &d\n  Timeout: 10\n" + INLINE_SECRET_TEMPLATE
+
+
+def test_an_anchor_cannot_turn_a_committed_secret_into_a_pass():
+    """The worst outcome this module can produce, reached by two lines of YAML.
+
+    `_template_settings` fell back to the env-file regex when the subset parser
+    refused a template. That regex finds nothing in YAML, so an unparseable
+    template yielded an empty key list and the check read that as clean. The
+    literal credential was still sitting in the file.
+    """
+    assert verdict_of(
+        variant(GOOD_ADO, {"template.yaml": INLINE_SECRET_TEMPLATE}),
+        "secrets-never-committed",
+    ) is Verdict.FAILED
+
+    verdict = verdict_of(
+        variant(GOOD_ADO, {"template.yaml": ANCHORED_INLINE_SECRET}),
+        "secrets-never-committed",
+    )
+    assert verdict is Verdict.UNDETERMINED, (
+        "an anchor made the parser refuse the file and the check reported a "
+        "pass over a template it never read"
+    )
+
+
+ALIAS_IN_FLOW = ACTIONS_PIPELINE.replace(
+    "  build:\n    needs: secret-scan\n",
+    "  build:\n    needs: [&scan secret-scan]\n",
+    1,
+)
+
+
+def test_an_alias_inside_a_flow_sequence_is_refused_rather_than_misread():
+    """A misparse that produces a confident false finding is worse than a refusal.
+
+    `needs: *scan` was refused and `needs: [*scan]` was not, so the alias
+    survived as the literal string, the dependency graph came out wrong, and the
+    critical rule reported that jobs which do depend on the scan do not.
+    """
+    files = variant(GOOD_ACTIONS, {".github/workflows/ci.yml": ALIAS_IN_FLOW})
+
+    assert "secret-scan-first-stage" not in failed(files), (
+        "a job that does depend on the scan was reported as not depending on it"
+    )
+
+
+def test_a_latest_runner_does_not_count_as_a_test_step():
+    """`test` matched inside `ubuntu-latest`, so on any `-latest` runner, which
+    is the common case, the missing-test branch could not fire. Every fixture in
+    this file pinned `ubuntu-24.04`, so nothing caught it."""
+    bare = (
+        "name: CI\non:\n  push:\njobs:\n  secret-scan:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n"
+        "    - run: ./gitleaks detect --source . --redact\n"
+    )
+    files = variant(GOOD_ADO, {"azure-pipelines.yml": None, ".github/workflows/ci.yml": bare})
+
+    assert "no test step" in found_text(files, "heavy-work-offloaded-to-pipeline")
+
+
+def test_an_action_named_deploy_is_not_a_deploy_step():
+    """The same substring bug reading the other way.
+
+    `deploy` matched inside `google-github-actions/deploy-cloudrun@v2`, so a
+    repository with no deployment at all was told its pipeline deploys with no
+    IaC template to invoke.
+    """
+    using_action = ACTIONS_PIPELINE + (
+        "\n  ship:\n    needs: build\n    runs-on: ubuntu-24.04\n    steps:\n"
+        "    - uses: google-github-actions/deploy-cloudrun@v2\n"
+    )
+    files = variant(
+        GOOD_ACTIONS, {".github/workflows/ci.yml": using_action, "template.yaml": None}
+    )
+
+    text = found_text(files, "heavy-work-offloaded-to-pipeline")
+    assert "no IaC template" not in text
+
+
+TERRAFORM_REFERENCE = (
+    'resource "google_sql_user" "app" {\n'
+    "  password = var.db_password\n"
+    "}\n"
+)
+
+
+def test_a_terraform_variable_reference_is_not_a_committed_secret():
+    """`var.db_password` is the correct pattern and holds nothing.
+
+    Reporting it at critical severity asks the reader to replace a correct
+    reference with a different cloud's syntax. Same class as the `secret_id`
+    false positive, one provider over.
+    """
+    files = variant(GOOD_ADO, {"infra/main.tf": TERRAFORM_REFERENCE})
+
+    assert "secrets-never-committed" not in failed(files)
+
+
+SCAN_NAMED_FOR_ITS_TOOL = ACTIONS_PIPELINE.replace(
+    "  secret-scan:\n    name: Secret scan\n", "  gitleaks:\n", 1
+).replace("needs: secret-scan", "needs: gitleaks")
+
+
+def test_a_scan_job_named_after_its_tool_is_still_a_scan():
+    """The job id is not part of the standard for GitHub Actions.
+
+    Requiring the literal name `SecretScan` produced the sentence "no secret
+    scan job in the same workflow" about a workflow whose first job runs
+    gitleaks and gates the rest. That sentence was false.
+    """
+    files = variant(GOOD_ACTIONS, {".github/workflows/ci.yml": SCAN_NAMED_FOR_ITS_TOOL})
+
+    assert "secret-scan-first-stage" not in failed(files)
+    assert verdict_of(files, "gitleaks-pinned-hard-gate") is not Verdict.UNDETERMINED
