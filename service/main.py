@@ -53,6 +53,9 @@ from mitos.spec_repo import build_spec_repo  # noqa: E402
 from mitos.watcher import build_watcher  # noqa: E402
 from mitos import webhook as wh  # noqa: E402
 
+from mitos.tools import MAX_BYTES_PER_READ, MAX_READS_PER_RUN  # noqa: E402
+
+from .dashboard import render_fleet, render_overview, render_runs  # noqa: E402
 from .thread_view import render as render_thread  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
@@ -430,6 +433,7 @@ async def github_webhook(request: Request) -> JSONResponse:
             run_chore(
                 wh.to_pull_request(delivery, files), led,
                 run_id=delivery.delivery_id,
+                repository=delivery.repository,
                 approve=lambda card: False,  # a webhook never approves a write
                 # The specialists read the repository the pull request came
                 # from. Without this they read the built-in demo corpus, and
@@ -610,6 +614,52 @@ def run(req: RunRequest) -> JSONResponse:
     )
 
 
+@app.get("/config")
+def config() -> dict[str, Any]:
+    """The bounds, as values rather than as prose in a README.
+
+    Both are enforced elsewhere and neither is settable from here. `read_scope`
+    is what the tool layer will open and `webhook_repositories` is what the
+    verifier will accept, and publishing them is the difference between a
+    dashboard that says a boundary exists and one that shows you where it is.
+    """
+    return {
+        "read_scope": list(READ_SCOPE),
+        "webhook_repositories": sorted(ALLOWED_REPOS),
+        "max_reads_per_run": MAX_READS_PER_RUN,
+        "max_bytes_per_read": MAX_BYTES_PER_READ,
+    }
+
+
+def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
+    """Entries for a page, and how many exist, so a page can say it is a window.
+
+    A list showing the last 300 of 4000 that does not say so is a list that
+    quietly lies about what happened.
+    """
+    everything = ledger().all()
+    return [e.to_doc() for e in everything[-limit:]], len(everything)
+
+
+@app.get("/fleet", response_class=HTMLResponse)
+def fleet_page(limit: int = 300) -> str:
+    """Which companions exist, and which of them ever did anything.
+
+    The catalog on its own is a table that could be aspirational. Joined to the
+    thread it becomes a record: this one was dispatched nine times, this one
+    refused twice, this one has never run.
+    """
+    entries, total = _page_data(limit)
+    return render_fleet(catalog()["companions"], entries, ROLE, total=total)
+
+
+@app.get("/runs", response_class=HTMLResponse)
+def runs_page(limit: int = 300) -> str:
+    """What ran, and where each run stopped."""
+    entries, total = _page_data(limit)
+    return render_runs(entries, ROLE, total=total)
+
+
 @app.get("/thread/view", response_class=HTMLResponse)
 def thread_view(limit: int = 300) -> str:
     """The thread as the graph it is.
@@ -624,34 +674,20 @@ def thread_view(limit: int = 300) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    ident = identity()
-    reachable = ident["spec_repo_write_credential"]["reachable"]
-    colour = "#b3261e" if reachable and ROLE != "writer" else "#146c2e"
-    return f"""<!doctype html><meta charset=utf-8>
-<title>Mitos · {ROLE}</title>
-<style>
- body{{font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:52rem;
- margin:3rem auto;padding:0 1.25rem;color:#1b1b1f;background:#fff}}
- @media(prefers-color-scheme:dark){{body{{background:#131316;color:#e5e2e6}}}}
- h1{{font-size:1.35rem;margin:0 0 .25rem}} .r{{color:#666}}
- table{{border-collapse:collapse;width:100%;margin:1.25rem 0}}
- td,th{{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #8883}}
- code{{background:#8881;padding:.1rem .3rem;border-radius:3px}}
- .v{{color:{colour};font-weight:600}}
-</style>
-<h1>Mitos · <span class=r>{ROLE}</span></h1>
-<p class=r>One of three services. Same image, different identity.</p>
-<table>
-<tr><th>running as</th><td><code>{ident["running_as"]}</code></td></tr>
-<tr><th>may call <code>write_spec_repo</code></th>
-    <td class=v>{ident["may_call_write_tools"].get("write_spec_repo")}</td></tr>
-<tr><th>can reach the spec-repo write credential</th>
-    <td class=v>{reachable}</td></tr>
-</table>
-<p>Endpoints: <code>/identity</code> · <code>/catalog</code> · <code>/thread</code>
- · <code>POST /run</code></p>
-<p class=r>The first row is enforced inside ADK's tool interceptor. The second is
-enforced by Google IAM, outside this process, which is why this service cannot
-grant it to itself.</p>
-"""
+def index(limit: int = 300) -> str:
+    """The overview: is the boundary holding, and is the fleet awake.
+
+    This used to be a three-row identity card. It was true and it answered a
+    question nobody had, because the interesting thing about a privilege
+    boundary is not that it is configured, it is that it held while work was
+    happening. So the same three rows are still here, now next to the thread
+    that shows what they refused.
+    """
+    entries, total = _page_data(limit)
+    return render_overview(
+        identity(),
+        watch(),
+        entries,
+        total=total,
+        config=config(),
+    )
