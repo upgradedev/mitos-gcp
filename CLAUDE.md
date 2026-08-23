@@ -30,7 +30,12 @@ roles. A live subscription to a *query* has no clean equivalent: a change feed i
 shard-ordered, consumed server-side, and is about a table. It also makes "context
 across weeks of asynchronous operations" a mechanism rather than a claim.
 **Consequence:** the provenance thread is the memory, the audit trail and the
-control plane at once, so a run retraces as one thread. Cloud Run must be
+control plane at once, so a run retraces as one thread. The limit is worth
+stating next to the decision: the query carries no date, so the passage of
+time on its own delivers no snapshot and wakes nothing. An expired deferral
+is escalated the next time the set changes for any reason. The README claimed
+the calendar alone was enough; it is not, and making it so needs a durable
+timer this build does not have. Cloud Run must be
 deployed with `--no-cpu-throttling`, or CPU is throttled to zero between requests
 and the subscription is suspended with no error. Portability of this component is
 deliberately abandoned.

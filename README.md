@@ -105,11 +105,19 @@ decides that.
 
 ## Why Google Cloud is load-bearing
 
-> **Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so a
-> compliance finding deferred until 12 August wakes the fleet on 12 August because the query itself
-> is the subscription. Take Firestore away and the thread you follow back stops being the control
-> plane and becomes a log, and you need a queue, a poller and a separate state store to get the same
-> behaviour, none of which can be retraced as one thread.**
+> **Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so
+> when any deferral is written or changed the fleet is handed the whole open set and escalates the
+> ones that have expired, unattended. Take Firestore away and the thread you follow back stops
+> being the control plane and becomes a log, and you need a queue, a poller and a separate state
+> store to get the same behaviour, none of which can be retraced as one thread.**
+
+**What that does not do, said plainly.** The calendar alone does not wake anything. The query is
+`kind == "finding.deferred"` with no date in it, so a deferral reaching its expiry writes nothing,
+changes no result set, and produces no snapshot. The expiry is evaluated in the callback, so an
+expired deferral is noticed the next time the set changes for any reason. This README said
+"deferred until 12 August wakes the fleet on 12 August" and that was not true. Making it true
+needs a durable timer, a Cloud Task scheduled at the expiry with an authenticated idempotent
+callback, which is a real subsystem and is not in this build.
 
 A change feed is not the same thing. DynamoDB Streams is shard-ordered, consumed server-side, and
 delivers events about a *table*. `on_snapshot` subscribes to a **query**: *every finding whose

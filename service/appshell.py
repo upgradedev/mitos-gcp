@@ -523,9 +523,10 @@ LEAD = (
 
 POINTS: tuple[tuple[str, str], ...] = (
     (
-        "nobody schedules it",
-        "A finding deferred until August wakes the fleet in August, because "
-        "the query that finds it is the subscription.",
+        "nobody polls it",
+        "Writing a deferral hands the fleet every open one, and it escalates "
+        "the expired ones unattended. The calendar alone wakes nothing: that "
+        "would need a durable timer, and this build does not have one.",
     ),
     (
         "its own gate refuses it",
