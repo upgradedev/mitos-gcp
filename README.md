@@ -343,6 +343,45 @@ Built by [`.github/workflows/video.yml`](.github/workflows/video.yml), never on 
 printed it; `video/build.py` replays exactly that, at exactly that speed. **Nothing is cut and no
 beat is sped up.** If the chore fails, the recording fails and no video is produced.
 
+## What it costs to run
+
+Prices read from Google's own pages on 2026-08-23, re-read independently by a
+second pass that switched the region selectors itself rather than trusting the
+first. Configuration taken from [`infra/main.tf`](infra/main.tf), not assumed.
+
+| Line | Monthly | Why |
+|---|---:|---|
+| Cloud Run, reader | **$52.60** | one instance, always allocated, CPU never throttled |
+| Vertex AI, Gemini 3.7 Flash | $15.30 | at 150 chores a month, four model calls each |
+| Cloud Run, evaluator and writer | $0.39 | request-based, scale to zero |
+| Firestore, Secret Manager, Artifact Registry, Logging | $0.00 | inside the free allowances |
+| | **$73.51** | |
+
+**One line is 72% of the bill, and it is a design decision rather than a
+surprise.** The reader holds the Firestore query subscription that is the
+control plane, so it runs with `min_instance_count = 1` and `cpu_idle = false`.
+Cloud Run bills an always-allocated instance for all 730 hours whether or not
+anything happens. That is the price of ADR-001: no scheduler, no queue, and a
+fleet that wakes on a change rather than on a timer. Throttle that CPU to save
+$52 and the subscription suspends with no error, which is the failure the ADR
+already warns about.
+
+Everything that scales with use is the $15.30. Everything else is the floor.
+
+Two honest caveats. The free allowances for Cloud Run, Secret Manager and
+Artifact Registry are **per billing account, not per project**, and this is one
+of ten projects on ours, so the $5.22 Cloud Run allowance is added back above on
+the assumption that a sibling already spent it. And the token counts behind the
+$15.30 are the read budget's ceiling rather than a measurement: 12 files at
+8,000 bytes is what the guard permits, not what a run typically uses. The real
+figure is lower and nobody has measured it.
+
+Sources: [Cloud Run](https://cloud.google.com/run/pricing),
+[Vertex AI](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing),
+[Firestore](https://cloud.google.com/firestore/pricing),
+[Secret Manager](https://cloud.google.com/secret-manager/pricing),
+[Artifact Registry](https://cloud.google.com/artifact-registry/pricing).
+
 ## Status, stated honestly
 
 | Claim | State |
