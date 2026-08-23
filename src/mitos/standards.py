@@ -2621,7 +2621,11 @@ def audit_repository(
         # exists on its own and is what the tighten is applied to, so the two
         # halves stay separable and the model's contribution stays visible as a
         # difference rather than being blended into one opaque verdict.
-        result = tighten(result, reader.read(judgement_queue(corpus)))
+        # The same corpus object goes to both halves. Letting the reader build
+        # its own from a repository name is how the two silently diverge, and it
+        # did: a two-file audit came back with a confident finding about a path
+        # that only exists in the demo corpus.
+        result = tighten(result, reader.read(judgement_queue(corpus), corpus))
     return result.to_response()
 
 

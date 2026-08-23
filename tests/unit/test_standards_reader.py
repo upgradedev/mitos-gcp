@@ -36,7 +36,7 @@ def test_an_empty_queue_is_answered_without_a_model() -> None:
     """
     reader = StandardsReader.__new__(StandardsReader)
 
-    assert reader.read([]) == []
+    assert reader.read([], DictCorpus({"a.py": "x = 1\n"})) == []
 
 
 def test_a_reply_that_is_not_what_was_asked_for_settles_nothing() -> None:
