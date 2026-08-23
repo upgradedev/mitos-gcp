@@ -826,8 +826,12 @@ class StandardsReader:
     model: str = DEFAULT_MODEL
     project: Optional[str] = None
     role: str = "reader"
-    repository: Optional[str] = None
-    ref: str = "HEAD"
+    # Deliberately no `repository` field. An earlier version had one and built
+    # its own corpus from it, so the reader could be pointed at a different tree
+    # than the one being audited. It was, in the first live run: the audit
+    # covered two files and the reader reported on a path from the demo corpus,
+    # confidently and wrongly. The corpus is now an argument to `read`, so there
+    # is one of them and it cannot drift.
     scope: Optional[tuple] = None
 
     BRIEF = (
@@ -856,8 +860,12 @@ class StandardsReader:
     def __post_init__(self) -> None:
         configure_vertex(self.project)
 
-    def read(self, queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def read(self, queue: list[dict[str, Any]], corpus: Any) -> list[dict[str, Any]]:
         """Judgements for whichever queued rules the reader could settle.
+
+        `corpus` is the repository under audit, passed in rather than built
+        here, so the reader cannot end up reading a different tree than the one
+        the deterministic pass covered.
 
         Returns an empty list on any failure. That leaves every rule at
         `needs_judgement`, which is the correct outcome when the reader is
@@ -874,10 +882,9 @@ class StandardsReader:
         from google.genai import types  # noqa: PLC0415
 
         from .guard import make_before_tool_guard  # noqa: PLC0415
-        from .tools import ReadLog, build_corpus, make_tools  # noqa: PLC0415
+        from .tools import ReadLog, make_tools  # noqa: PLC0415
 
         log = ReadLog()
-        corpus = build_corpus(self.repository, ref=self.ref, scope=self.scope)
         tools = make_tools(corpus, log, scope=self.scope)
 
         agent = LlmAgent(
@@ -923,18 +930,18 @@ class StandardsReader:
 def build_standards_reader(
     project: Optional[str] = None,
     role: str = "reader",
-    repository: Optional[str] = None,
-    ref: str = "HEAD",
     scope: Optional[tuple] = None,
 ):
-    """The standards reader, when a model is configured. `None` otherwise."""
+    """The standards reader, when a model is configured. `None` otherwise.
+
+    Takes no repository. Which tree gets read is decided by the corpus handed to
+    `read`, which is the same one the deterministic pass used.
+    """
     if os.environ.get("MITOS_MODEL", "stub") == "stub":
         return None
     return StandardsReader(
         model=os.environ.get("MITOS_MODEL", DEFAULT_MODEL),
         project=project,
         role=role,
-        repository=repository,
-        ref=ref,
         scope=scope,
     )
