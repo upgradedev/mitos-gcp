@@ -13,6 +13,7 @@ with the input that would have got through.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -182,3 +183,34 @@ def test_an_approval_missing_a_bound_field_is_not_an_approval():
     """A document from an older schema must not verify by default."""
     with pytest.raises(Mismatch):
         Approval.from_dict({"repository": REPO, "path": PATH})
+
+
+# --------------------------------------------------------------------------
+# The public surface may not cause a write
+# --------------------------------------------------------------------------
+
+
+def test_the_public_reader_holds_no_publisher():
+    """Asserted against the source, because the offline suite is stdlib only.
+
+    Importing `service.main` here would pull in httpx, which CLAUDE.md keeps out
+    of the offline path on purpose, and a test that only runs where the extras
+    are installed is a test that does not run on most pushes.
+
+    The property: the hole this replaced was anonymous bytes reaching the
+    repository. With the approval binding the bytes are the fleet's own rather
+    than the caller's, which is materially safer and is not the same as safe. A
+    public endpoint that ends in a publish on request is still a public endpoint
+    that writes, so the default is off.
+    """
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'PUBLIC_DEMO_MAY_WRITE = os.environ.get(' in source
+    assert '"MITOS_PUBLIC_DEMO_MAY_WRITE", ""' in source, (
+        "the flag no longer defaults to empty, so the public deployment may write"
+    )
+    assert "if not PUBLIC_DEMO_MAY_WRITE:\n        # " in source, (
+        "the publisher is no longer gated on the flag"
+    )
