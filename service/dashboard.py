@@ -41,6 +41,14 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from .appshell import (
+    APP_CSS,
+    explainer,
+    funnel,
+    hero_tiles,
+    how_counted,
+    sparkline,
+)
 from .thread_view import KIND_STYLE as _THREAD_KIND_STYLE
 
 # One table, not three. Three pages colouring kinds from three copies of the
@@ -324,7 +332,7 @@ def _shell(
         "<!doctype html><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width,initial-scale=1">'
         f"<title>{_esc(title)}</title>"
-        f"<style>{_CSS}</style>"
+        f"<style>{_CSS}{APP_CSS}</style>"
         f"<header><h1>{_esc(heading)}{_badge(role)}</h1>"
         f"<div class=sub>{sub_html}</div></header>"
         f"<nav>{nav}</nav>"
@@ -623,17 +631,38 @@ def render_overview(
     total: Optional[int] = None,
     config: Optional[dict[str, Any]] = None,
     peers: Optional[list[dict[str, Any]]] = None,
+    metrics: Optional[dict[str, Any]] = None,
     now: Optional[str] = None,
 ) -> str:
-    """Page 1. `identity` is GET /identity, `watch` is GET /watch, `entries` is
-    the `entries` list from GET /thread."""
+    """Page 1. What the fleet did, then what it was not allowed to do.
+
+    Two audiences on one page, in that order. Somebody arriving from a link
+    needs to know what this is and whether it works, so the top is a plain
+    explanation, four figures, and the pipeline drawn once. Somebody
+    operating it needs the privilege boundary and the subscription, so those
+    are underneath, unchanged.
+
+    The order was the other way round and the page opened with `running as`
+    and a service account. That is a machine describing itself, and it
+    answered a question nobody arriving here has.
+    """
     identity = identity or {}
     watch = watch or {}
     entries = list(entries or [])
     role = str(identity.get("role") or "unknown")
     stamp = _stamp(now)
+    metrics = metrics or {}
     body = (
-        _deployment_panel(identity, role)
+        (
+            explainer()
+            + hero_tiles(metrics.get("headline"))
+            + funnel(metrics.get("funnel"))
+            + sparkline(metrics.get("activity"))
+            + how_counted(metrics.get("headline"))
+            if metrics
+            else ""
+        )
+        + _deployment_panel(identity, role)
         + _boundary_panel(identity, role)
         + _control_plane_panel(watch, stamp)
         + _thread_panel(entries, total, stamp)

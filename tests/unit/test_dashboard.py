@@ -682,7 +682,12 @@ def test_the_page_never_prints_a_single_compliance_percentage():
     """
     page = render_standards([a_finding("a", "failed")], A_SUMMARY, "reader")
 
-    assert "%" not in page
+    # The stylesheet is full of percentages and none of them are a claim about
+    # compliance. Assert over what a reader sees, not over the CSS.
+    import re
+
+    visible = re.sub(r"<style>.*?</style>", "", page, flags=re.S)
+    assert "%" not in visible
     assert "4 of 24 rules were decided here" in page
 
 
