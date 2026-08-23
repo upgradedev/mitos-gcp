@@ -89,7 +89,27 @@ openapi: 3.1.0
 paths:
   /:
     get:
+      description: 'The overview: is the boundary holding, and is the fleet awake.
+
+
+        This used to be a three-row identity card. It was true and it answered a
+
+        question nobody had, because the interesting thing about a privilege
+
+        boundary is not that it is configured, it is that it held while work was
+
+        happening. So the same three rows are still here, now next to the thread
+
+        that shows what they refused.'
       operationId: index__get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 300
+          title: Limit
+          type: integer
       responses:
         '200':
           content:
@@ -97,6 +117,12 @@ paths:
               schema:
                 type: string
           description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
       summary: Index
   /catalog:
     get:
@@ -111,6 +137,29 @@ paths:
                 type: object
           description: Successful Response
       summary: Catalog
+  /config:
+    get:
+      description: 'The bounds, as values rather than as prose in a README.
+
+
+        Both are enforced elsewhere and neither is settable from here. `read_scope`
+
+        is what the tool layer will open and `webhook_repositories` is what the
+
+        verifier will accept, and publishing them is the difference between a
+
+        dashboard that says a boundary exists and one that shows you where it is.'
+      operationId: config_config_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Config Config Get
+                type: object
+          description: Successful Response
+      summary: Config
   /execute:
     post:
       description: 'Perform the governed write. Writer service only.
@@ -144,6 +193,39 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Execute
+  /fleet:
+    get:
+      description: 'Which companions exist, and which of them ever did anything.
+
+
+        The catalog on its own is a table that could be aspirational. Joined to the
+
+        thread it becomes a record: this one was dispatched nine times, this one
+
+        refused twice, this one has never run.'
+      operationId: fleet_page_fleet_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 300
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Fleet Page
   /identity:
     get:
       operationId: identity_identity_get
@@ -218,6 +300,32 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Run Stream
+  /runs:
+    get:
+      description: What ran, and where each run stopped.
+      operationId: runs_page_runs_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 300
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Runs Page
   /thread:
     get:
       operationId: thread_thread_get
