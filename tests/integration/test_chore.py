@@ -301,3 +301,32 @@ def test_a_path_nobody_read_is_still_a_hallucination():
     assert any(
         f.check == "hallucinated-path" for f in result.first_verdict.findings
     ), "an invented path passed the check"
+
+
+# --------------------------------------------------------------------------
+# The public surface may not cause a write
+# --------------------------------------------------------------------------
+
+
+def test_the_public_reader_produces_the_card_and_publishes_nothing():
+    """The hole this replaced was anonymous bytes reaching the repository.
+
+    With the approval binding the bytes are the fleet's own rather than the
+    caller's, which is materially safer but is not the same as safe: a public
+    endpoint that ends in a publish on request is still a public endpoint that
+    writes. The deployed reader produces the approval card and stops, and this
+    asserts the wiring rather than the intention.
+    """
+    import importlib
+    import os
+
+    os.environ.setdefault("MITOS_LEDGER", "memory")
+    main = importlib.import_module("service.main")
+
+    assert main.PUBLIC_DEMO_MAY_WRITE is False, (
+        "the public deployment is configured to write on an anonymous request"
+    )
+    assert main._publisher() is None, (
+        "the reader holds a publisher, so an anonymous /run with approve=true "
+        "can still reach the writer"
+    )
