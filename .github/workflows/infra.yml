@@ -84,7 +84,14 @@ jobs:
             || { echo "::error::the reader would not know who to ask for a write, so it would publish nothing and still look fine"; exit 1; }
           grep -q 'attribute_condition' main.tf \
             || { echo "::error::the CI identity is assumable by any repository on GitHub"; exit 1; }
-          echo "the four load-bearing settings are present"
+          # The exposure this repository actually shipped: the public binding
+          # looped over every role, so the writer, whose /execute publishes a
+          # body straight from the request, was anonymously invokable.
+          test "$(grep -c 'member   = "allUsers"' main.tf)" -eq 1 \
+            || { echo "::error::more than one service is anonymously invokable"; exit 1; }
+          grep -qF 'for_each = toset(["reader"])' main.tf \
+            || { echo "::error::the public binding is no longer scoped to the reader alone"; exit 1; }
+          echo "the load-bearing settings are present"
 
   plan:
     name: Plan against the real project

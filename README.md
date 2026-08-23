@@ -176,7 +176,14 @@ curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute \
 ```
 
 The reader orchestrates the whole chore and then has to **ask** the writer service, over an
-authenticated call, and the writer re-checks the plan hash itself rather than trusting the caller.
+authenticated call, and the writer verifies an approval artifact before it publishes anything.
+The approval binds the repository, the path, the branch and a digest of the exact bytes, plus the
+run, the approving actor, an expiry and a nonce. The writer recomputes that digest from the bytes
+it was handed, so a caller who changes one character after approval is refused, and the nonce is
+consumed with a Firestore `create` so the same approval cannot be replayed into a second write.
+
+This said the writer re-checked the plan hash long before it did. It does now, and every refusal
+has a test that feeds it the input that would previously have got through.
 
 `/identity` does not read a config flag. It **attempts** the access and reports what came back.
 

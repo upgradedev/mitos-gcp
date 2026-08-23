@@ -37,6 +37,15 @@ from fastapi.responses import (  # noqa: E402
 )
 from pydantic import BaseModel  # noqa: E402
 
+from mitos.approval import (  # noqa: E402
+    Approval,
+    Expired,
+    Mismatch,
+    Replayed,
+    body_digest,
+    build_approval_store,
+    verify_and_consume,
+)
 from mitos.chore import run_chore  # noqa: E402
 from mitos.fixtures import PR_4471, PR_4472, SEEDED_HISTORY  # noqa: E402
 from mitos.fleet import CATALOG  # noqa: E402
@@ -251,7 +260,28 @@ def thread(limit: int = 100) -> dict[str, Any]:
     }
 
 
-def _publisher():
+_APPROVALS = None
+
+# The repository the specification is published to. Named here rather than
+# taken from the request, so a caller cannot approve bytes for one repository
+# and have them written to another.
+SPEC_REPOSITORY = os.environ.get("MITOS_SPEC_REPO", "upgradedev/mitos-spec")
+
+# Whether an anonymous caller may cause a real publish. Off by default. The
+# public reader produces the approval card and stops there, because a public
+# endpoint that writes on request is the shape of the hole this replaced, even
+# once the bytes are the fleet's own rather than the caller's.
+PUBLIC_DEMO_MAY_WRITE = os.environ.get("MITOS_PUBLIC_DEMO_MAY_WRITE", "") == "yes"
+
+
+def approvals():
+    global _APPROVALS
+    if _APPROVALS is None:
+        _APPROVALS = build_approval_store(PROJECT)
+    return _APPROVALS
+
+
+def _publisher(actor: str = "unattended", run_id: str = ""):
     """Only the writer service holds a credential that can publish.
 
     The reader orchestrates the chore and then has to ask, because IAM will not
@@ -262,7 +292,15 @@ def _publisher():
     if ROLE == "writer":
         return build_spec_repo(PROJECT)
     url = os.environ.get("MITOS_WRITER_URL")
-    return _RemoteWriter(url) if url else None
+    if not url:
+        return None
+    if not PUBLIC_DEMO_MAY_WRITE:
+        # The reader is the anonymous surface. An unauthenticated request that
+        # can end in a publish is the shape of the hole this replaced, even now
+        # that the bytes are the fleet's own rather than the caller's, so the
+        # public deployment produces the approval card and stops.
+        return None
+    return _RemoteWriter(url, actor=actor, run_id=run_id, repository=SPEC_REPOSITORY)
 
 
 @dataclass
@@ -270,13 +308,39 @@ class _RemoteWriter:
     """Delegates the write to the writer service over an authenticated call.
 
     This is the privilege boundary made concrete: the reader cannot perform the
-    write, so it asks the one identity that can, and the writer re-checks the
-    plan hash itself rather than trusting the caller.
+    write, so it asks the one identity that can.
+
+    The writer verifies the approval independently: it recomputes the digest
+    from the bytes that arrived and refuses if they are not the bytes that were
+    approved. For one commit this docstring claimed that and it was not true.
     """
 
     url: str
+    actor: str = "unattended"
+    run_id: str = ""
+    repository: str = ""
+    nonce: str = ""
 
     def publish(self, *, path: str, body: str, message: str, branch: str) -> dict:
+        # Recorded before the request, over the bytes actually being sent. The
+        # writer recomputes this digest from what arrives, so the approval
+        # covers these bytes and no others.
+        granted = approvals().grant(
+            Approval(
+                repository=self.repository,
+                path=path,
+                branch=branch,
+                digest=body_digest(
+                    repository=self.repository, path=path, branch=branch, body=body
+                ),
+                run_id=self.run_id,
+                actor=self.actor,
+            )
+        )
+        self.nonce = granted.nonce
+        return self._send(path=path, body=body, message=message, branch=branch)
+
+    def _send(self, *, path: str, body: str, message: str, branch: str) -> dict:
         import google.auth.transport.requests  # noqa: PLC0415
         import google.oauth2.id_token  # noqa: PLC0415
 
@@ -286,7 +350,14 @@ class _RemoteWriter:
             )
             r = httpx.post(
                 f"{self.url}/execute",
-                json={"path": path, "body": body, "message": message, "branch": branch},
+                json={
+                    "path": path,
+                    "body": body,
+                    "message": message,
+                    "branch": branch,
+                    "nonce": self.nonce,
+                    "repository": self.repository,
+                },
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=120.0,
             )
@@ -305,6 +376,11 @@ class ExecuteRequest(BaseModel):
     body: str
     message: str
     branch: str
+    # The approval this write claims to be covered by. Not optional: a request
+    # without one is refused, which is what stops a caller who reaches this
+    # endpoint from choosing what gets written.
+    nonce: str = ""
+    repository: str = ""
 
 
 @app.post("/execute")
@@ -320,9 +396,40 @@ def execute(req: ExecuteRequest) -> dict:
             status_code=403,
             detail=f"the {ROLE} service holds no credential that can write",
         )
-    return build_spec_repo(PROJECT).publish(
+
+    # The write is bound to an approval, and this is where the binding is
+    # enforced rather than described. The digest is recomputed from the bytes
+    # actually presented, so a caller that changes one character after the
+    # approval was granted produces a different digest and is refused. The
+    # nonce is consumed transactionally, so the same approval cannot be
+    # replayed into a second write.
+    repository = req.repository or SPEC_REPOSITORY
+    try:
+        approval = verify_and_consume(
+            approvals(),
+            nonce=req.nonce,
+            repository=repository,
+            path=req.path,
+            branch=req.branch,
+            body=req.body,
+            by=f"{ROLE}@{PROJECT}",
+        )
+    except Replayed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Expired as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+    except Mismatch as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    receipt = build_spec_repo(PROJECT).publish(
         path=req.path, body=req.body, message=req.message, branch=req.branch
     )
+    # The receipt names what authorised it, so a published file traces back to
+    # a person and a run without anybody having to correlate two systems.
+    receipt["approved_by"] = approval.actor
+    receipt["approval_nonce"] = approval.nonce
+    receipt["run_id"] = approval.run_id
+    return receipt
 
 
 class RunRequest(BaseModel):

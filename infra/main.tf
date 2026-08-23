@@ -350,9 +350,22 @@ resource "google_cloud_run_v2_service" "fleet" {
   ]
 }
 
-# A judge opens these with no account, so they are public on purpose.
+# The reader is the public surface, on purpose: a judge opens it with no
+# account. The other two are not, and this loop used to grant `allUsers` to all
+# three because it iterated `local.roles`.
+#
+# That was not a theoretical exposure. `POST /execute` on the writer takes a
+# path, a body and a branch from the request and publishes them, so anonymous
+# invoke on that service was an unauthenticated arbitrary write to the
+# specification repository. It was reachable, and confirmed reachable: an empty
+# body came back 422 from FastAPI listing the fields it wanted, which is Cloud
+# Run having let the caller through.
+#
+# `for_each` is kept over a one-element set rather than collapsed to a bare
+# resource, so the address stays `public["reader"]` and the other two are
+# removed from state instead of the reader being destroyed and recreated.
 resource "google_cloud_run_v2_service_iam_member" "public" {
-  for_each = toset(local.roles)
+  for_each = toset(["reader"])
 
   name     = google_cloud_run_v2_service.fleet[each.value].name
   location = var.region
