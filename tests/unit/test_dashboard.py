@@ -601,17 +601,28 @@ def test_a_blocked_response_still_parks_a_run():
 
 
 def a_finding(rule_id, verdict, **over):
-    base = {
+    """Built through the real `Finding.as_dict`, not by restating its keys.
+
+    A hand-written fixture here agreed with a bug in the renderer: it read
+    `rule_id`, the dataclass field name, while `as_dict` writes `rule`. Every
+    row on the live page printed "None" and every test passed, because the
+    fixture and the renderer shared the same wrong assumption. Going through the
+    producer makes that impossible.
+    """
+    from mitos.standards import Finding, Verdict
+
+    fields = {
         "rule_id": rule_id,
         "severity": "critical",
-        "verdict": verdict,
+        "verdict": Verdict(verdict),
         "looked_for": "a gitleaks step in the first stage",
-        "looked_at": ["azure-pipelines.yml"],
+        "looked_at": ("azure-pipelines.yml",),
         "found": "the scan runs after build",
-        "limitation": "",
     }
-    base.update(over)
-    return base
+    fields.update({k: v for k, v in over.items() if k in fields})
+    if "looked_at" in over:
+        fields["looked_at"] = tuple(over["looked_at"])
+    return Finding(**fields).as_dict()
 
 
 A_SUMMARY = {

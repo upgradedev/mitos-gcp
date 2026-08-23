@@ -1087,8 +1087,14 @@ def _finding_card(finding: dict[str, Any]) -> str:
     verdict = str(finding.get("verdict") or "undetermined")
     tone, label = _VERDICT_TONE.get(verdict, ("unknown", verdict))
     severity = str(finding.get("severity") or "")
+    # `Finding.as_dict` writes `rule`. Reading `rule_id`, the dataclass field
+    # name, printed "None" for every row on the live page. Both are accepted so
+    # a caller holding either shape renders, and the tests below build their
+    # fixtures from the real producer rather than restating its keys, which is
+    # how this got through: the fixture agreed with the bug.
+    rule = finding.get("rule") or finding.get("rule_id") or "unnamed rule"
     head = (
-        f'<div class=h><span class=n>{_esc(finding.get("rule_id"))}</span>'
+        f'<div class=h><span class=n>{_esc(rule)}</span>'
         f"{_badge(severity) if severity else ''}"
         f"<span class=v>{_tone(label, tone)}</span></div>"
     )
@@ -1166,7 +1172,12 @@ def render_standards(
     """
     findings = list(findings or [])
     order = {v: i for i, v in enumerate(_VERDICT_ORDER)}
-    findings.sort(key=lambda f: (order.get(str(f.get("verdict")), 99), str(f.get("rule_id"))))
+    findings.sort(
+        key=lambda f: (
+            order.get(str(f.get("verdict")), 99),
+            str(f.get("rule") or f.get("rule_id") or ""),
+        )
+    )
 
     body = _audit_summary_panel(summary or {}, repository)
     if note:
