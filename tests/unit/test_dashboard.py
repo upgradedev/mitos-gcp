@@ -29,7 +29,9 @@ from service.dashboard import (
     render_fleet,
     render_overview,
     render_runs,
+    render_connect,
     render_standards,
+    audit_form,
 )
 
 NOW = "2026-08-22T18:30:00+00:00"
@@ -717,3 +719,57 @@ def test_the_page_says_when_it_audited_the_demo_corpus_rather_than_your_code():
     page = render_standards([], A_SUMMARY, "reader")
 
     assert "demo corpus" in page
+
+
+# --------------------------------------------------------------------------
+# The flow: pointing it at your own repository
+# --------------------------------------------------------------------------
+
+
+def test_the_form_keeps_what_was_typed_so_a_typo_can_be_corrected():
+    """Clearing the field on an error makes the reader retype from memory."""
+    page = audit_form("upgradedev/typo-here", "that is not a repository")
+
+    assert 'value="upgradedev/typo-here"' in page
+    assert "that is not a repository" in page
+
+
+def test_the_form_cannot_be_used_to_inject_markup_back_into_itself():
+    """The value is reflected into an attribute, which is the classic hole."""
+    page = audit_form('"><img src=x onerror=alert(1)>', '"><script>x</script>')
+
+    assert "<img" not in page
+    assert "<script>x" not in page
+
+
+def test_the_form_states_the_rate_limit_and_the_public_only_rule():
+    """Both are limits a reader hits within a minute of using this.
+
+    Discovering them from a page full of undetermined verdicts is worse than
+    being told, and the second one has a reason worth reading.
+    """
+    page = audit_form()
+
+    assert "60 requests an hour" in page
+    assert "Public repositories only" in page
+
+
+def test_the_connect_page_names_the_step_that_cannot_be_self_served():
+    """The allowlist is deployment configuration.
+
+    A three-step flow whose middle step quietly needs somebody else wastes the
+    reader's afternoon. It says so, and says it is a limit rather than a
+    coming-soon.
+    """
+    page = render_connect("reader", base="https://example.test")
+
+    assert "https://example.test/webhook/github" in page
+    assert "needs somebody with access to the service" in page
+    assert "not a coming-soon" in page
+
+
+def test_the_connect_page_says_what_it_will_do_to_your_repository():
+    """The first question anybody asks before pointing a tool at their code."""
+    page = render_connect("reader")
+
+    assert "nothing. It reads." in page

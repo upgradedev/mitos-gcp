@@ -169,6 +169,7 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         ("/fleet", "catalogued companions"),
         ("/runs", "this window, counted"),
         ("/standards", "the audit"),
+        ("/connect", "three steps"),
         ("/thread/view", "Mitos"),
     ):
         status, raw = get(f"{reader}{path}")
@@ -184,6 +185,21 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         status == 200 and bool(cfg.get("read_scope")) and "max_reads_per_run" in cfg,
         "/config publishes the bounds as values",
         f"scope={cfg.get('read_scope')} reads={cfg.get('max_reads_per_run')}",
+    )
+
+    # A typo in the form must not read as the service being broken. This was a
+    # 500 until the corpus started validating the name it interpolates.
+    status, raw = get(f"{reader}/standards?repository=not-a-repo")
+    r.record(
+        status == 200 and "audit it" in raw,
+        "a bad repository name returns the form and an explanation, not a 500",
+        f"HTTP {status}",
+    )
+    status, _ = get(f"{reader}/standards.json?repository=../../user")
+    r.record(
+        status == 400,
+        "a repository name that could steer a URL is refused",
+        f"HTTP {status}",
     )
 
     status, raw = get(f"{reader}/standards.json")

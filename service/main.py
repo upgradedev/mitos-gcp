@@ -61,9 +61,11 @@ from mitos.tools import build_corpus  # noqa: E402
 from .metrics import summarise  # noqa: E402
 
 from .dashboard import (  # noqa: E402
+    audit_form,
     render_fleet,
     render_overview,
     render_runs,
+    render_connect,
     render_standards,
 )
 from .thread_view import render as render_thread  # noqa: E402
@@ -653,7 +655,7 @@ def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
 
 def _audit(
     repository: Optional[str] = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+) -> tuple[list[dict[str, Any]], dict[str, Any], str, str]:
     """Audit a repository against the engineering standard.
 
     Only the deterministic pass runs here, and that is a deliberate limit rather
@@ -663,7 +665,10 @@ def _audit(
     between them, and a judge clicking a link should not be holding a socket
     open while that happens. It has a live test instead.
     """
-    corpus = build_corpus(repository, ref="HEAD", scope=AUDIT_SCOPE)
+    try:
+        corpus = build_corpus(repository, ref="HEAD", scope=AUDIT_SCOPE)
+    except ValueError as exc:
+        return [], {}, "", str(exc) or "that is not a repository name"
     result = check_repository(corpus)
     note = ""
     if repository:
@@ -681,12 +686,15 @@ def _audit(
         [f.as_dict() for f in result.results],
         result.summary.as_dict() if result.summary else {},
         note,
+        "",
     )
 
 
 @app.get("/standards.json")
 def standards_json(repository: Optional[str] = None) -> dict[str, Any]:
-    findings, summary, note = _audit(repository)
+    findings, summary, note, error = _audit(repository)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
     return {
         "repository": repository,
         "summary": summary,
@@ -699,6 +707,17 @@ def standards_json(repository: Optional[str] = None) -> dict[str, Any]:
     }
 
 
+@app.get("/connect", response_class=HTMLResponse)
+def connect_page(request: Request) -> str:
+    """What somebody actually does with this, in three steps.
+
+    The base URL comes from the request rather than a constant, so the webhook
+    endpoint printed on the page is the one belonging to whichever deployment
+    the reader is looking at.
+    """
+    return render_connect(ROLE, base=str(request.base_url).rstrip("/"))
+
+
 @app.get("/standards", response_class=HTMLResponse)
 def standards_page(repository: Optional[str] = None) -> str:
     """What a repository fails, and what could not be decided from it.
@@ -706,9 +725,17 @@ def standards_page(repository: Optional[str] = None) -> str:
     `?repository=owner/name` points it at real code. Without one it audits the
     demo corpus, which is what the recorded demo and every offline test use.
     """
-    findings, summary, note = _audit(repository)
+    findings, summary, note, error = _audit(repository)
+    # A typo in the form is not a server fault. It used to raise out of the
+    # corpus and land as a 500, which reads as "this is broken" rather than
+    # "check the name", and the form is the first thing a stranger touches.
     return render_standards(
-        findings, summary, ROLE, repository=repository, note=note
+        findings,
+        summary,
+        ROLE,
+        repository=None if error else repository,
+        note=note,
+        form=audit_form(repository, error),
     )
 
 

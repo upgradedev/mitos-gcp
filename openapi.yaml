@@ -160,6 +160,25 @@ paths:
                 type: object
           description: Successful Response
       summary: Config
+  /connect:
+    get:
+      description: 'What somebody actually does with this, in three steps.
+
+
+        The base URL comes from the request rather than a constant, so the webhook
+
+        endpoint printed on the page is the one belonging to whichever deployment
+
+        the reader is looking at.'
+      operationId: connect_page_connect_get
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: Successful Response
+      summary: Connect Page
   /execute:
     post:
       description: 'Perform the governed write. Writer service only.

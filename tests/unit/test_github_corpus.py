@@ -140,3 +140,75 @@ def test_a_repository_means_the_real_one():
 
 def test_the_default_scope_is_used_when_none_is_given():
     assert build_corpus("owner/repo").scope == DEFAULT_PREFIXES
+
+
+# --------------------------------------------------------------------------
+# The repository name reaches a URL, so it is validated before it gets there
+# --------------------------------------------------------------------------
+
+
+REJECTED = [
+    # Escapes the /repos/ prefix once a client normalises the path, so the
+    # request lands on a different GitHub endpoint than the one intended.
+    "../../user",
+    "a/b/../../../orgs/github",
+    # Truncates the path, so the trailing /git/trees/HEAD never arrives.
+    "a/b#frag",
+    # Appends parameters to somebody else's request.
+    "a/b?per_page=1&x=",
+    "noslash",
+    "/leading",
+    "trailing/",
+    "a b/c",
+    "a/b c",
+    "-lead/x",
+    "a/..",
+    "",
+]
+
+ACCEPTED = [
+    "upgradedev/archon-gcp-agentic",
+    "a/b",
+    "x-y/z.dot_underscore",
+    "A1/B2",
+]
+
+
+@pytest.mark.parametrize("repository", REJECTED)
+def test_a_repository_name_that_could_steer_a_url_is_refused(repository):
+    """`repository` arrives from a query string on a public page.
+
+    No credential is sent today, so the worst case is a wrong public read. The
+    README already contemplates a token for private repositories, and a token
+    would turn this into a credentialed request to an endpoint the caller
+    picked.
+    """
+    with pytest.raises(ValueError):
+        GitHubCorpus(repository=repository)
+
+
+@pytest.mark.parametrize("repository", ACCEPTED)
+def test_a_real_repository_name_is_not_refused(repository):
+    """The other direction, so the check is not simply refusing everything."""
+    assert GitHubCorpus(repository=repository).repository == repository
+
+
+@pytest.mark.parametrize("ref", ["../etc", "x..y", "a" * 300, "with space"])
+def test_a_ref_that_could_steer_a_url_is_refused(ref):
+    with pytest.raises(ValueError):
+        GitHubCorpus(repository="a/b", ref=ref)
+
+
+@pytest.mark.parametrize("ref", ["HEAD", "main", "v1.2.3", "feature/x", "a" * 40])
+def test_a_real_ref_is_not_refused(ref):
+    assert GitHubCorpus(repository="a/b", ref=ref).ref == ref
+
+
+def test_the_refusal_happens_before_any_request_is_made():
+    """Validation at construction, not at call time.
+
+    A check that only runs when a read happens leaves every other caller
+    holding an object that will misbehave later.
+    """
+    with pytest.raises(ValueError):
+        GitHubCorpus(repository="../../user")
