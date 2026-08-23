@@ -223,3 +223,69 @@ def test_the_agentic_specialist_chooses_what_to_read():
         "both items produced an identical read sequence, which is a fixed "
         "pipeline wearing an agent's clothes"
     )
+
+
+# --------------------------------------------------------------------------
+# The standards auditor's agentic half
+# --------------------------------------------------------------------------
+
+
+def test_the_standards_reader_opens_files_and_settles_something():
+    """The five rules a pattern refused, given to something that can read.
+
+    Without this the standards auditor is twenty-four regular expressions with
+    an agentic story attached to it, which is the shape of failure this project
+    was started to avoid.
+    """
+    from mitos.gemini import build_standards_reader
+    from mitos.standards import AUDIT_SCOPE, judgement_queue
+    from mitos.tools import DictCorpus
+
+    # A repository whose README describes an architecture the code does not
+    # have. No pattern can settle that; a reader who opens both can.
+    corpus = DictCorpus(
+        {
+            "README.md": (
+                "# Billing\n\n## Architecture\n\n"
+                "Requests arrive on a Kafka topic and are consumed by a pool of "
+                "workers writing to Cassandra.\n"
+            ),
+            "app/main.py": (
+                "from fastapi import FastAPI\n"
+                "import sqlite3\n\n"
+                "app = FastAPI()\n\n"
+                "@app.get('/invoices')\n"
+                "def invoices():\n"
+                "    return sqlite3.connect('billing.db').execute('select 1').fetchall()\n"
+            ),
+        }
+    )
+
+    queue = judgement_queue(corpus)
+    assert queue, "nothing was deferred, so there is nothing to give a reader"
+
+    reader = build_standards_reader(scope=AUDIT_SCOPE)
+    assert reader is not None, "MITOS_MODEL is set, so a reader must be built"
+
+    judgements = reader.read(queue, corpus)
+
+    assert judgements, (
+        "the reader settled nothing at all. It may be correct that no rule "
+        "could be judged, but on a README describing Kafka over a file that "
+        "imports sqlite3 it is more likely the wiring is broken"
+    )
+    known = set(corpus.paths())
+    for item in judgements:
+        assert item.get("verdict") in ("failed", "suspected"), item
+        assert item.get("looked_at"), f"a judgement with no path read: {item}"
+        # The reader must have read the repository under audit and no other.
+        # The first live run reported on services/customer/README.md, a path
+        # from the demo corpus, because `read` built a corpus of its own. The
+        # finding was fluent, specific and about a repository that was not
+        # being audited. Asserting the paths exist is what catches that;
+        # asserting the list is non-empty is not.
+        outside = [p for p in item["looked_at"] if p not in known]
+        assert not outside, (
+            f"the reader cited {outside}, which is not in the audited corpus "
+            f"{sorted(known)}. It read a different tree than the one audited"
+        )

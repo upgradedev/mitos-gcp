@@ -97,6 +97,7 @@ def run_chore(
     publisher: Optional[SpecRepo] = None,
     classifier: Any = None,
     doc_agent: Any = None,
+    repository: Optional[str] = None,
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
@@ -117,10 +118,18 @@ def run_chore(
     root = record(
         "trigger.pull_request",
         "webhook",
-        {"pr": pr.number, "title": pr.title, "files": pr.paths()},
+        {
+            "pr": pr.number,
+            "title": pr.title,
+            "files": pr.paths(),
+            # None is not missing data. It means the specialists read the
+            # built-in demo corpus rather than a checkout of anything, and the
+            # dashboard has to be able to tell those two apart.
+            "repository": repository,
+        },
         None,
     )
-    emit("trigger", f"PR {pr.number} — {pr.title}\n  {len(pr.files)} files from {pr.author}")
+    emit("trigger", f"PR {pr.number}: {pr.title}\n  {len(pr.files)} files from {pr.author}")
 
     # 2. The branch point. A model may widen it and can never narrow it.
     dispatch, divergence = fleet.route_with_model(pr, classifier)
