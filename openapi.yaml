@@ -326,6 +326,66 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Runs Page
+  /standards:
+    get:
+      description: 'What a repository fails, and what could not be decided from it.
+
+
+        `?repository=owner/name` points it at real code. Without one it audits the
+
+        demo corpus, which is what the recorded demo and every offline test use.'
+      operationId: standards_page_standards_get
+      parameters:
+      - in: query
+        name: repository
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Repository
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Standards Page
+  /standards.json:
+    get:
+      operationId: standards_json_standards_json_get
+      parameters:
+      - in: query
+        name: repository
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Repository
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Standards Json Standards Json Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Standards Json
   /thread:
     get:
       operationId: thread_thread_get

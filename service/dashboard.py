@@ -208,6 +208,7 @@ _NAV = (
     ("/", "overview"),
     ("/fleet", "fleet"),
     ("/runs", "runs"),
+    ("/standards", "standards"),
     ("/thread/view", "thread"),
 )
 
@@ -1054,5 +1055,132 @@ def render_runs(
         sub_html=_window(len(entries), total),
         role=role,
         active="/runs",
+        body_html=body,
+    )
+
+
+# --------------------------------------------------------------------------
+# Page 4. What does this repository fail, and what could not be decided here?
+# --------------------------------------------------------------------------
+
+# Verdicts, in the order a reader should meet them, with the tone each carries.
+# The three that are not a decision get the unknown tone rather than a colour,
+# because a compliance page that paints "could not be determined" the same green
+# as "passed" is the failure this whole module was built to avoid.
+_VERDICT_TONE = {
+    "failed": ("bad", "failed"),
+    "suspected": ("warn", "suspected"),
+    "passed": ("good", "passed"),
+    "not_applicable": ("z", "does not apply"),
+    # `u`, the class `_unknown` uses, not a new name. Writing "unknown" here
+    # produced a class the stylesheet does not define, so the three verdicts
+    # that are not a decision rendered with no styling at all and looked like
+    # plain text beside a green pass. The page exists to keep those apart.
+    "undetermined": ("u", "could not be determined"),
+    "needs_judgement": ("u", "needs a reader"),
+    "not_checkable": ("u", "leaves no trace here"),
+}
+_VERDICT_ORDER = tuple(_VERDICT_TONE)
+
+
+def _finding_card(finding: dict[str, Any]) -> str:
+    verdict = str(finding.get("verdict") or "undetermined")
+    tone, label = _VERDICT_TONE.get(verdict, ("unknown", verdict))
+    severity = str(finding.get("severity") or "")
+    head = (
+        f'<div class=h><span class=n>{_esc(finding.get("rule_id"))}</span>'
+        f"{_badge(severity) if severity else ''}"
+        f"<span class=v>{_tone(label, tone)}</span></div>"
+    )
+    body = _row("looked for", _esc(finding.get("looked_for")))
+    looked_at = finding.get("looked_at") or ()
+    body += _row(
+        "looked at",
+        _join(looked_at, "")
+        or _unknown("nothing was opened for this rule"),
+    )
+    body += _row("found", _esc(finding.get("found")))
+    if finding.get("limitation"):
+        body += _row("limitation", _unknown(str(finding["limitation"])))
+    return f'<section class="item">{head}{body}</section>'
+
+
+def _audit_summary_panel(summary: dict[str, Any], repository: Optional[str]) -> str:
+    """The counts, with the undecided ones kept out of the decided ones.
+
+    `passed` and `failed` are a verdict. Everything under "not decided here" is
+    not, and the two are never added together. A single compliance percentage
+    would have to pick a side for the middle column, and every choice it could
+    make would be a lie.
+    """
+    decided = int(summary.get("passed", 0)) + int(summary.get("failed", 0))
+    body = _row(
+        "repository",
+        _esc(repository)
+        if repository
+        else _unknown("the built-in demo corpus, not your code"),
+    )
+    body += _row("rules in the standard", _esc(summary.get("rules", 0)))
+    body += _cell("passed", _tone(str(summary.get("passed", 0)), "good"))
+    body += _cell(
+        "failed",
+        _tone(str(summary.get("failed", 0)), "bad" if summary.get("failed") else "good"),
+    )
+    body += _cell(
+        "suspected",
+        _tone(str(summary.get("suspected", 0)), "warn" if summary.get("suspected") else "z"),
+    )
+    body += _row(
+        "not decided here",
+        _unknown(
+            f"{summary.get('undetermined', 0)} could not be determined, "
+            f"{summary.get('needs_judgement', 0)} need a reader, "
+            f"{summary.get('not_checkable', 0)} leave no trace in a repository, "
+            f"{summary.get('not_applicable', 0)} do not apply"
+        ),
+    )
+    return _panel(
+        "the audit",
+        body,
+        note=(
+            f"{decided} of {summary.get('rules', 0)} rules were decided here. The rest "
+            "are listed as undecided rather than folded into either column, because a "
+            "number that counts silence as compliance is worse than no number."
+        ),
+    )
+
+
+def render_standards(
+    findings: list[dict[str, Any]],
+    summary: dict[str, Any],
+    role: str,
+    *,
+    repository: Optional[str] = None,
+    note: str = "",
+) -> str:
+    """Page 4. `findings` and `summary` are what GET /standards.json returns.
+
+    Sorted by verdict rather than by rule id, so the failures are the first
+    thing on the page and the six rules that a repository cannot answer are the
+    last. Nobody scrolls to find out what is broken.
+    """
+    findings = list(findings or [])
+    order = {v: i for i, v in enumerate(_VERDICT_ORDER)}
+    findings.sort(key=lambda f: (order.get(str(f.get("verdict")), 99), str(f.get("rule_id"))))
+
+    body = _audit_summary_panel(summary or {}, repository)
+    if note:
+        body += _panel("about this run", _row("note", _unknown(note)))
+    body += _panel(
+        "every rule, worst first",
+        "".join(_finding_card(f) for f in findings)
+        or _zero("no rules were evaluated"),
+    )
+    return _shell(
+        title=f"Mitos · standards",
+        heading="Mitos · standards",
+        sub_html=_esc(repository) if repository else "the demo corpus",
+        role=role,
+        active="/standards",
         body_html=body,
     )
