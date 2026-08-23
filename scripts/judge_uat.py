@@ -159,6 +159,54 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         f"HTTP {status}, {len(doc.get('paths', {}))} paths",
     )
 
+    # The pages a judge actually clicks. Left out of this suite once already:
+    # the dashboard shipped, the rebuild would have gone green, and nothing here
+    # would have noticed a deploy that dropped it. Same shape as the missing
+    # MITOS_WRITER_URL, which was caught by luck rather than by a check.
+    print("\n== The surface a judge clicks")
+    for path, must_contain in (
+        ("/", "the privilege boundary"),
+        ("/fleet", "catalogued companions"),
+        ("/runs", "this window, counted"),
+        ("/standards", "the audit"),
+        ("/thread/view", "Mitos"),
+    ):
+        status, raw = get(f"{reader}{path}")
+        r.record(
+            status == 200 and must_contain in raw,
+            f"{path} renders",
+            f"HTTP {status}, {len(raw)} bytes",
+        )
+
+    status, raw = get(f"{reader}/config")
+    cfg = as_json(raw) or {}
+    r.record(
+        status == 200 and bool(cfg.get("read_scope")) and "max_reads_per_run" in cfg,
+        "/config publishes the bounds as values",
+        f"scope={cfg.get('read_scope')} reads={cfg.get('max_reads_per_run')}",
+    )
+
+    status, raw = get(f"{reader}/standards.json")
+    summary = (as_json(raw) or {}).get("summary") or {}
+    r.record(
+        status == 200 and summary.get("rules", 0) > 0,
+        "the standards audit runs and returns a verdict per rule",
+        f"{summary.get('rules')} rules, {summary.get('failed')} failed",
+    )
+    # The load-bearing property of that module, asserted against the live
+    # service and not only in a unit test: silence is never counted as
+    # compliance.
+    r.record(
+        summary.get("could_not_be_determined", 0) > 0
+        and summary.get("passed", 0) + summary.get("failed", 0)
+        + summary.get("could_not_be_determined", 0)
+        + summary.get("suspected", 0)
+        + summary.get("not_applicable", 0)
+        <= summary.get("rules", 0),
+        "undecided rules are reported as undecided, not folded into the pass count",
+        f"{summary.get('could_not_be_determined')} undecided of {summary.get('rules')}",
+    )
+
     print("\n== The chore, streamed, as a judge would watch it")
     # Deliberately streamed rather than awaited. With a model in the loop the
     # whole chore takes minutes, and a judge who posts to a blocking endpoint

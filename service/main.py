@@ -55,7 +55,15 @@ from mitos import webhook as wh  # noqa: E402
 
 from mitos.tools import MAX_BYTES_PER_READ, MAX_READS_PER_RUN  # noqa: E402
 
-from .dashboard import render_fleet, render_overview, render_runs  # noqa: E402
+from mitos.standards import AUDIT_SCOPE, check_repository  # noqa: E402
+from mitos.tools import build_corpus  # noqa: E402
+
+from .dashboard import (  # noqa: E402
+    render_fleet,
+    render_overview,
+    render_runs,
+    render_standards,
+)
 from .thread_view import render as render_thread  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
@@ -639,6 +647,67 @@ def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
     """
     everything = ledger().all()
     return [e.to_doc() for e in everything[-limit:]], len(everything)
+
+
+def _audit(
+    repository: Optional[str] = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    """Audit a repository against the engineering standard.
+
+    Only the deterministic pass runs here, and that is a deliberate limit rather
+    than an unfinished one. It returns in about a millisecond over the demo
+    corpus, so a page can be served synchronously. The agentic reader takes
+    minutes, because it is an agent opening files one at a time and thinking
+    between them, and a judge clicking a link should not be holding a socket
+    open while that happens. It has a live test instead.
+    """
+    corpus = build_corpus(repository, ref="HEAD", scope=AUDIT_SCOPE)
+    result = check_repository(corpus)
+    note = ""
+    if repository:
+        # Said on the page, not discovered by the reader when rules start coming
+        # back undetermined. Unauthenticated GitHub allows 60 requests an hour
+        # and an audit reads up to 300 files, so a large repository will run out
+        # partway through and the rules whose files were refused report that
+        # they could not be determined.
+        note = (
+            "Read over the public GitHub API with no credential, which allows 60 "
+            "requests an hour. A repository large enough to exhaust that will "
+            "have rules reported as could not be determined rather than passed."
+        )
+    return (
+        [f.as_dict() for f in result.results],
+        result.summary.as_dict() if result.summary else {},
+        note,
+    )
+
+
+@app.get("/standards.json")
+def standards_json(repository: Optional[str] = None) -> dict[str, Any]:
+    findings, summary, note = _audit(repository)
+    return {
+        "repository": repository,
+        "summary": summary,
+        "findings": findings,
+        "note": note,
+        "agentic_pass": (
+            "not run here. The five rules a pattern cannot settle stay at "
+            "needs_judgement, which is the honest verdict for them."
+        ),
+    }
+
+
+@app.get("/standards", response_class=HTMLResponse)
+def standards_page(repository: Optional[str] = None) -> str:
+    """What a repository fails, and what could not be decided from it.
+
+    `?repository=owner/name` points it at real code. Without one it audits the
+    demo corpus, which is what the recorded demo and every offline test use.
+    """
+    findings, summary, note = _audit(repository)
+    return render_standards(
+        findings, summary, ROLE, repository=repository, note=note
+    )
 
 
 @app.get("/fleet", response_class=HTMLResponse)

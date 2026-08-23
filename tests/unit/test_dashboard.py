@@ -29,6 +29,7 @@ from service.dashboard import (
     render_fleet,
     render_overview,
     render_runs,
+    render_standards,
 )
 
 NOW = "2026-08-22T18:30:00+00:00"
@@ -592,3 +593,111 @@ def test_a_blocked_response_still_parks_a_run():
     ]
 
     assert "compliance-companion" in render_runs(entries, "reader", now=NOW)
+
+
+# --------------------------------------------------------------------------
+# Page 4, the standards audit
+# --------------------------------------------------------------------------
+
+
+def a_finding(rule_id, verdict, **over):
+    base = {
+        "rule_id": rule_id,
+        "severity": "critical",
+        "verdict": verdict,
+        "looked_for": "a gitleaks step in the first stage",
+        "looked_at": ["azure-pipelines.yml"],
+        "found": "the scan runs after build",
+        "limitation": "",
+    }
+    base.update(over)
+    return base
+
+
+A_SUMMARY = {
+    "rules": 24,
+    "checked": 13,
+    "passed": 1,
+    "failed": 3,
+    "suspected": 0,
+    "not_applicable": 7,
+    "undetermined": 2,
+    "needs_judgement": 5,
+    "not_checkable": 6,
+}
+
+
+def test_the_standards_page_renders_with_nothing_at_all():
+    assert render_standards([], {}, "reader")
+
+
+def test_a_verdict_that_is_not_a_decision_is_not_painted_as_one():
+    """`could not be determined` must not look like `passed`.
+
+    The whole argument of this module is that silence and compliance are
+    different facts. If they share a colour the page has lost the argument on
+    the only surface a judge actually looks at.
+    """
+    page = render_standards(
+        [
+            a_finding("a", "passed", found="the scan is first"),
+            a_finding("b", "undetermined", found="the file could not be parsed"),
+            a_finding("c", "needs_judgement", looked_at=[], found="a reader must decide"),
+        ],
+        A_SUMMARY,
+        "reader",
+    )
+
+    assert "could not be determined" in page
+    assert "needs a reader" in page
+    # The undecided ones carry the unknown style, never the pass style. Both
+    # quoting forms are accepted because `_tone` and `_unknown` differ there;
+    # what must hold is that the class is `u` and that the stylesheet knows it.
+    from service.dashboard import _CSS
+
+    assert ".u" in _CSS, "the unknown style is not defined, so it renders as plain text"
+    for phrase in ("could not be determined", "needs a reader"):
+        i = page.index(phrase)
+        before = page[max(0, i - 120) : i]
+        assert 'class="u"' in before or "class=u" in before, phrase
+        assert "good" not in before, phrase
+
+
+def test_the_page_never_prints_a_single_compliance_percentage():
+    """Any one number has to pick a side for the undecided column.
+
+    Every choice it could make is a lie, so the page states the three groups
+    and refuses to reduce them.
+    """
+    page = render_standards([a_finding("a", "failed")], A_SUMMARY, "reader")
+
+    assert "%" not in page
+    assert "4 of 24 rules were decided here" in page
+
+
+def test_failures_are_first_and_untestable_rules_are_last():
+    page = render_standards(
+        [
+            a_finding("z-not-checkable", "not_checkable", looked_at=[], found="process"),
+            a_finding("a-failed", "failed"),
+        ],
+        A_SUMMARY,
+        "reader",
+    )
+
+    assert page.index("a-failed") < page.index("z-not-checkable")
+
+
+def test_a_repository_name_from_a_query_string_cannot_inject_markup():
+    """`?repository=` is user input and reaches the heading and the summary."""
+    page = render_standards(
+        [], A_SUMMARY, "reader", repository='"><img src=x onerror=alert(1)>'
+    )
+
+    assert "<img" not in page
+
+
+def test_the_page_says_when_it_audited_the_demo_corpus_rather_than_your_code():
+    page = render_standards([], A_SUMMARY, "reader")
+
+    assert "demo corpus" in page
