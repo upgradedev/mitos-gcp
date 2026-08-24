@@ -139,34 +139,110 @@ async def _ask(agent_name: str, instruction: str, prompt: str, model: str) -> st
 _RETRYABLE = ("resourceexhausted", "429", "unavailable", "deadline", "quota")
 _MAX_ATTEMPTS = 4
 
+# Measured, not guessed. Three consecutive classifications of the same small
+# diff on the global Vertex endpoint took 91.2s, 19.0s and 13.4s. The median is
+# fine and the tail is not, and there was no deadline anywhere, so a slow call
+# was absorbed in full and then retried up to four times.
+#
+# That tail is the whole reason this project could not record a video: the same
+# run took 156s, 209s and 645s at one pace, `POST /run` stopped answering inside
+# two minutes, and the deployed judge suite failed with a connection reset after
+# ten. One missing timeout, three symptoms that looked unrelated.
+#
+# Two bounds, because one is not enough. `_ATTEMPT_TIMEOUT_S` stops any single
+# call from running long. `_TOTAL_BUDGET_S` stops four bounded attempts from
+# adding up to something unbounded, which is the mistake a per-attempt timeout
+# invites.
+_ATTEMPT_TIMEOUT_S = float(os.environ.get("MITOS_MODEL_TIMEOUT_S", "45"))
+_TOTAL_BUDGET_S = float(os.environ.get("MITOS_MODEL_BUDGET_S", "110"))
 
-def _run(coro_factory, attempts: int = _MAX_ATTEMPTS):
-    """Run a coroutine, retrying transient inference failures with backoff.
+# An agentic call is several exchanges, not one. It lists the repository,
+# decides what to open, reads, and only then answers, and all of that is
+# inside a single `_run`. Held to the one-shot deadline it came back having
+# refused without opening anything, which reads exactly like an agent that
+# guessed, and the live suite is right to fail on that.
+_AGENT_TIMEOUT_S = float(os.environ.get("MITOS_AGENT_TIMEOUT_S", "180"))
+_AGENT_BUDGET_S = float(os.environ.get("MITOS_AGENT_BUDGET_S", "300"))
+
+
+class ModelTooSlow(TimeoutError):
+    """The model did not answer inside the budget.
+
+    A distinct type because the callers treat it differently from a wrong
+    answer: the fleet carries on with the deterministic result, which under
+    ADR-002 is the strict one, and records that the model contributed nothing.
+    It is never a reason to let something through.
+    """
+
+
+def _run(
+    coro_factory,
+    attempts: int = _MAX_ATTEMPTS,
+    attempt_timeout: float = _ATTEMPT_TIMEOUT_S,
+    total_budget: float = _TOTAL_BUDGET_S,
+):
+    """Run a coroutine under a deadline, retrying transient failures.
 
     Takes a factory rather than a coroutine because a coroutine cannot be
     awaited twice, and the whole point here is to be able to try again.
+
+    Both bounds are enforced. A single attempt is cut off at `attempt_timeout`,
+    and the loop stops once `total_budget` is spent, including the backoff it
+    slept. Without the second, four bounded attempts plus backoff is still seven
+    minutes, which is not a bound anybody can plan around.
+
+    The backoff carries jitter. Four specialists retrying a shared endpoint in
+    lockstep is how a busy minute becomes a thundering herd of our own making.
     """
     import asyncio  # noqa: PLC0415
+    import random  # noqa: PLC0415
     import time  # noqa: PLC0415
+
+    async def _bounded():
+        return await asyncio.wait_for(coro_factory(), timeout=attempt_timeout)
 
     if not callable(coro_factory):
         # Callers that pass a coroutine directly get one attempt, which is the
         # old behaviour and is still correct for anything not worth retrying.
         return asyncio.run(coro_factory)
 
+    started = time.monotonic()
     last: Exception | None = None
     for attempt in range(attempts):
+        spent = time.monotonic() - started
+        if spent >= total_budget:
+            break
         try:
-            return asyncio.run(coro_factory())
+            return asyncio.run(_bounded())
+        except asyncio.TimeoutError as exc:
+            last = ModelTooSlow(
+                f"the model did not answer within {attempt_timeout:g}s "
+                f"on attempt {attempt + 1}"
+            )
+            last.__cause__ = exc
         except Exception as exc:  # noqa: BLE001 - re-raised below
             blob = f"{type(exc).__name__} {exc}".lower()
             if not any(term in blob for term in _RETRYABLE):
                 raise
             last = exc
-            if attempt < attempts - 1:
-                time.sleep(2**attempt)
+        if attempt < attempts - 1:
+            # Full jitter. Sleeping exactly 2**n means every caller that
+            # started together wakes together.
+            # `SystemRandom` rather than a suppression comment. The value is
+            # jitter and does not need to be unguessable, but silencing a
+            # scanner is a debt somebody inherits, and the CSPRNG-backed
+            # call costs one word and is not flagged at all.
+            delay = random.SystemRandom().uniform(0, 2**attempt)
+            remaining = total_budget - (time.monotonic() - started)
+            if remaining <= 0:
+                break
+            time.sleep(min(delay, remaining))
+
     if last is None:  # pragma: no cover - unreachable while attempts >= 1
         raise RuntimeError("retry loop ended with no result and no error")
+    # The original error, not a wrapper. A quota exhaustion is not slowness, and
+    # relabelling it would send the next reader looking at latency for a problem
+    # that is a billing quota. Only a real timeout is reported as one.
     raise last
 
 
@@ -728,7 +804,13 @@ class AgenticSpecialist:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go))
+            data = _extract_json(
+                _run(
+                    go,
+                    attempt_timeout=_AGENT_TIMEOUT_S,
+                    total_budget=_AGENT_BUDGET_S,
+                )
+            )
         except Exception as exc:
             return unusable_reply(exc, log.as_dict())
 
@@ -920,7 +1002,13 @@ class StandardsReader:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go))
+            data = _extract_json(
+                _run(
+                    go,
+                    attempt_timeout=_AGENT_TIMEOUT_S,
+                    total_budget=_AGENT_BUDGET_S,
+                )
+            )
         except Exception:  # noqa: BLE001 - an unreachable reader settles nothing
             return []
 
