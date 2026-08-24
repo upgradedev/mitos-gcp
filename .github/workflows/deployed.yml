@@ -173,11 +173,20 @@ jobs:
           set -o pipefail
           fail=0
           while IFS='|' read -r path phrase; do
-            body=$(curl -s --max-time 30 "$READER$path")
-            if printf '%s' "$body" | grep -qF "$phrase"; then
-              echo "ok   $path"
+            # Status and body separately, and a timeout long enough for the
+            # heaviest page. /thread/view renders every entry in the window and
+            # comes back a quarter of a megabyte; at 30 seconds it timed out on
+            # a cold instance, curl returned nothing, and the check reported
+            # "did not contain" for a page that was fine. A check that blames
+            # the wrong thing costs more than no check.
+            code=$(curl -s -o /tmp/page.html -w '%{http_code}' --max-time 90 "$READER$path")
+            if [ "$code" != "200" ]; then
+              echo "::error::$path answered $code"; fail=1; continue
+            fi
+            if grep -qF "$phrase" /tmp/page.html; then
+              echo "ok   $path  ($(wc -c < /tmp/page.html) bytes)"
             else
-              echo "::error::$path did not contain: $phrase"; fail=1
+              echo "::error::$path returned 200 but did not contain: $phrase"; fail=1
             fi
           done <<'PAGES'
           /|the privilege boundary
