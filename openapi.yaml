@@ -12,6 +12,10 @@ components:
         branch:
           title: Branch
           type: string
+        commit:
+          default: ''
+          title: Commit
+          type: string
         message:
           title: Message
           type: string
