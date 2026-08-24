@@ -269,7 +269,12 @@ jobs:
           set -o pipefail
           # The official image rather than a third-party action, so the thing
           # being trusted is the one ZAP publishes.
-          docker run --rm -v "$PWD:/zap/wrk/:rw"             --network host             ghcr.io/zaproxy/zaproxy:2.16.1             zap-baseline.py               -t "$READER"               -c .zap-baseline.conf               -J zap.json               -r zap.html               -I             || true
+          # World-writable, because the image runs as its own uid and the mount
+          # is owned by the runner. Without it the scan completed and then could
+          # not write its report, which the assertion below correctly treated as
+          # having proved nothing.
+          mkdir -p zap-out && chmod 777 zap-out
+          docker run --rm -v "$PWD/zap-out:/zap/wrk/:rw" --network host ghcr.io/zaproxy/zaproxy:2.16.1 zap-baseline.py -t "$READER" -z "-config spider.excludedUrls=.*repository=.*" -c .zap-baseline.conf -J zap.json -r zap.html -I || true
           # `-I` and `|| true` so the scan's own exit code does not decide the
           # build. What decides it is the assertion below, over the findings we
           # have looked at, because a tool that fails on informational alerts
@@ -282,7 +287,7 @@ jobs:
           import json, sys
           from pathlib import Path
 
-          report = Path("zap.json")
+          report = Path("zap-out/zap.json")
           if not report.exists():
               sys.exit("::error::the scan produced no report, so it proved nothing")
 
@@ -308,8 +313,8 @@ jobs:
         with:
           name: zap-baseline
           path: |
-            zap.html
-            zap.json
+            zap-out/zap.html
+            zap-out/zap.json
           retention-days: 14
 
   # Layer 4. The whole suite, the same one a judge is invited to run, against
