@@ -145,3 +145,34 @@ def test_an_unreachable_model_never_makes_the_gate_more_permissive():
     out = _with_critic(failing, "a draft", _Unreachable())
 
     assert out.passed is False
+
+
+def test_a_tool_using_call_gets_a_budget_sized_for_a_tool_loop():
+    """A classification is one exchange; an agentic call is several.
+
+    Held to the one-shot deadline, the agentic specialist came back having
+    refused without opening anything, which reads exactly like an agent that
+    guessed. The live suite caught it. The two budgets are separate because the
+    two things are different sizes of work, not because one was inconvenient.
+    """
+    from mitos.gemini import (
+        _AGENT_BUDGET_S,
+        _AGENT_TIMEOUT_S,
+        _ATTEMPT_TIMEOUT_S,
+        _TOTAL_BUDGET_S,
+    )
+
+    assert _AGENT_TIMEOUT_S > _ATTEMPT_TIMEOUT_S
+    assert _AGENT_BUDGET_S > _TOTAL_BUDGET_S
+
+
+def test_both_tool_using_paths_actually_use_that_budget():
+    """Declaring the constant and not passing it is the failure this catches."""
+    import inspect
+
+    from mitos import gemini
+
+    for method in (gemini.AgenticSpecialist.assess, gemini.StandardsReader.read):
+        source = inspect.getsource(method)
+        assert "_AGENT_TIMEOUT_S" in source, f"{method.__qualname__} uses the one-shot deadline"
+        assert "_AGENT_BUDGET_S" in source, f"{method.__qualname__} uses the one-shot budget"

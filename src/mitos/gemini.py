@@ -156,6 +156,14 @@ _MAX_ATTEMPTS = 4
 _ATTEMPT_TIMEOUT_S = float(os.environ.get("MITOS_MODEL_TIMEOUT_S", "45"))
 _TOTAL_BUDGET_S = float(os.environ.get("MITOS_MODEL_BUDGET_S", "110"))
 
+# An agentic call is several exchanges, not one. It lists the repository,
+# decides what to open, reads, and only then answers, and all of that is
+# inside a single `_run`. Held to the one-shot deadline it came back having
+# refused without opening anything, which reads exactly like an agent that
+# guessed, and the live suite is right to fail on that.
+_AGENT_TIMEOUT_S = float(os.environ.get("MITOS_AGENT_TIMEOUT_S", "180"))
+_AGENT_BUDGET_S = float(os.environ.get("MITOS_AGENT_BUDGET_S", "300"))
+
 
 class ModelTooSlow(TimeoutError):
     """The model did not answer inside the budget.
@@ -220,7 +228,8 @@ def _run(
         if attempt < attempts - 1:
             # Full jitter. Sleeping exactly 2**n means every caller that
             # started together wakes together.
-            delay = random.uniform(0, 2**attempt)  # noqa: S311 - not a secret
+            # nosec B311 - jitter for a retry, not a cryptographic value.
+            delay = random.uniform(0, 2**attempt)  # noqa: S311
             remaining = total_budget - (time.monotonic() - started)
             if remaining <= 0:
                 break
@@ -792,7 +801,13 @@ class AgenticSpecialist:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go))
+            data = _extract_json(
+                _run(
+                    go,
+                    attempt_timeout=_AGENT_TIMEOUT_S,
+                    total_budget=_AGENT_BUDGET_S,
+                )
+            )
         except Exception as exc:
             return unusable_reply(exc, log.as_dict())
 
@@ -984,7 +999,13 @@ class StandardsReader:
             return "".join(chunks)
 
         try:
-            data = _extract_json(_run(go))
+            data = _extract_json(
+                _run(
+                    go,
+                    attempt_timeout=_AGENT_TIMEOUT_S,
+                    total_budget=_AGENT_BUDGET_S,
+                )
+            )
         except Exception:  # noqa: BLE001 - an unreachable reader settles nothing
             return []
 
