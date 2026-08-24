@@ -59,6 +59,7 @@ def use(store, approval, **over):
         branch=BRANCH,
         body=BODY,
         by="writer@test",
+        commit="",
     )
     args.update(over)
     return verify_and_consume(store, **args)
@@ -214,3 +215,37 @@ def test_the_public_reader_holds_no_publisher():
     assert "if not PUBLIC_DEMO_MAY_WRITE:\n        # " in source, (
         "the publisher is no longer gated on the flag"
     )
+
+
+def test_an_approval_does_not_survive_the_author_pushing_again():
+    """An approval is a statement about a diff somebody read.
+
+    A branch that moves afterwards makes that a different diff. Without the
+    commit in the digest, an approval granted against one head sha stayed valid
+    after the author pushed another, which is the one thing a reviewer would not
+    expect to be true.
+    """
+    store = InMemoryApprovalStore()
+    reviewed = "aaa1111"
+    approval = store.grant(
+        an_approval(
+            commit=reviewed,
+            digest=body_digest(
+                repository=REPO, path=PATH, branch=BRANCH, body=BODY, commit=reviewed
+            ),
+        )
+    )
+
+    # The same bytes, the same path, the same branch, presented for a later
+    # commit than the one that was approved.
+    with pytest.raises(Mismatch):
+        use(store, approval, commit="bbb2222")
+
+    assert use(store, approval, commit=reviewed).commit == reviewed
+
+
+def test_the_digest_changes_when_only_the_commit_changes():
+    fixed = dict(repository=REPO, path=PATH, branch=BRANCH, body=BODY)
+
+    assert body_digest(commit="aaa1111", **fixed) != body_digest(commit="bbb2222", **fixed)
+    assert body_digest(commit="", **fixed) != body_digest(commit="aaa1111", **fixed)

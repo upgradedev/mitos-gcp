@@ -50,18 +50,30 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def body_digest(*, repository: str, path: str, branch: str, body: str) -> str:
+def body_digest(
+    *, repository: str, path: str, branch: str, body: str, commit: str = ""
+) -> str:
     """The digest an approval binds, over everything that decides the effect.
 
     The body alone is not enough. The same bytes written to a different path or
     a different branch are a different change, and an approval that did not
     cover them would still verify.
+
+    `commit` is the head sha of the pull request the approval was granted for.
+    It is here because an approval is a statement about a diff somebody read,
+    and a branch that moves afterwards makes that diff a different diff. Without
+    it, an approval granted against one commit stayed valid after the author
+    pushed another, which is the one thing a reviewer would not expect.
+
+    Empty for a run with no commit, the offline demo among them, and empty is
+    recorded rather than omitted so the two cases hash differently.
     """
     return content_hash(
         {
             "repository": repository,
             "path": path,
             "branch": branch,
+            "commit": commit,
             "body": body,
         }
     )
@@ -89,6 +101,9 @@ class Approval:
     digest: str
     run_id: str
     actor: str
+    # The head sha the reviewer was looking at. Bound into the digest, so an
+    # approval does not survive the author pushing again.
+    commit: str = ""
     intent: str = "publish_specification"
     intent_origin: str = "human_approval_card"
     nonce: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -119,7 +134,14 @@ class Approval:
         return cls(**fields)
 
     def check(
-        self, *, repository: str, path: str, branch: str, body: str, now: Optional[datetime] = None
+        self,
+        *,
+        repository: str,
+        path: str,
+        branch: str,
+        body: str,
+        commit: str = "",
+        now: Optional[datetime] = None,
     ) -> None:
         """Raise unless this approval covers exactly these bytes, still.
 
@@ -131,8 +153,17 @@ class Approval:
             raise Expired(
                 f"the approval expired at {self.expires_at().isoformat(timespec='seconds')}"
             )
+        # The commit the CALLER presents, not the one stored on the approval.
+        # Recomputing from `self.commit` made the approval verify against
+        # itself, so the field was recorded and never checked: a binding that
+        # reads correctly and enforces nothing. Caught by the test that meant to
+        # prove it worked.
         presented = body_digest(
-            repository=repository, path=path, branch=branch, body=body
+            repository=repository,
+            path=path,
+            branch=branch,
+            body=body,
+            commit=commit,
         )
         if not hmac.compare_digest(presented, self.digest):
             raise Mismatch(
@@ -224,6 +255,7 @@ def verify_and_consume(
     branch: str,
     body: str,
     by: str,
+    commit: str = "",
     now: Optional[datetime] = None,
 ) -> Approval:
     """The whole check, in the order that matters.
@@ -236,7 +268,12 @@ def verify_and_consume(
     if approval is None:
         raise Mismatch("no approval was granted for that nonce")
     approval.check(
-        repository=repository, path=path, branch=branch, body=body, now=now
+        repository=repository,
+        path=path,
+        branch=branch,
+        body=body,
+        commit=commit,
+        now=now,
     )
     store.consume(approval.nonce, by=by)
     return approval

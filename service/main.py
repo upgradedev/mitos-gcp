@@ -47,6 +47,7 @@ from mitos.approval import (  # noqa: E402
     verify_and_consume,
 )
 from mitos.chore import run_chore  # noqa: E402
+from mitos.once import AlreadySeen, build_claims  # noqa: E402
 from mitos.fixtures import PR_4471, PR_4472, SEEDED_HISTORY  # noqa: E402
 from mitos.fleet import CATALOG  # noqa: E402
 from mitos.guard import ROLE_READER, WRITE_TOOLS, is_allowed  # noqa: E402
@@ -270,6 +271,7 @@ def thread(limit: int = 100) -> dict[str, Any]:
 BUILD_SHA = os.environ.get("MITOS_BUILD_SHA", "unknown")
 
 _APPROVALS = None
+_CLAIMS = None
 
 # One limiter per process, for the endpoints that spend money or append to
 # the thread. The read-only pages are not limited: they cost a Firestore
@@ -304,6 +306,13 @@ SPEC_REPOSITORY = os.environ.get("MITOS_SPEC_REPO", "upgradedev/mitos-spec")
 # endpoint that writes on request is the shape of the hole this replaced, even
 # once the bytes are the fleet's own rather than the caller's.
 PUBLIC_DEMO_MAY_WRITE = os.environ.get("MITOS_PUBLIC_DEMO_MAY_WRITE", "") == "yes"
+
+
+def claims():
+    global _CLAIMS
+    if _CLAIMS is None:
+        _CLAIMS = build_claims(PROJECT)
+    return _CLAIMS
 
 
 def approvals():
@@ -413,6 +422,10 @@ class ExecuteRequest(BaseModel):
     # endpoint from choosing what gets written.
     nonce: str = ""
     repository: str = ""
+    # The head sha the reviewer was looking at. Presented, not taken from
+    # the approval, because an approval that verifies against its own
+    # stored value checks nothing.
+    commit: str = ""
 
 
 @app.post("/execute")
@@ -444,6 +457,7 @@ def execute(req: ExecuteRequest) -> dict:
             path=req.path,
             branch=req.branch,
             body=req.body,
+            commit=req.commit,
             by=f"{ROLE}@{PROJECT}",
         )
     except Replayed as exc:
@@ -558,6 +572,31 @@ async def github_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"accepted": False, "reason": str(rej)}, status_code=rej.status)
 
     led = ledger()
+
+    # Claimed before anything is appended or started. GitHub retries a delivery
+    # it did not get a timely answer for, and Cloud Run runs up to four readers,
+    # so the same pull request can arrive twice within seconds on two different
+    # instances. Nothing keyed on the delivery id, so both ran the whole chore:
+    # four model calls each, and two accounts of one event in the thread that is
+    # supposed to BE the account.
+    #
+    # 200 rather than an error. A retried delivery is GitHub behaving correctly,
+    # and answering it with a failure is how a webhook gets disabled.
+    try:
+        claims().claim(delivery.delivery_id, note=f"{delivery.repository}#{delivery.number}")
+    except AlreadySeen:
+        return JSONResponse(
+            {
+                "accepted": True,
+                "duplicate": True,
+                "delivery": delivery.delivery_id,
+                "note": (
+                    "this delivery was handled already; nothing was run again "
+                    "and nothing was appended"
+                ),
+            }
+        )
+
     entry = led.append(
         Entry(
             kind="trigger.webhook",
