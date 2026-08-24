@@ -649,6 +649,12 @@ async def github_webhook(request: Request) -> JSONResponse:
                     payload={"error": f"{type(exc).__name__}: {str(exc)[:300]}"},
                 )
             )
+            # Deliberately not completed. A run that failed for a transient
+            # reason should be retryable, and leaving the lease to expire is
+            # what makes GitHub's next delivery pick it up instead of being
+            # told it already happened.
+        else:
+            claims().complete(delivery.delivery_id, outcome="chore finished")
 
     threading.Thread(target=work, daemon=True).start()
 
