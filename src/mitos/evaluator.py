@@ -219,7 +219,30 @@ def _with_critic(verdict: Verdict, draft: str, critic: Critic) -> Verdict:
     The model still cannot approve anything, cannot clear a finding, and cannot
     reduce what a human is shown. It can only add to it.
     """
-    extra_raw = critic.review(draft, [f.detail for f in verdict.findings])
+    try:
+        extra_raw = critic.review(draft, [f.detail for f in verdict.findings])
+    except Exception as exc:  # noqa: BLE001 - degradation is the behaviour
+        # Not silence. A card that was never reviewed by the critic and a
+        # card the critic had nothing to add to look identical unless one
+        # of them says so, and the person approving cannot tell.
+        return Verdict(
+            passed=verdict.passed,
+            findings=verdict.findings,
+            advisories=verdict.advisories
+            + [
+                Finding(
+                    severity="ADVISORY",
+                    check="model-critic",
+                    detail=(
+                        "the second opinion did not run, so this card carries "
+                        "the deterministic findings only"
+                    ),
+                    evidence=f"{type(exc).__name__}: {str(exc)[:160]}",
+                )
+            ],
+            injection_attempt=verdict.injection_attempt,
+            checked=[*verdict.checked, "model-critic-unavailable"],
+        )
     advisories = [
         Finding(
             severity="ADVISORY",

@@ -454,7 +454,18 @@ def route_with_model(pr: PullRequest, classifier=None) -> tuple[Dispatch, dict]:
     if classifier is None:
         return base, {}
 
-    proposal = classifier.classify(pr)
+    try:
+        proposal = classifier.classify(pr)
+    except Exception as exc:  # noqa: BLE001 - degradation is the behaviour
+        # Union-only means an absent model contributes nothing, so the
+        # deterministic dispatch stands untouched. Recorded rather than
+        # swallowed: a run where the model was unreachable and a run where
+        # it agreed are different runs, and the thread should say which.
+        return base, {
+            "model_reached": False,
+            "why": f"{type(exc).__name__}: {str(exc)[:160]}",
+            "effect": "none; the deterministic dispatch is unchanged",
+        }
     deterministic = {s.name for s in base.signals}
     proposed = set(proposal.get("signals", []))
 
