@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import re
 
+from mitos.chore import escalate_on_wake
+from mitos.ledger import Entry, InMemoryLedger
+from mitos.watcher import InMemoryWatcher
 from service.dashboard import (
     NOT_ON_GCP,
     NOT_SEEN,
@@ -29,10 +32,12 @@ from service.dashboard import (
     render_fleet,
     render_overview,
     render_runs,
+    public_base,
     render_connect,
     render_standards,
     audit_form,
 )
+from service.metrics import summarise
 
 NOW = "2026-08-22T18:30:00+00:00"
 
@@ -315,7 +320,7 @@ def test_an_unsubscribed_watch_prints_its_own_reason():
 def test_the_open_deferral_set_is_unknown_until_the_endpoint_reports_it():
     page = render_overview(an_identity(), a_watch(), [], now=NOW)
     assert rows(page)["open deferrals"].startswith(
-        "this deployment reports wake-ups, not the open set"
+        "this deployment reports the firings, not the open set"
     )
 
     page = render_overview(an_identity(), {**a_watch(), "open": 4}, [], now=NOW)
@@ -776,21 +781,16 @@ def test_the_connect_page_says_what_it_will_do_to_your_repository():
 
 
 def test_the_webhook_endpoint_offered_for_pasting_is_not_plain_text():
-    """`request.base_url` reports the scheme this process saw, which behind
-    Cloud Run's proxy is http.
+    """A request object reports the scheme this process saw, which behind Cloud
+    Run's proxy is http.
 
     The connect page was printing `http://...` as the endpoint to paste into
-    GitHub: a plain text URL for a signed request, offered to somebody
-    following instructions who has no reason to doubt them.
+    GitHub: a plain text URL for a signed request, offered to somebody following
+    instructions who has no reason to doubt them.
     """
-    from service.main import _public_base
-
-    class _Req:
-        def __init__(self, headers):
-            self.headers = headers
-            self.base_url = "http://mitos-reader-437828525303.europe-west1.run.app/"
-
-    behind_proxy = _public_base(_Req({"x-forwarded-proto": "https"}))
+    behind_proxy = public_base(
+        "http://mitos-reader-437828525303.europe-west1.run.app/", "https"
+    )
 
     assert behind_proxy.startswith("https://")
     assert "http://" not in behind_proxy
@@ -799,12 +799,385 @@ def test_the_webhook_endpoint_offered_for_pasting_is_not_plain_text():
 def test_a_forwarded_scheme_nobody_recognises_is_ignored():
     """The header is client-supplied. It is displayed and never trusted for a
     decision, and an unrecognised value must not end up inside a URL."""
-    from service.main import _public_base
+    assert public_base("http://example.test/", "javascript") == "http://example.test"
+    assert public_base("http://example.test/", "") == "http://example.test"
+    assert public_base("https://example.test/", "http") == "http://example.test"
 
-    class _Req:
-        def __init__(self, headers):
-            self.headers = headers
-            self.base_url = "http://example.test/"
 
-    assert _public_base(_Req({"x-forwarded-proto": "javascript"})) == "http://example.test"
-    assert _public_base(_Req({})) == "http://example.test"
+
+# --------------------------------------------------------------------------
+# One fact, one figure, one label
+# --------------------------------------------------------------------------
+#
+# The overview printed "unattended wakes 163" in the headline band and
+# "unattended wake-ups 2" in the control plane panel further down. Both were
+# right. A firing of the query subscription escalates every deferral it found
+# expired and writes one entry per finding, so one figure counts firings and the
+# other counts entries, and the labels differed by a hyphen.
+#
+# Three checks, deliberately separate, because they fail for different reasons:
+#
+#   declared      every figure on the page says what it counts and over what
+#   contradicts   two figures counting the same unit over the same scope
+#                 disagree, which means one of them is wrong
+#   restates      two labels ask the reader the same question, which means one
+#                 of them is misnamed even when both numbers are right
+#
+# The second is arithmetic and the third is English. Collapsing them into one
+# rule makes it pass by renaming, which is the failure this section exists to
+# prevent.
+
+# Joining words. None of them changes the question a reader thinks the number
+# answers, so none of them may be what keeps two labels apart.
+_STOPWORDS = frozenset(
+    "a an and are at be by for in is it its no of on or per that the them "
+    "these they this to was were with".split()
+)
+
+_A_COUNT = re.compile(r"^\d[\d,]*( of \d[\d,]*| [a-z]+)?$")
+_TILE = re.compile(
+    r'<div class="tile-label">(?P<label>.*?)</div>'
+    r'<div class="tile-value[^"]*">(?P<value>.*?)'
+    r'(?:<span class="tile-unit">|</div>)'
+)
+_STAGE = re.compile(r"<g><title>(?P<title>.*?)</title>")
+_STAGE_TITLE = re.compile(r"^(?P<stage>.*?): (?P<value>[^.]*?)(?:\.|$)")
+
+
+def figures(page: str) -> list[tuple[str, str]]:
+    """Every labelled figure on a rendered page: label, value as printed.
+
+    Three sources, because the page has three ways of printing a number: the
+    hero tiles, the funnel stages, and the panel rows. A panel row counts only
+    when its value is a bare count, which is what keeps timestamps, service
+    account emails and booleans out.
+
+    Prose is excluded on purpose. The `method` sentences under the page and the
+    notes under each panel are sentences that mention numbers, not figures under
+    labels, and pulling counts out of paragraphs would report a collision every
+    time two sentences named the same total.
+    """
+    out = [
+        (_text(m.group("label")), _text(m.group("value")))
+        for m in _TILE.finditer(page)
+    ]
+    for m in _STAGE.finditer(page):
+        parsed = _STAGE_TITLE.match(m.group("title"))
+        if parsed:
+            out.append((parsed.group("stage"), parsed.group("value")))
+    for m in _ROW.finditer(page):
+        label, value = _text(m.group("label")), _text(m.group("value"))
+        if _A_COUNT.match(value):
+            out.append((label, value))
+    return out
+
+
+def claim(label: str) -> frozenset:
+    """A label reduced to what it claims to count.
+
+    Case, punctuation, plurals and joining words come off. What is left is the
+    set of words that decide which question the reader thinks the figure
+    answers, and "unattended wakes" and "unattended wake-ups" leave the same
+    ones behind.
+    """
+    words = re.findall(r"[a-z0-9_]+", label.lower())
+    return frozenset(
+        word[:-1] if len(word) > 3 and word.endswith("s") else word
+        for word in words
+        if word not in _STOPWORDS
+    )
+
+
+def restatements(labelled: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Pairs of labels where one says everything the other says.
+
+    Not a similarity score. The rule is containment, so it fires when a reader
+    could take the second label as a more precise wording of the first and has
+    no way on the page to find out that it is a different figure entirely.
+    """
+    labels = sorted({label for label, _ in labelled})
+    return [
+        (left, right)
+        for index, left in enumerate(labels)
+        for right in labels[index + 1 :]
+        if claim(left) and claim(right)
+        and (claim(left) <= claim(right) or claim(right) <= claim(left))
+    ]
+
+
+def contradictions(
+    labelled: list[tuple[str, str]], facts: dict[str, tuple[str, str]]
+) -> list[tuple[tuple[str, str], dict[str, list[str]]]]:
+    """Figures declared to count the same unit over the same scope, printing
+    different values. One of them is wrong and the page does not say which."""
+    grouped: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for label, value in labelled:
+        grouped.setdefault(facts[label], {}).setdefault(value, []).append(label)
+    return [(fact, values) for fact, values in grouped.items() if len(values) > 1]
+
+
+# What each figure on the overview counts, and over what. Written out rather
+# than inferred: a unit and a scope are what the label is short for, and a tile
+# added without them is a number nobody has had to say the meaning of. The
+# exhaustiveness check below is what makes filling this in unavoidable.
+OVERVIEW_FACTS: dict[str, tuple[str, str]] = {
+    # The headline band.
+    "pull requests handled": ("runs whose trigger is in the window", "window"),
+    "approval cards": ("plan.proposed entries", "window"),
+    "median time to a card": ("seconds, median over runs", "window"),
+    "reached a card unattended": ("runs dispatched and carded, unparked", "window"),
+    "sent to a human": ("item.parked entries", "window"),
+    "writes executed": ("write.executed entries", "window"),
+    "refusals enforced": ("guard probes refused", "window"),
+    "findings escalated unattended": ("finding.escalated entries, unattended", "window"),
+    "deferrals with no escalation naming them": (
+        "finding.deferred entries with no escalation naming them",
+        "window",
+    ),
+    # The funnel, which counts runs at every stage on purpose.
+    "triggered": ("runs", "window"),
+    "specialists woken": ("runs dispatched", "window"),
+    "gate ran": ("runs with a verdict", "window"),
+    "card produced": ("runs with a card", "window"),
+    "published": ("write.executed entries that published", "window"),
+    # The panels underneath.
+    "times the subscription fired": ("subscription firings", "this process"),
+    "open deferrals": ("deferrals open", "this deployment"),
+    "distinct kinds": ("entry kinds", "window"),
+    "distinct actors": ("actors", "window"),
+    "distinct run ids": ("run ids", "window"),
+    "total in the ledger": ("entries", "the whole ledger"),
+    "max bytes per read": ("bytes", "a configured bound"),
+    "max reads per run": ("reads", "a configured bound"),
+}
+
+
+def a_woken_thread():
+    """A thread the subscription woke, and the `/watch` answer that saw it wake.
+
+    Built by running the real watcher over real deferrals rather than by typing
+    the counts in, because the two figures this exercises are exactly the two a
+    typed fixture would have been free to make agree. Two firings escalate 88
+    deferrals and then 75, so the thread carries 163 escalation entries while
+    the endpoint reports 2 wake-ups.
+
+    Two runs are added on top: one proposing two cards, so cards and runs are
+    not the same number either, and one whose trigger fell off the front.
+    """
+    led = InMemoryLedger()
+    for count, deferred_on, expires_on in (
+        (88, "2026-08-01", "2026-08-10"),
+        (75, "2026-08-05", "2026-08-15"),
+    ):
+        for index in range(count):
+            led.append(
+                Entry(
+                    kind="finding.deferred",
+                    actor="compliance-companion",
+                    subject="services/customer",
+                    payload={
+                        "deferred_on": deferred_on,
+                        "expires_on": expires_on,
+                        "finding": f"{expires_on}-{index}",
+                    },
+                    run_id="seed",
+                    recorded_at=f"{deferred_on}T09:00:00+00:00",
+                )
+            )
+    watcher = InMemoryWatcher(led)
+    watcher.start(lambda expired: escalate_on_wake(led, expired))
+    watcher.tick("2026-08-12")
+    watcher.tick("2026-08-20")
+
+    for index, kind in enumerate(
+        ("trigger.pull_request", "fleet.dispatch", "evaluator.verdict",
+         "plan.proposed", "plan.proposed")
+    ):
+        led.append(
+            Entry(
+                kind=kind,
+                actor="architect-leader",
+                subject="acme/api#4471",
+                payload={"pr": 4471, "passed": True, "path": f"docs/{index}.md"},
+                run_id="r1",
+                recorded_at=f"2026-08-21T10:00:0{index}+00:00",
+            )
+        )
+    led.append(
+        Entry(
+            kind="plan.proposed",
+            actor="documentation-companion",
+            subject="acme/api#99",
+            payload={"path": "docs/tail.md"},
+            run_id="r2",
+            recorded_at="2026-08-21T11:00:00+00:00",
+        )
+    )
+
+    entries = [e.to_doc() for e in led.all()]
+    watch = {
+        "subscribed": True,
+        "mechanism": "firestore query subscription (on_snapshot), no scheduler",
+        "watching": "kind == finding.deferred, escalated once its expiry passes",
+        "wakeups": len(watcher.wakeups),
+        "detail": [
+            {"reason": w.reason, "matched": w.matched, "at": w.at}
+            for w in watcher.wakeups
+        ],
+    }
+    return entries, watch
+
+
+def a_woken_overview():
+    entries, watch = a_woken_thread()
+    return render_overview(
+        an_identity(),
+        watch,
+        entries,
+        total=len(entries),
+        config={"read_scope": ["docs/"], "webhook_repositories": ["acme/api"],
+                "max_bytes_per_read": 40000, "max_reads_per_run": 12,
+                "webhook_secret_configured": True},
+        metrics=summarise(entries, now=NOW),
+        now=NOW,
+    )
+
+
+def test_one_firing_of_the_subscription_is_not_one_escalation():
+    """The two figures, and the arithmetic between them.
+
+    163 escalation entries came out of 2 firings, so the numbers a reader meets
+    on this page are eighty-one and a half apart and neither is wrong. What the
+    page owes them is two labels that are not the same words.
+    """
+    entries, watch = a_woken_thread()
+    summary = summarise(entries, now=NOW)
+    escalations = [e for e in entries if e["kind"] == "finding.escalated"]
+    tile = next(t for t in summary["headline"] if t["key"] == "unattended_wakes")
+
+    assert watch["wakeups"] == 2
+    assert [w["matched"] for w in watch["detail"]] == [88, 75]
+    assert len(escalations) == 163
+    assert tile["value"] == "163"
+    assert tile["label"] == "findings escalated unattended"
+    assert "not one per firing of the subscription" in tile["method"]
+
+    page = a_woken_overview()
+
+    assert rows(page)["times the subscription fired"] == "2"
+    assert "unattended wake" not in page
+
+    # "0 of 163" is 163 deferrals of which none is unpaired, and the caption
+    # read "no deferral is recorded in this window" over the larger of its own
+    # two numbers.
+    deferrals = next(
+        t for t in summary["headline"] if t["key"] == "deferrals_unescalated"
+    )
+    assert deferrals["value"] == "0 of 163"
+    assert "no deferral is recorded" not in deferrals["caption"]
+
+
+def test_every_figure_on_the_overview_declares_what_it_counts():
+    """The check that gives the other two their teeth.
+
+    A tile added without an entry in `OVERVIEW_FACTS` fails here, and the only
+    way to pass is to write down the unit and the scope. That is the step at
+    which an author finds out that the figure they are adding already exists
+    further down the page under another name.
+    """
+    printed = {label for label, _ in figures(a_woken_overview())}
+
+    assert not sorted(printed - set(OVERVIEW_FACTS)), (
+        "these figures are printed with nothing saying what they count: "
+        f"{sorted(printed - set(OVERVIEW_FACTS))}"
+    )
+
+
+def test_no_two_figures_on_the_overview_disagree_about_one_fact():
+    """Same unit, same scope, two numbers. One of them is wrong."""
+    clashes = contradictions(figures(a_woken_overview()), OVERVIEW_FACTS)
+
+    assert not clashes, f"one fact, more than one number: {clashes}"
+
+
+def test_no_label_on_the_overview_restates_another():
+    """Different facts, and labels a reader cannot tell apart.
+
+    This one fires on wording rather than on arithmetic, which is why it is
+    separate: "approval cards" is 15 entries and "card produced" is 14 runs,
+    both correct, and the page would still be lying if the first were called
+    "approval cards produced".
+    """
+    repeated = restatements(figures(a_woken_overview()))
+
+    assert not repeated, f"one question, two labels: {repeated}"
+
+
+def test_the_other_two_pages_do_not_restate_a_label_either():
+    """The rule is per page, and the fleet and runs pages get the wording half
+    of it. No declaration table for them: they carry five figures between them
+    and no funnel, so what is worth guarding there is the naming."""
+    fleet = render_fleet(a_catalog(), a_thread(), "reader", now=NOW)
+    runs = render_runs(a_thread(), "reader", total=99, now=NOW)
+
+    assert not restatements(figures(fleet))
+    assert [label for label, _ in figures(runs)] == [
+        "dispatches", "specialist responses", "plans proposed", "deferrals",
+        "escalations",
+    ]
+    assert not restatements(figures(runs))
+
+
+def test_the_check_catches_the_two_pairs_this_page_shipped_with():
+    """The guard, run against the labels it was written for.
+
+    Without this the section only proves that today's page passes, which is also
+    what an empty check proves.
+    """
+    shipped = [
+        ("unattended wakes", "163"),
+        ("unattended wake-ups", "2"),
+        ("approval cards produced", "15"),
+        ("card produced", "14"),
+    ]
+
+    assert restatements(shipped) == [
+        ("approval cards produced", "card produced"),
+        ("unattended wake-ups", "unattended wakes"),
+    ]
+    # And the half that catches a rename of one label rather than of a pair.
+    # Reverting either one alone leaves the wording check quiet and lands the
+    # author here instead, where the only way out is to write down a unit and a
+    # scope for the figure they just renamed.
+    assert sorted({label for label, _ in shipped} - set(OVERVIEW_FACTS)) == [
+        "approval cards produced",
+        "unattended wake-ups",
+        "unattended wakes",
+    ]
+
+
+def test_an_escalation_neither_signal_settles_is_still_in_the_total():
+    """The escalation total is the escalations, not the two halves of it.
+
+    `a_thread` carries two escalations under the `watch` run id with no
+    `woken_by` stamp, so the split refuses to sort them and the tile used to
+    open "0 escalations in this window" on a page holding two.
+    """
+    entries = a_thread()
+    tile = next(
+        t
+        for t in summarise(entries, now=NOW)["headline"]
+        if t["key"] == "unattended_wakes"
+    )
+
+    assert len([e for e in entries if e["kind"] == "finding.escalated"]) == 2
+    assert tile["value"] == "0"
+    # The zero caption for this tile is "no deferral expired in this window",
+    # and it sat directly above a method line saying two escalations are here
+    # and undecidable. A tile is not allowed to contradict its own footnote.
+    assert "no deferral expired" not in tile["caption"]
+    assert tile["caption"] == (
+        "this window cannot settle whether its escalations were unattended"
+    )
+    assert tile["method"].startswith("2 escalations in this window, 0 unattended")
+    assert "in neither half of it" in tile["method"]

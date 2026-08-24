@@ -461,7 +461,7 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
 
     wakeups = watch.get("wakeups")
     detail = watch.get("detail") or []
-    count = wakeups if isinstance(wakeups, int) else len(detail)
+    firings = wakeups if isinstance(wakeups, int) else len(detail)
     body = (
         _row("subscribed", _tone("true", "good"))
         + _row(
@@ -475,9 +475,12 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
             else _unknown("no query reported"),
         )
         + _row(
-            "unattended wake-ups",
-            _esc(count) if count
-            else _zero("0 in this deployment's lifetime; nothing has expired yet"),
+            # Firings, not escalations. Each `woke` row below carries the number
+            # of deferrals its firing matched, and those are what the thread
+            # counts one entry at a time.
+            "times the subscription fired",
+            _esc(firings) if firings
+            else _zero("0 since this process started; nothing has expired yet"),
         )
     )
     for wake in detail:
@@ -489,7 +492,15 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
             + _cell("matched", _esc(wake.get("matched")))
             + _cell("at", _when(wake.get("at"), now)),
         )
-    return _panel("the control plane", body + _open_deferrals_row(watch))
+    return _panel(
+        "the control plane",
+        body + _open_deferrals_row(watch),
+        "A firing is one snapshot delivery in which at least one deferral had "
+        "expired, counted for this process since it started. Each firing "
+        "escalates every deferral it found expired and writes one entry per "
+        "finding, so the escalations counted in the thread are a much larger "
+        "number and a different fact.",
+    )
 
 
 def _open_deferrals_row(watch: dict[str, Any]) -> str:
@@ -503,8 +514,8 @@ def _open_deferrals_row(watch: dict[str, Any]) -> str:
         return _row(
             "open deferrals",
             _unknown(
-                "this deployment reports wake-ups, not the open set, so this "
-                "cannot be known from here"
+                "this deployment reports the firings, not the open set, so "
+                "this cannot be known from here"
             ),
         )
     value = watch.get("open")
@@ -1296,6 +1307,32 @@ _CONNECT_STEPS = (
         "approve the exact bytes.",
     ),
 )
+
+
+def public_base(base_url: str, forwarded_proto: str = "") -> str:
+    """The URL a caller outside Cloud Run would use.
+
+    A request object reports the scheme of the connection the process saw, and
+    behind Cloud Run's proxy that is http. The connect page was printing
+    `http://.../webhook/github` as the endpoint to paste into GitHub: a plain
+    text URL for a signed request, handed to somebody following instructions who
+    has no reason to doubt them.
+
+    Two strings rather than a request, so this is testable without importing the
+    service, which the offline suite cannot do: it is stdlib only and the
+    service pulls in httpx.
+
+    The header is client-supplied and that is acceptable here. The value is
+    displayed, never trusted for a decision, and anything unrecognised is
+    ignored rather than interpolated, so the worst case is a link that does not
+    work rather than a control that does not hold.
+    """
+    base = str(base_url or "").rstrip("/")
+    proto = str(forwarded_proto or "").split(",")[0].strip().lower()
+    if proto not in ("http", "https"):
+        return base
+    scheme, _, rest = base.partition("://")
+    return f"{proto}://{rest}" if rest else base
 
 
 def render_connect(role: str, *, base: str = "") -> str:

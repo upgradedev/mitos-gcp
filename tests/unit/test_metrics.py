@@ -431,6 +431,36 @@ def test_a_tool_that_actually_ran_is_not_reported_as_a_refusal():
     assert refusals["value"] == "1 of 2"
     assert refusals["tone"] == "bad"
     assert "The tool itself ran 1 times" in refusals["method"]
+    # "1 of 2" begins with a digit that is not a zero, so the caption comes from
+    # the branch rather than from the table either way. The zero of this shape
+    # is the one that was wrong, and it is asserted below.
+    assert refusals["caption"] == (
+        "the write tool ran, which is the boundary not holding"
+    )
+
+
+def test_a_boundary_that_refused_nothing_is_not_captioned_as_a_quiet_window():
+    """A zero that is not one.
+
+    Five probes were handed the write tool and the tool ran on all five, which
+    is the interceptor not holding. The tile was red, its method said the tool
+    ran five times, and the caption between them read "no write was attempted
+    here, so nothing was refused": the loudest failure this product can have,
+    described as a quiet afternoon.
+    """
+    entries = [
+        entry("guard.exercised", "r1", at(i), actor="documentation-companion",
+              attempted=True, denied=False, tool_executed=True)
+        for i in range(5)
+    ]
+    refusals = tile(summarise(entries), "refusals")
+
+    assert refusals["value"] == "0 of 5"
+    assert refusals["tone"] == "bad"
+    assert "nothing was refused" not in refusals["caption"]
+    assert refusals["caption"] == (
+        "the write tool ran, which is the boundary not holding"
+    )
 
 
 def test_no_probe_at_all_is_a_zero_and_not_a_refusal():
@@ -453,8 +483,8 @@ def test_a_wake_is_unattended_and_a_recall_escalation_is_not():
 
     wakes = tile(summarise(entries), "unattended_wakes")
     assert wakes["value"] == "3"
-    assert "4 escalations in this window, 3 of them unattended" in wakes["method"]
-    assert "The other 1 were raised during recall" in wakes["method"]
+    assert "4 escalations in this window, 3 unattended" in wakes["method"]
+    assert "1 escalation here was raised during recall" in wakes["method"]
 
 
 def test_an_escalation_the_two_signals_disagree_about_is_unknown():
@@ -466,7 +496,13 @@ def test_an_escalation_the_two_signals_disagree_about_is_unknown():
     summary = summarise(entries)
 
     assert tile(summary, "unattended_wakes")["value"] == "0"
-    assert "0 escalations in this window" in tile(summary, "unattended_wakes")["method"]
+    # The escalation is in the total and in neither half. Reporting the total as
+    # the two halves added up printed "0 escalations in this window" on a window
+    # holding one, which is the tile refuting its own sentence.
+    assert "1 escalation in this window, 0 unattended" in tile(
+        summary, "unattended_wakes"
+    )["method"]
+    assert "in neither half of it" in tile(summary, "unattended_wakes")["method"]
     assert any("not decidable from this window" in u for u in summary["unknown"])
 
 
@@ -646,8 +682,11 @@ def test_no_caption_describes_something_that_did_not_happen():
         "a specialist refused",
         "an agent asked for the write tool",
         "no human touched these",
-        "a deferral expired and",
+        "one entry per deferral",
         "gate holding",
+        "the write tool ran",
+        "was refused at the tool call",
+        "cannot settle whether its escalations",
     )
     for item in summary["headline"]:
         for phrase in forbidden:

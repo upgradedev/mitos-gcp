@@ -40,6 +40,9 @@ KIND_STYLE = {
     "trigger.webhook": ("#5fd7d7", "trigger"),
     "trigger.ignored": ("#8a8790", "ignored"),
     "trigger.failed": ("#ff6b6b", "failed"),
+    # Refusal red. An instruction planted in a diff is the most
+    # interesting thing on the page when it happens.
+    "injection.detected": ("#ff6b6b", "injection"),
 }
 
 

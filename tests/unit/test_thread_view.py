@@ -23,7 +23,7 @@ from service.thread_view import KIND_STYLE, render
 # into a shell, because a word-boundary escape once reached this repository as a
 # literal control byte and the rule it belonged to could never match.
 KIND_PATTERN = (
-    '"((?:trigger|fleet|specialist|guard|evaluator|item|plan|write|finding)'
+    '"((?:trigger|fleet|specialist|guard|evaluator|item|plan|write|finding|injection)'
     '\\.[a-z_]+)"'
 )
 
