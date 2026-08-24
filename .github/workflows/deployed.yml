@@ -85,6 +85,26 @@ jobs:
                 f"{len(cat['companions'])} companions")
           PY
 
+      # The gate this repository did not have. The fleet served 4d2390b while
+      # the audited HEAD was 8b3bfcc, four merged pull requests behind, and
+      # every check was green because every check read the code rather than the
+      # thing running. A green suite over a stale deployment is worse than a red
+      # one: it is the same signal as a correct deployment.
+      - name: The running service is the commit that was audited
+        run: |
+          set -o pipefail
+          expected=$(git rev-parse --short HEAD)
+          running=$(curl -sf --max-time 60 "$READER/identity"             | python -c 'import json,sys; print(json.load(sys.stdin).get("build_sha","absent"))')
+          echo "expected $expected, running $running"
+          if [ "$running" = "unknown" ] || [ "$running" = "absent" ]; then
+            echo "::error::the running image does not report a build sha, so it cannot be shown to be the audited one"
+            exit 1
+          fi
+          if [ "$running" != "$expected" ]; then
+            echo "::error::the deployed service is $running and this commit is $expected; the fleet is not running what was audited"
+            exit 1
+          fi
+
       - name: The OpenAPI document describes the routes that are being served
         run: |
           set -o pipefail

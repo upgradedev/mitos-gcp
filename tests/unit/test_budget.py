@@ -119,3 +119,31 @@ def test_only_the_endpoints_that_cost_money_are_bounded():
         start = source.index(free)
         body = source[start : start + 700]
         assert "_within_budget" not in body, f"{free} is rationed and should not be"
+
+
+def test_the_service_reports_the_commit_it_was_built_from():
+    """A running service that cannot say which source it is cannot be shown to
+    be the audited one.
+
+    The fleet served 4d2390b while the audited HEAD was 8b3bfcc, four merged
+    pull requests behind, and every check was green because every check read the
+    code rather than the thing running.
+
+    `unknown` is deliberately a real answer rather than a default that looks
+    fine: the deployed gate refuses it.
+    """
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'BUILD_SHA = os.environ.get("MITOS_BUILD_SHA", "unknown")' in source
+    assert '"build_sha": BUILD_SHA,' in source, "/identity no longer reports it"
+    assert "ARG MITOS_BUILD_SHA" in dockerfile, (
+        "the image cannot be built with a sha, so every deployment reports unknown"
+    )
+    assert "MITOS_BUILD_SHA=${MITOS_BUILD_SHA}" in dockerfile, (
+        "the build arg is declared but never reaches the environment"
+    )

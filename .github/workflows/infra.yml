@@ -22,7 +22,9 @@ on:
         type: choice
         options: [plan, import, apply, teardown-rebuild]
       image:
-        description: "Container image to deploy"
+        description: "Container image to deploy. Build it with
+          --build-arg MITOS_BUILD_SHA=$(git rev-parse --short HEAD) or the
+          deployed check will refuse it for not knowing what it is."
         default: "europe-west1-docker.pkg.dev/upgradegr-mitos/cloud-run-source-deploy/mitos-reader:latest"
 
 permissions:
