@@ -178,9 +178,13 @@ def test_the_content_policy_denies_everything_it_does_not_need():
     A policy that allows what it does not use is a policy that will not notice
     when something starts using it.
     """
-    from service.main import SECURITY_HEADERS
-
-    csp = SECURITY_HEADERS["Content-Security-Policy"]
+    # Read from the source, not imported. `service.main` pulls in httpx and the
+    # offline suite is standard library only, which has now cost three separate
+    # commits; the guard below exists so it does not cost a fourth.
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    csp = source[source.index('"Content-Security-Policy"') :][:400]
 
     assert "default-src 'none'" in csp
     assert "frame-ancestors 'none'" in csp
