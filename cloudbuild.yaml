@@ -1,0 +1,55 @@
+# Builds the fleet image with the commit baked into it.
+#
+# `gcloud builds submit --tag` cannot pass a build argument, so an image built
+# that way reports `MITOS_BUILD_SHA=unknown` and the deployed check refuses it.
+# That refusal is correct and this file is the reason it does not have to fire:
+# there is one way to build this image and it carries its own provenance.
+#
+#   gcloud builds submit --project upgradegr-mitos --region europe-west1 \
+#     --config cloudbuild.yaml \
+#     --substitutions _SHA=$(git rev-parse --short HEAD)
+#
+# Both tags are pushed. `_SHA` is what a deployment pins to, so a rollback names
+# a commit rather than a moment in time. `latest` exists because Terraform's
+# `image` variable defaults to it, and a default pointing at something older
+# than the last deploy is how an apply with no arguments quietly rolls the fleet
+# back.
+
+substitutions:
+  _SHA: unknown
+  # Written out rather than built from ${PROJECT_ID}: a substitution default
+  # is not expanded before validation, so the reference failed to parse.
+  _REPO: europe-west1-docker.pkg.dev/upgradegr-mitos/cloud-run-source-deploy/mitos-reader
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - MITOS_BUILD_SHA=${_SHA}
+      - --tag
+      - ${_REPO}:${_SHA}
+      - --tag
+      - ${_REPO}:latest
+      - .
+
+  # Asserted here rather than discovered after a deploy. A build that produced
+  # an image which cannot say what it is has failed at the one job this file
+  # exists to do.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -o pipefail
+        got=$(docker run --rm --entrypoint printenv ${_REPO}:${_SHA} MITOS_BUILD_SHA)
+        echo "image reports MITOS_BUILD_SHA=$got"
+        test "$got" = "${_SHA}" || { echo "expected ${_SHA}"; exit 1; }
+        test "$got" != "unknown" || { echo "no sha was passed to the build"; exit 1; }
+
+images:
+  - ${_REPO}:${_SHA}
+  - ${_REPO}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
