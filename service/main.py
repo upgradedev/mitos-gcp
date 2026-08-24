@@ -76,6 +76,7 @@ from .dashboard import (  # noqa: E402
     render_fleet,
     render_overview,
     render_runs,
+    public_base,
     render_connect,
     render_standards,
 )
@@ -826,30 +827,6 @@ def config() -> dict[str, Any]:
     }
 
 
-def _public_base(request) -> str:
-    """The URL a caller outside Cloud Run would use.
-
-    `request.base_url` reports the scheme of the connection this process saw,
-    and behind Cloud Run's proxy that is http. The connect page was printing
-    `http://...` as the webhook endpoint to paste into GitHub, which is a plain
-    text URL for a signed request, offered to somebody who is following
-    instructions and has no reason to doubt them.
-
-    `X-Forwarded-Proto` is set by the load balancer and is the scheme the client
-    actually used. It is client-supplied in principle, and that is acceptable
-    here: this value is displayed, never trusted for a decision, and the failure
-    mode of getting it wrong is a link that does not work rather than a control
-    that does not hold.
-    """
-    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    base = str(request.base_url).rstrip("/")
-    if proto in ("http", "https"):
-        return base.replace("http://", f"{proto}://", 1).replace(
-            "https://", f"{proto}://", 1
-        )
-    return base
-
-
 def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
     """Entries for a page, and how many exist, so a page can say it is a window.
 
@@ -928,7 +905,12 @@ def connect_page(request: Request) -> str:
     endpoint printed on the page is the one belonging to whichever deployment
     the reader is looking at.
     """
-    return render_connect(ROLE, base=_public_base(request))
+    return render_connect(
+        ROLE,
+        base=public_base(
+            str(request.base_url), request.headers.get("x-forwarded-proto", "")
+        ),
+    )
 
 
 @app.get("/standards", response_class=HTMLResponse)

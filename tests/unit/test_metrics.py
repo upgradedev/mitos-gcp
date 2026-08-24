@@ -431,6 +431,36 @@ def test_a_tool_that_actually_ran_is_not_reported_as_a_refusal():
     assert refusals["value"] == "1 of 2"
     assert refusals["tone"] == "bad"
     assert "The tool itself ran 1 times" in refusals["method"]
+    # "1 of 2" begins with a digit that is not a zero, so the caption comes from
+    # the branch rather than from the table either way. The zero of this shape
+    # is the one that was wrong, and it is asserted below.
+    assert refusals["caption"] == (
+        "the write tool ran, which is the boundary not holding"
+    )
+
+
+def test_a_boundary_that_refused_nothing_is_not_captioned_as_a_quiet_window():
+    """A zero that is not one.
+
+    Five probes were handed the write tool and the tool ran on all five, which
+    is the interceptor not holding. The tile was red, its method said the tool
+    ran five times, and the caption between them read "no write was attempted
+    here, so nothing was refused": the loudest failure this product can have,
+    described as a quiet afternoon.
+    """
+    entries = [
+        entry("guard.exercised", "r1", at(i), actor="documentation-companion",
+              attempted=True, denied=False, tool_executed=True)
+        for i in range(5)
+    ]
+    refusals = tile(summarise(entries), "refusals")
+
+    assert refusals["value"] == "0 of 5"
+    assert refusals["tone"] == "bad"
+    assert "nothing was refused" not in refusals["caption"]
+    assert refusals["caption"] == (
+        "the write tool ran, which is the boundary not holding"
+    )
 
 
 def test_no_probe_at_all_is_a_zero_and_not_a_refusal():
@@ -652,8 +682,11 @@ def test_no_caption_describes_something_that_did_not_happen():
         "a specialist refused",
         "an agent asked for the write tool",
         "no human touched these",
-        "a deferral expired and",
+        "one entry per deferral",
         "gate holding",
+        "the write tool ran",
+        "was refused at the tool call",
+        "cannot settle whether its escalations",
     )
     for item in summary["headline"]:
         for phrase in forbidden:

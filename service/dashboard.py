@@ -1309,6 +1309,32 @@ _CONNECT_STEPS = (
 )
 
 
+def public_base(base_url: str, forwarded_proto: str = "") -> str:
+    """The URL a caller outside Cloud Run would use.
+
+    A request object reports the scheme of the connection the process saw, and
+    behind Cloud Run's proxy that is http. The connect page was printing
+    `http://.../webhook/github` as the endpoint to paste into GitHub: a plain
+    text URL for a signed request, handed to somebody following instructions who
+    has no reason to doubt them.
+
+    Two strings rather than a request, so this is testable without importing the
+    service, which the offline suite cannot do: it is stdlib only and the
+    service pulls in httpx.
+
+    The header is client-supplied and that is acceptable here. The value is
+    displayed, never trusted for a decision, and anything unrecognised is
+    ignored rather than interpolated, so the worst case is a link that does not
+    work rather than a control that does not hold.
+    """
+    base = str(base_url or "").rstrip("/")
+    proto = str(forwarded_proto or "").split(",")[0].strip().lower()
+    if proto not in ("http", "https"):
+        return base
+    scheme, _, rest = base.partition("://")
+    return f"{proto}://{rest}" if rest else base
+
+
 def render_connect(role: str, *, base: str = "") -> str:
     """Page 5. What somebody does with this, in three steps.
 

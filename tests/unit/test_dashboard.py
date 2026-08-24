@@ -32,6 +32,7 @@ from service.dashboard import (
     render_fleet,
     render_overview,
     render_runs,
+    public_base,
     render_connect,
     render_standards,
     audit_form,
@@ -780,21 +781,16 @@ def test_the_connect_page_says_what_it_will_do_to_your_repository():
 
 
 def test_the_webhook_endpoint_offered_for_pasting_is_not_plain_text():
-    """`request.base_url` reports the scheme this process saw, which behind
-    Cloud Run's proxy is http.
+    """A request object reports the scheme this process saw, which behind Cloud
+    Run's proxy is http.
 
     The connect page was printing `http://...` as the endpoint to paste into
-    GitHub: a plain text URL for a signed request, offered to somebody
-    following instructions who has no reason to doubt them.
+    GitHub: a plain text URL for a signed request, offered to somebody following
+    instructions who has no reason to doubt them.
     """
-    from service.main import _public_base
-
-    class _Req:
-        def __init__(self, headers):
-            self.headers = headers
-            self.base_url = "http://mitos-reader-437828525303.europe-west1.run.app/"
-
-    behind_proxy = _public_base(_Req({"x-forwarded-proto": "https"}))
+    behind_proxy = public_base(
+        "http://mitos-reader-437828525303.europe-west1.run.app/", "https"
+    )
 
     assert behind_proxy.startswith("https://")
     assert "http://" not in behind_proxy
@@ -803,15 +799,10 @@ def test_the_webhook_endpoint_offered_for_pasting_is_not_plain_text():
 def test_a_forwarded_scheme_nobody_recognises_is_ignored():
     """The header is client-supplied. It is displayed and never trusted for a
     decision, and an unrecognised value must not end up inside a URL."""
-    from service.main import _public_base
+    assert public_base("http://example.test/", "javascript") == "http://example.test"
+    assert public_base("http://example.test/", "") == "http://example.test"
+    assert public_base("https://example.test/", "http") == "http://example.test"
 
-    class _Req:
-        def __init__(self, headers):
-            self.headers = headers
-            self.base_url = "http://example.test/"
-
-    assert _public_base(_Req({"x-forwarded-proto": "javascript"})) == "http://example.test"
-    assert _public_base(_Req({})) == "http://example.test"
 
 
 # --------------------------------------------------------------------------
@@ -1076,6 +1067,15 @@ def test_one_firing_of_the_subscription_is_not_one_escalation():
     assert rows(page)["times the subscription fired"] == "2"
     assert "unattended wake" not in page
 
+    # "0 of 163" is 163 deferrals of which none is unpaired, and the caption
+    # read "no deferral is recorded in this window" over the larger of its own
+    # two numbers.
+    deferrals = next(
+        t for t in summary["headline"] if t["key"] == "deferrals_unescalated"
+    )
+    assert deferrals["value"] == "0 of 163"
+    assert "no deferral is recorded" not in deferrals["caption"]
+
 
 def test_every_figure_on_the_overview_declares_what_it_counts():
     """The check that gives the other two their teeth.
@@ -1145,6 +1145,15 @@ def test_the_check_catches_the_two_pairs_this_page_shipped_with():
         ("approval cards produced", "card produced"),
         ("unattended wake-ups", "unattended wakes"),
     ]
+    # And the half that catches a rename of one label rather than of a pair.
+    # Reverting either one alone leaves the wording check quiet and lands the
+    # author here instead, where the only way out is to write down a unit and a
+    # scope for the figure they just renamed.
+    assert sorted({label for label, _ in shipped} - set(OVERVIEW_FACTS)) == [
+        "approval cards produced",
+        "unattended wake-ups",
+        "unattended wakes",
+    ]
 
 
 def test_an_escalation_neither_signal_settles_is_still_in_the_total():
@@ -1163,5 +1172,12 @@ def test_an_escalation_neither_signal_settles_is_still_in_the_total():
 
     assert len([e for e in entries if e["kind"] == "finding.escalated"]) == 2
     assert tile["value"] == "0"
+    # The zero caption for this tile is "no deferral expired in this window",
+    # and it sat directly above a method line saying two escalations are here
+    # and undecidable. A tile is not allowed to contradict its own footnote.
+    assert "no deferral expired" not in tile["caption"]
+    assert tile["caption"] == (
+        "this window cannot settle whether its escalations were unattended"
+    )
     assert tile["method"].startswith("2 escalations in this window, 0 unattended")
     assert "in neither half of it" in tile["method"]
