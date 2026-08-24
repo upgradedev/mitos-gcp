@@ -16,7 +16,7 @@ on:
     inputs:
       pace:
         description: "Seconds between beats in the recorded run"
-        default: "3.75"
+        default: "1.3"
       ledger:
         description: "memory (offline) or firestore"
         default: "memory"
@@ -24,12 +24,11 @@ on:
     tags:
       - "video-*"
 
+# No id-token. The recording no longer calls a model, so this workflow needs no
+# Google credential at all, and a job that can assume a service account it does
+# not use is a privilege waiting to be misused by whatever gets added next.
 permissions:
   contents: read
-  # The recording ends on a comparison that needs a model: the item the
-  # deterministic rules cannot see. Authenticated by Workload Identity
-  # Federation, so no key exists to leak.
-  id-token: write
 
 concurrency:
   group: video-${{ github.ref }}
@@ -62,20 +61,28 @@ jobs:
           key: vo-${{ hashFiles('video/narration.json') }}
           restore-keys: vo-
 
-      - uses: google-github-actions/auth@71f986410dfbc7added4569d411d040a91dc6935 # v2.1.8
-        with:
-          workload_identity_provider: projects/437828525303/locations/global/workloadIdentityPools/github/providers/github-oidc
-          service_account: mitos-ci@upgradegr-mitos.iam.gserviceaccount.com
-
       - name: Install the model client
         run: pip install -r requirements/spike.txt
 
+      # Deterministic on purpose, and this is ADR-009 rather than a shortcut.
+      #
+      # The recording used to end on a live Gemini call. Three builds at the
+      # same pace produced runs of 156s, 209s and 645s, and the last one printed
+      # eight times as many lines as the first. A recording whose length varies
+      # by a factor of four cannot reliably produce an artifact under a 240
+      # second cap, and a submission video that fails to build on the day is the
+      # failure mode that has already cost two entries.
+      #
+      # The model requirement is not weakened by this. It is proven where the
+      # proof is stronger: tests/integration/test_gemini_live.py calls Gemini
+      # 3.7 on Vertex on every pull request, asserts on what came back, and a
+      # separate step fails the build if that suite silently skips. A video is
+      # not evidence of a model call; a test that fails when the model is
+      # unreachable is.
       - name: Record one real run
         env:
-          MITOS_MODEL: gemini-3.7-flash
-          GOOGLE_CLOUD_PROJECT: upgradegr-mitos
-          GOOGLE_CLOUD_LOCATION: global
-        run: python video/record.py --pace "${{ inputs.pace || '3.4' }}" --ledger "${{ inputs.ledger || 'memory' }}"
+          MITOS_MODEL: stub
+        run: python video/record.py --pace "${{ inputs.pace || '1.3' }}" --ledger "${{ inputs.ledger || 'memory' }}"
 
       - name: Narrate the beats that changed
         env:

@@ -121,6 +121,50 @@ resolving Python 3.12 mid-build, which is the same class of surprise.
 service holding a credential that can change something. Python is pinned to 3.13
 in `.python-version` and in CI together, so they cannot drift.
 
+### ADR-009 — The recorded video runs deterministically; the model is proven in CI
+**Date:** 2026-08-24 | **Status:** Implemented
+**Decision:** `video.yml` records the demo with `MITOS_MODEL=stub`. The
+submission video contains no live model call. Gemini 3.7 is exercised by
+`tests/integration/test_gemini_live.py` on every pull request instead, and a
+separate CI step fails the build if that suite skips.
+**Reason:** the recording used to end on a live Gemini call, and three builds at
+the same pace produced runs of 156s, 209s and 645s, the longest printing eight
+times as many lines as the shortest. The competition caps the video at four
+minutes. A recording whose length varies by a factor of four cannot reliably
+produce an artifact under that cap, and a submission video that fails to build
+on the day is precisely how two previous entries were lost.
+
+The requirement is "Gemini 3.5 or newer accessed through Gemini API or Vertex
+AI". A video does not satisfy it in any checkable way: a viewer cannot tell a
+real response from a recorded one, so the video was never the evidence. The test
+is. It calls the model, asserts on what came back, and goes red when the model
+is unreachable.
+**Consequence:** the demo in the video shows the deterministic path, which is
+the path ADR-003 already says CI and the recording use. The one thing the video
+loses is the closing comparison where the model widens the router on `vuln_code`;
+that comparison still runs in CI and is described in the README with the test
+that proves it. `video.yml` also holds no Google credential now, because it
+needed one only for that call.
+**Rejected:** a timeout around the model call. It bounds the failure without
+removing it, so the build still fails on a slow day, which is the day you are
+most likely to be rebuilding.
+
+### ADR-010 — The deployed system is tested as a pyramid, not smoke-tested
+**Date:** 2026-08-24 | **Status:** Implemented
+**Decision:** `deployed.yml` runs four layers against the live URLs: the
+contract each service publishes about itself, the security boundary, the
+journeys a judge follows, and the full `judge_uat` suite. It runs on a schedule,
+on demand, and after every apply.
+**Reason:** everything green in CI proves the code that was pushed. It does not
+prove the thing that is running. The gap between them has already produced two
+incidents here: `MITOS_WRITER_URL` missing from Terraform, caught by luck before
+a rebuild, and `allUsers` on the writer, which no test looked for because every
+test read the identity endpoints anonymously and expected them to answer.
+**Consequence:** a deployment that drifts is caught by a schedule rather than by
+somebody opening the page. The suite runs with no credential by default, so it
+is the same thing a judge can run, and the checks that need one announce
+themselves as not checked rather than passing quietly.
+
 ## Standards compliance
 
 | ORG_STANDARDS | State |
