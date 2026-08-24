@@ -773,3 +773,38 @@ def test_the_connect_page_says_what_it_will_do_to_your_repository():
     page = render_connect("reader")
 
     assert "nothing. It reads." in page
+
+
+def test_the_webhook_endpoint_offered_for_pasting_is_not_plain_text():
+    """`request.base_url` reports the scheme this process saw, which behind
+    Cloud Run's proxy is http.
+
+    The connect page was printing `http://...` as the endpoint to paste into
+    GitHub: a plain text URL for a signed request, offered to somebody
+    following instructions who has no reason to doubt them.
+    """
+    from service.main import _public_base
+
+    class _Req:
+        def __init__(self, headers):
+            self.headers = headers
+            self.base_url = "http://mitos-reader-437828525303.europe-west1.run.app/"
+
+    behind_proxy = _public_base(_Req({"x-forwarded-proto": "https"}))
+
+    assert behind_proxy.startswith("https://")
+    assert "http://" not in behind_proxy
+
+
+def test_a_forwarded_scheme_nobody_recognises_is_ignored():
+    """The header is client-supplied. It is displayed and never trusted for a
+    decision, and an unrecognised value must not end up inside a URL."""
+    from service.main import _public_base
+
+    class _Req:
+        def __init__(self, headers):
+            self.headers = headers
+            self.base_url = "http://example.test/"
+
+    assert _public_base(_Req({"x-forwarded-proto": "javascript"})) == "http://example.test"
+    assert _public_base(_Req({})) == "http://example.test"
