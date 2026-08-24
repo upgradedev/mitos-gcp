@@ -293,6 +293,11 @@ paths:
       description: 'The chore, streamed as it happens.
 
 
+        Bounded like `/run`: it spends the same four model calls, and streaming
+
+        them does not make them free.
+
+
         `/run` returns when the whole thing is finished, and with a model in the
 
         loop that is minutes rather than seconds: the specialists read the
