@@ -21,9 +21,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY service/ ./service/
 
+# The commit this image was built from, baked in at build time. A running
+# service that cannot say which source it is has to be identified by its
+# image tag, and a tag is a label somebody applies rather than a fact about
+# the bytes.
+ARG MITOS_BUILD_SHA=unknown
+
 ENV PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1 \
-    PORT=8080
+    PORT=8080 \
+    MITOS_BUILD_SHA=${MITOS_BUILD_SHA}
 
 # A non-root user, because the writer holds the only credential in the fleet
 # that can change anything outside the ledger.

@@ -238,6 +238,9 @@ def identity() -> dict[str, Any]:
         "may_call_write_tools": write_checks,
         "spec_repo_write_credential": _can_reach_write_credential(),
         "model": os.environ.get("MITOS_MODEL", "stub"),
+        # Which source this process is. Reported rather than inferred from
+        # the image tag, because a tag is a label and this is a fact.
+        "build_sha": BUILD_SHA,
         "note": (
             "may_call_write_tools is enforced in ADK's before_tool_callback. "
             "spec_repo_write_credential is enforced by Google IAM, outside this "
@@ -260,6 +263,11 @@ def thread(limit: int = 100) -> dict[str, Any]:
         "entries": [e.to_doc() for e in entries],
     }
 
+
+# `unknown` is a real answer and is not treated as a pass anywhere: the
+# deployed check refuses it, because an image that cannot say what it is
+# gives no evidence that it is the audited one.
+BUILD_SHA = os.environ.get("MITOS_BUILD_SHA", "unknown")
 
 _APPROVALS = None
 
