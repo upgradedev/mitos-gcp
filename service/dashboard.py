@@ -461,7 +461,7 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
 
     wakeups = watch.get("wakeups")
     detail = watch.get("detail") or []
-    count = wakeups if isinstance(wakeups, int) else len(detail)
+    firings = wakeups if isinstance(wakeups, int) else len(detail)
     body = (
         _row("subscribed", _tone("true", "good"))
         + _row(
@@ -475,9 +475,12 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
             else _unknown("no query reported"),
         )
         + _row(
-            "unattended wake-ups",
-            _esc(count) if count
-            else _zero("0 in this deployment's lifetime; nothing has expired yet"),
+            # Firings, not escalations. Each `woke` row below carries the number
+            # of deferrals its firing matched, and those are what the thread
+            # counts one entry at a time.
+            "times the subscription fired",
+            _esc(firings) if firings
+            else _zero("0 since this process started; nothing has expired yet"),
         )
     )
     for wake in detail:
@@ -489,7 +492,15 @@ def _control_plane_panel(watch: dict[str, Any], now: str) -> str:
             + _cell("matched", _esc(wake.get("matched")))
             + _cell("at", _when(wake.get("at"), now)),
         )
-    return _panel("the control plane", body + _open_deferrals_row(watch))
+    return _panel(
+        "the control plane",
+        body + _open_deferrals_row(watch),
+        "A firing is one snapshot delivery in which at least one deferral had "
+        "expired, counted for this process since it started. Each firing "
+        "escalates every deferral it found expired and writes one entry per "
+        "finding, so the escalations counted in the thread are a much larger "
+        "number and a different fact.",
+    )
 
 
 def _open_deferrals_row(watch: dict[str, Any]) -> str:
@@ -503,8 +514,8 @@ def _open_deferrals_row(watch: dict[str, Any]) -> str:
         return _row(
             "open deferrals",
             _unknown(
-                "this deployment reports wake-ups, not the open set, so this "
-                "cannot be known from here"
+                "this deployment reports the firings, not the open set, so "
+                "this cannot be known from here"
             ),
         )
     value = watch.get("open")

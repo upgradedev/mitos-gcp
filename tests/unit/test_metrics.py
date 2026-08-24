@@ -453,8 +453,8 @@ def test_a_wake_is_unattended_and_a_recall_escalation_is_not():
 
     wakes = tile(summarise(entries), "unattended_wakes")
     assert wakes["value"] == "3"
-    assert "4 escalations in this window, 3 of them unattended" in wakes["method"]
-    assert "The other 1 were raised during recall" in wakes["method"]
+    assert "4 escalations in this window, 3 unattended" in wakes["method"]
+    assert "1 escalation here was raised during recall" in wakes["method"]
 
 
 def test_an_escalation_the_two_signals_disagree_about_is_unknown():
@@ -466,7 +466,13 @@ def test_an_escalation_the_two_signals_disagree_about_is_unknown():
     summary = summarise(entries)
 
     assert tile(summary, "unattended_wakes")["value"] == "0"
-    assert "0 escalations in this window" in tile(summary, "unattended_wakes")["method"]
+    # The escalation is in the total and in neither half. Reporting the total as
+    # the two halves added up printed "0 escalations in this window" on a window
+    # holding one, which is the tile refuting its own sentence.
+    assert "1 escalation in this window, 0 unattended" in tile(
+        summary, "unattended_wakes"
+    )["method"]
+    assert "in neither half of it" in tile(summary, "unattended_wakes")["method"]
     assert any("not decidable from this window" in u for u in summary["unknown"])
 
 

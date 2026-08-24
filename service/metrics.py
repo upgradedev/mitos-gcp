@@ -20,7 +20,11 @@ is a module rather than a dict comprehension in the service:
   escalations   `finding.escalated` is written from two places. `escalate_on_wake`
                 writes it unattended and stamps `woken_by`; `run_chore` writes it
                 during recall, inside a run that a pull request triggered. Only
-                the first is an unattended wake, and the tile says so.
+                the first is an unattended wake, and the tile says so. The tile
+                counts entries, one per deferral that expired. The control plane
+                panel on the same page counts firings of the subscription, and
+                one firing escalates everything it found expired, so the two are
+                not close and each label has to say which unit it is in.
 
   writes        `chore.execute_write` separates the write passing all three
                 checks from bytes landing in the specification repository, and
@@ -121,7 +125,7 @@ PRIMARY = ("median_to_card", "runs_triggered", "unattended_to_card", "writes")
 # arithmetic is kept intact in `method` and rendered under the page.
 SHORT = {
     "runs_triggered": "pull requests the fleet was woken for",
-    "cards": "one per run, addressed by the hash of the bytes it proposes",
+    "cards": "one per approval reached, addressed by the hash of its bytes",
     "median_to_card": "from the pull request landing to an approval card",
     "unattended_to_card": "no human touched these before the card existed",
     "parked": "a specialist refused and handed the item to a person",
@@ -129,7 +133,7 @@ SHORT = {
     # "the gate holding" is true of a zero and false of anything else, and a
     # static line here printed it over a write that had actually happened.
     "refusals": "an agent asked for the write tool and was refused at the tool call",
-    "unattended_wakes": "a deferral expired and the subscription woke the fleet",
+    "unattended_wakes": "one entry per deferral that expired with nobody watching",
     "deferrals_unescalated": "deferrals still waiting, with nothing recording their expiry",
 }
 
@@ -143,10 +147,16 @@ def _short_for(key: str, value: str) -> str:
     most load-bearing tile on the page.
     """
     text = value.strip()
+    # "0 of 163" and "0 of 0" both start with a zero and only the second one is
+    # one. The first says 163 were counted and none of them was the thing on the
+    # tile, so a line saying nothing happened contradicts the larger number
+    # standing beside it in the same value.
+    _, _, out_of = text.partition(" of ")
+    counted = out_of.strip() not in ("", "0")
     # A value that is not a number at all is already a refusal to answer, and
     # the tile's own method sentence says why. A cheerful static line over it
     # would be the page talking past its own data.
-    nothing = text.startswith("0") or not text[:1].isdigit()
+    nothing = (text.startswith("0") and not counted) or not text[:1].isdigit()
     if key == "writes":
         # Handled by `_writes_tile`, which knows the card count. Reaching
         # here at all means a caller skipped it, so say the safe thing.
@@ -420,22 +430,16 @@ def summarise(
     published = sum(1 for e in writes if _payload(e).get("published"))
 
     headline = [
-        _triggers_tile(len(triggered), trigger_entries, doubled),
-        _tile(
-            "cards",
-            "approval cards produced",
-            str(counts["plan.proposed"]),
-            "cards",
-            "one per run that reached the approval, each addressed by the sha256 "
-            "of the exact bytes it proposes",
-            "plain",
+        _triggers_tile(
+            len(triggered), trigger_entries, doubled, len(run_ids) - len(triggered)
         ),
+        _cards_tile(counts["plan.proposed"], len(carded)),
         _median_tile(durations, len(carded)),
         _unattended_tile(len(unattended_to_card), len(dispatched)),
         _parked_tile(counts["item.parked"]),
         _writes_tile(len(writes), published, counts["plan.proposed"]),
         _refusals_tile(len(settled), denied, tool_ran, len(unsettled)),
-        _wakes_tile(len(wakes), len(in_run_escalations)),
+        _wakes_tile(len(wakes), len(in_run_escalations), disputed),
         _deferrals_tile(deferred, unescalated),
     ]
 
@@ -464,7 +468,9 @@ def summarise(
     }
 
 
-def _triggers_tile(runs: int, trigger_entries: int, doubled: int) -> dict[str, Any]:
+def _triggers_tile(
+    runs: int, trigger_entries: int, doubled: int, tails: int
+) -> dict[str, Any]:
     caption = f"{trigger_entries} trigger entries over {runs} runs"
     if doubled:
         caption += (
@@ -473,8 +479,41 @@ def _triggers_tile(runs: int, trigger_entries: int, doubled: int) -> dict[str, A
             f"are counted once"
         )
     caption += ". These are runs, and the same pull request can be handled twice."
+    if tails:
+        verb = "carries" if tails == 1 else "carry"
+        # The funnel counts every run and this counts the runs whose trigger is
+        # visible, so the two differ by exactly the tails. Said here because the
+        # reader meets both figures on one screen.
+        caption += (
+            f" {_plural(tails, 'other run')} in this window {verb} no trigger "
+            f"entry, and the trigger is further back than the window, so this "
+            f"figure is the runs whose trigger can be seen. The funnel counts "
+            f"every run, which is why its first stage is the larger number."
+        )
     return _tile(
         "runs_triggered", "pull requests handled", str(runs), "runs", caption, "plain"
+    )
+
+
+def _cards_tile(cards: int, carded: int) -> dict[str, Any]:
+    """Cards, counted as cards.
+
+    "one per run that reached the approval" was the caption and it is not true
+    of a run that proposes twice. The funnel stage beside this one counts those
+    runs, so the strip and the tile are two units, and they were two numbers
+    under labels that differed by the word approval.
+    """
+    return _tile(
+        "cards",
+        "approval cards",
+        str(cards),
+        "cards",
+        f"{_plural(cards, 'card')} across {_plural(carded, 'run')} that reached "
+        f"an approval, each addressed by the sha256 of the exact bytes it "
+        f"proposes. A run that proposes twice contributes two cards and one run, "
+        f"which is why this tile and the funnel stage beside it are counted in "
+        f"different units.",
+        "plain",
     )
 
 
@@ -594,6 +633,7 @@ def _refusals_tile(
             + ", so neither a refusal nor a reachable tool can be claimed from "
             "this window",
             "unknown",
+            short="the probes could not run, so nothing here settles it",
         )
     if not settled:
         return _tile(
@@ -615,6 +655,18 @@ def _refusals_tile(
             f" {_plural(unsettled, 'probe')} could not run and {verb} counted "
             f"neither way."
         )
+    # Like `writes`, and for the same reason: the caption is true or false
+    # depending on the number above it, and only this builder has both. "0 of 5"
+    # got the zero line, "no write was attempted here", printed over a red tile
+    # whose own method said the tool ran five times.
+    if tool_ran:
+        short = "the write tool ran, which is the boundary not holding"
+    elif denied == settled:
+        short = "every write the agent asked for was refused at the tool call"
+    else:
+        # Neither refused nor executed. Nothing here says which, so nothing is
+        # said: the method sentence is the honest answer for this one.
+        short = ""
     return _tile(
         "refusals",
         "refusals enforced",
@@ -622,22 +674,59 @@ def _refusals_tile(
         "probes",
         caption,
         "bad" if tool_ran else ("good" if denied == settled else "warn"),
+        short=short,
     )
 
 
-def _wakes_tile(unattended: int, in_run: int) -> dict[str, Any]:
+def _wakes_tile(unattended: int, in_run: int, disputed: int) -> dict[str, Any]:
+    """Escalation entries written with nobody watching, counted as entries.
+
+    One firing of the query subscription escalates every deferral that had
+    expired by the time it fired, so a couple of firings write a few hundred of
+    these. The control plane panel on the same page counts the firings. Both
+    figures are right and they are not close, which is survivable only while
+    each label says which of the two units it is in.
+
+    `disputed` is in the total and in neither half. Leaving it out printed a
+    total smaller than the escalations the window holds, which is the same fault
+    as the label it was written next to: a number that is not what its sentence
+    says.
+    """
+    total = unattended + in_run + disputed
     caption = (
-        f"{unattended + in_run} escalations in this window, {unattended} of them "
+        f"{_plural(total, 'escalation')} in this window, {unattended} "
         f"unattended: nobody called anything, a deferral reached its expiry and "
-        f"the query subscription woke the fleet."
+        f"the query subscription woke the fleet. One entry per expired deferral, "
+        f"not one per firing of the subscription."
     )
     if in_run:
+        was = "was" if in_run == 1 else "were"
         caption += (
-            f" The other {in_run} were raised during recall inside a run that a "
-            f"pull request triggered, so they are not wakes."
+            f" {_plural(in_run, 'escalation')} here {was} raised during recall "
+            f"inside a run that a pull request triggered, which is not a wake."
         )
+    if disputed:
+        is_, sits = ("is", "sits") if disputed == 1 else ("are", "sit")
+        caption += (
+            f" {_plural(disputed, 'escalation')} {is_} stamped unattended but "
+            f"{sits} under a run id, or the reverse, and so counted in the total "
+            f"above and in neither half of it."
+        )
+    short = ""
+    if disputed and not unattended:
+        # The zero caption for this tile is "no deferral expired in this
+        # window". An escalation the two signals disagree about is not evidence
+        # for that; it is the window failing to settle the question, and the
+        # method sentence directly under this one already says so.
+        short = "this window cannot settle whether its escalations were unattended"
     return _tile(
-        "unattended_wakes", "unattended wakes", str(unattended), "", caption, "plain"
+        "unattended_wakes",
+        "findings escalated unattended",
+        str(unattended),
+        "",
+        caption,
+        "plain",
+        short=short,
     )
 
 
@@ -728,8 +817,8 @@ def _funnel(
         _stage(
             "card produced",
             len(carded),
-            f"{counts['plan.proposed']} cards, each addressed by the sha256 of "
-            f"the bytes it proposes",
+            f"{counts['plan.proposed']} cards across them, each addressed by "
+            f"the sha256 of the bytes it proposes",
         ),
         _stage(
             "published",

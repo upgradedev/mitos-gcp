@@ -16,7 +16,12 @@ from typing import Any, Callable, Optional
 
 from . import fleet
 from .envelope import Outcome, Response, Status
-from .evaluator import Verdict, evaluate, redact_for_repair
+from .evaluator import (
+    Verdict,
+    evaluate,
+    redact_for_repair,
+    scan_pull_request_for_injection,
+)
 from .fixtures import PullRequest
 from .guard import ROLE_READER, ROLE_WRITER, is_allowed
 from .ledger import Entry, Ledger, content_hash
@@ -130,6 +135,42 @@ def run_chore(
         None,
     )
     emit("trigger", f"PR {pr.number}: {pr.title}\n  {len(pr.files)} files from {pr.author}")
+
+    # 1b. The untrusted input, read as untrusted input.
+    #
+    # The gate judges a draft, so it sees only what a specialist chose to quote.
+    # In the demo the planted instruction sits in a specification hunk and the
+    # documentation companion copies added specification lines verbatim, so it
+    # reaches the draft and is caught. That is a property of that path, not of
+    # the system: the same instruction in a migration hunk is quoted by nobody
+    # and was never scanned at all.
+    #
+    # Recorded, not acted on. Finding an instruction in a diff does not decide
+    # anything; it puts the fact in the thread and in front of the human at the
+    # approval, which is where the decision already lives.
+    planted = scan_pull_request_for_injection(pr)
+    if planted:
+        record(
+            "injection.detected",
+            "evaluator",
+            {
+                "count": len(planted),
+                "findings": [
+                    {"check": f.check, "detail": f.detail, "evidence": f.evidence}
+                    for f in planted
+                ],
+                "note": (
+                    "found in the pull request itself, before any specialist "
+                    "quoted it into a draft"
+                ),
+            },
+            root.entry_id,
+        )
+        emit(
+            "guard",
+            f"{len(planted)} instruction(s) planted in the diff, recorded and "
+            f"carried to the approval",
+        )
 
     # 2. The branch point. A model may widen it and can never narrow it.
     dispatch, divergence = fleet.route_with_model(pr, classifier)

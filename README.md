@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
-[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740)
+[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32738967814)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
 [![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
@@ -12,9 +12,11 @@
 column and why. Mitos is the fleet that answers that, and the thread you follow back.**
 
 **▶ Demo video:** `PENDING_YOUTUBE_UPLOAD`
-*(the 3:49 master is built and verified in CI. This line is replaced with the public URL at upload,
-and every CI run annotates a warning while the placeholder is still here so it cannot be quietly
-forgotten.)*
+*(the master is 210.10s, built and verified in CI by
+[run 32749633575](https://github.com/upgradedev/mitos-gcp/actions/runs/32749633575), which asserts
+on the shipped pixels rather than on the inputs. This line is replaced with the public URL at
+upload, and every CI run annotates a warning while the placeholder is still here so it cannot be
+quietly forgotten.)*
 
 Named for Ariadne's thread. You can always retrace your way out.
 
@@ -194,6 +196,65 @@ consumed with a Firestore `create` so the same approval cannot be replayed into 
 This said the writer re-checked the plan hash long before it did. It does now, and every refusal
 has a test that feeds it the input that would previously have got through.
 
+**The same write, in the order it happens.** The picture at the top of this README shows who talks
+to whom. This one shows what has to be true at each step and who does the refusing, which is the
+part boxes cannot carry: two hash checks over different fields on either side of the boundary, and
+two refusals that are Google's rather than ours.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor H as human reviewer
+    participant R as mitos-reader
+    participant IAM as Google IAM
+    participant W as mitos-writer
+    participant SM as Secret Manager
+    participant F as Firestore
+    participant G as upgradedev/mitos-spec
+
+    Note over R: orchestrates the whole chore and holds no credential that can write
+
+    G->>R: webhook delivery, a pull request touching a personal-data column
+    R->>SM: read the webhook secret, the one secret only mitos-reader may read
+    R->>R: HMAC-SHA256 over the raw body, 401 on a mismatch, 403 off the allowlist
+    Note over R: the dispatch, the draft, the gate and the repair happen here, and are the flowchart above
+    H->>R: approves the card, sha256 over pr, path and body
+    R->>R: execute_write recomputes that hash and raises on mismatch
+    R->>F: grant an approval, digest over repository, path, branch and the bytes
+    R->>IAM: ask the metadata server for an ID token for the writer URL
+    R->>W: POST /execute with the bytes and the nonce
+    Note over IAM,W: Cloud Run checks run.invoker before the container sees the request. The only invoker binding on the writer is mitos-reader
+    W->>W: 403 unless MITOS_ROLE is writer. One image, three deployments, so the endpoint exists on all three
+    W->>F: look the nonce up
+    F-->>W: the approval
+    W->>W: recompute the digest from the bytes that actually arrived
+
+    alt the approval expired
+        W-->>R: 410, and nothing is written
+    else no such approval, or not the bytes that were approved
+        W-->>R: 403, and nothing is written
+    else covered and unexpired
+        W->>F: create a document keyed on the nonce
+        Note right of F: create, not set. A second use of the same approval is AlreadyExists, answered 409
+        W->>SM: read the spec-repo deploy key
+        Note over R,SM: the reader and the evaluator are refused here by IAM. /identity attempts it on all three and reports what came back
+        SM-->>W: a deploy key scoped to one repository, on disk 0600 and deleted in a finally
+        W->>G: push a branch over SSH, authored by the writer service account
+        W-->>R: receipt naming approved_by, approval_nonce and run_id
+    end
+
+    R->>F: append write.executed, parented on the entry before it
+    H->>R: GET /thread/view
+    R->>F: read the entries
+    R-->>H: the page walks parent_id back, webhook delivery to published file, one thread
+```
+
+**On the public deployment this stops early, and that is deliberate.** `_publisher` in
+[`service/main.py`](service/main.py) hands back nothing unless `MITOS_PUBLIC_DEMO_MAY_WRITE` is
+`yes`, and [`infra/main.tf`](infra/main.tf) does not set it on the reader. So a run an anonymous
+caller starts gets as far as the card and the hash check and asks nobody to write. An
+unauthenticated request that can end in a publish is the shape of the hole this replaced.
+
 `/identity` does not read a config flag. It **attempts** the access and reports what came back.
 
 ### The interceptor, and the proof it can fail
@@ -367,8 +428,8 @@ That cost an hour to find and `test_gemini_live.py` pins it.
 | `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
 
 **86% coverage against an 85% floor**, measured on `main` by
-[CI run 32577912740](https://github.com/upgradedev/mitos-gcp/actions/runs/32577912740):
-85.98%, 1369 statements, 192 missed. The command that produced it, and the whole
+[CI run 32738967814](https://github.com/upgradedev/mitos-gcp/actions/runs/32738967814):
+86.27%, 2652 statements, 364 missed. The command that produced it, and the whole
 of what it covers:
 
 ```bash
@@ -381,7 +442,7 @@ Firestore adapter suite and the live Gemini suite run as separate CI jobs and si
 outside that number, so read it as coverage of the offline path rather than of
 everything that runs.
 
-**The margin is 0.98 points, and that is the honest number rather than a
+**The margin is 1.27 points, and that is the honest number rather than a
 comfortable one.** Coverage has sat near 86% on `main` since 2026-08-20
 ([run 32400213647](https://github.com/upgradedev/mitos-gcp/actions/runs/32400213647),
 86.06%) while the model, webhook and corpus layers landed. The floor stays at 85

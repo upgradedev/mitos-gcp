@@ -6,6 +6,11 @@ checks are auto-FAIL there and they are auto-FAIL here: a leaked credential and 
 guardrail bypass. Its anti-manipulation rule is here too, because a generator's
 output can carry an injection that was planted upstream in the diff.
 
+Two things are scanned and they are not the same thing. `evaluate` reads a
+generator's draft. `scan_pull_request_for_injection` reads the untrusted input
+directly, because a draft only ever contains the parts of the input some
+specialist chose to quote.
+
 Everything in this module is deterministic. No model decides whether a draft
 passes, which is the point: a gate whose verdict is produced by the same class of
 thing it is gating can be argued out of its verdict.
@@ -15,7 +20,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:  # the gate must not depend at runtime on where its input came from
+    from .fixtures import PullRequest
 
 # Credential shapes. Deliberately narrow: a detector that fires on any long
 # string produces noise, and a gate that cries wolf gets widened by the next
@@ -260,6 +268,98 @@ def _with_critic(verdict: Verdict, draft: str, critic: Critic) -> Verdict:
         injection_attempt=verdict.injection_attempt,
         checked=[*verdict.checked, "model-critic"],
     )
+
+
+def _hunks(patch: str) -> list[tuple[str, str]]:
+    """Split a patch into `(header, text)` pairs, `text` including the header.
+
+    A patch with no `@@` header is one hunk with an empty header rather than
+    nothing to scan, because `webhook.to_pull_request` builds `files` from
+    whatever the GitHub API returned and the fixtures are not the only shape
+    that arrives. A patch with no text at all yields no hunks, which is the
+    limit named in `scan_pull_request_for_injection`.
+    """
+    out: list[tuple[str, str]] = []
+    header, lines = "", []
+    for line in patch.splitlines():
+        if line.startswith("@@"):
+            if lines:
+                out.append((header, "\n".join(lines)))
+            header, lines = line.strip(), [line]
+        else:
+            # The diff marker comes off. Measured on the demo fixture, whose
+            # planted paragraph wraps mid-phrase: `already` then `+approved`.
+            # Three of its four instructions matched the raw hunk and
+            # `pre-approved-claim` did not, because the `+` sits inside the
+            # phrase. Leaving the marker in means any multi-word pattern is
+            # evaded by pressing return, and the reader of the diff, human or
+            # model, never sees the marker anyway.
+            lines.append(line[1:] if line.startswith(("+", "-", " ")) else line)
+    if lines:
+        out.append((header, "\n".join(lines)))
+    return out
+
+
+def _hunk_label(header: str) -> str:
+    """Keep the line range and drop the rest.
+
+    What follows the second `@@` is the enclosing context line, which is prose
+    written by whoever opened the pull request. It makes the location longer
+    without making it more locatable.
+    """
+    end = header.find("@@", 2)
+    return header[: end + 2] if end != -1 else header
+
+
+def _located(text: str, where: str) -> list[Finding]:
+    """Scan one piece of the input and say where the piece was.
+
+    The location goes in `detail` rather than in a new field on `Finding`
+    because `detail` is what the callers already print. The hallucinated-path
+    check does the same thing with the path it objected to.
+    """
+    found = _scan(text, INJECTION_PATTERNS, "CRITICAL", "prompt-injection")
+    for f in found:
+        f.detail = f"{f.detail} in {where}"
+    return found
+
+
+def scan_pull_request_for_injection(pr: PullRequest) -> list[Finding]:
+    """Scan the pull request itself: every hunk, the title and the author.
+
+    `evaluate` judges a draft, so it sees only what a specialist chose to quote.
+    In the demo the planted instruction sits in a specification hunk and the
+    documentation companion copies added specification lines verbatim, so it
+    reaches the draft and the gate catches it. That is a property of that path
+    and not of the system. The same instruction in a migration hunk is quoted by
+    nobody: run against a diff carrying one, the draft scan returned
+    `PASS, 5 checks, no findings` with `injection_attempt` false.
+
+    The title and the author are read for the same reason. Neither passes
+    through a specialist, and both reach the provenance thread and the
+    dashboard.
+
+    Returns `list[Finding]`, which is what `_scan` returns, so a caller can
+    merge these with a draft verdict's findings. It returns them and stops.
+    Scanning is not blocking: what a finding costs the item stays with the
+    caller, which is where that decision already lives.
+
+    The limit, stated rather than left to be discovered. GitHub omits `patch`
+    for a binary file and for one whose diff exceeds its size cap, and a file
+    that arrives with no patch text contributes nothing here. That is silence,
+    not a clean bill, and this function does not tell the two apart. Saying so
+    would mean returning a finding that is not an injection, which is a
+    decision about what a caller is handed and does not belong in a function
+    named for one check.
+    """
+    findings = _located(pr.title, "the pull request title")
+    findings += _located(pr.author, "the pull request author")
+    for f in pr.files:
+        path = f.get("path", "an unnamed file")
+        for header, text in _hunks(f.get("patch", "")):
+            label = _hunk_label(header)
+            findings += _located(text, f"{path} {label}".strip())
+    return findings
 
 
 def redact_for_repair(draft: str) -> str:
