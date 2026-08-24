@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/ci.yml)
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
-[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32738967814)
+[![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
 [![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
@@ -428,8 +428,8 @@ That cost an hour to find and `test_gemini_live.py` pins it.
 | `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
 
 **86% coverage against an 85% floor**, measured on `main` by
-[CI run 32738967814](https://github.com/upgradedev/mitos-gcp/actions/runs/32738967814):
-86.27%, 2652 statements, 364 missed. The command that produced it, and the whole
+[CI run 32738967814](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127):
+86.20%, 2725 statements, 376 missed. The command that produced it, and the whole
 of what it covers:
 
 ```bash
@@ -442,7 +442,7 @@ Firestore adapter suite and the live Gemini suite run as separate CI jobs and si
 outside that number, so read it as coverage of the offline path rather than of
 everything that runs.
 
-**The margin is 1.27 points, and that is the honest number rather than a
+**The margin is 1.20 points, and that is the honest number rather than a
 comfortable one.** Coverage has sat near 86% on `main` since 2026-08-20
 ([run 32400213647](https://github.com/upgradedev/mitos-gcp/actions/runs/32400213647),
 86.06%) while the model, webhook and corpus layers landed. The floor stays at 85
