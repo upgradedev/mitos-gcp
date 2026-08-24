@@ -228,8 +228,11 @@ def _run(
         if attempt < attempts - 1:
             # Full jitter. Sleeping exactly 2**n means every caller that
             # started together wakes together.
-            # nosec B311 - jitter for a retry, not a cryptographic value.
-            delay = random.uniform(0, 2**attempt)  # noqa: S311
+            # `SystemRandom` rather than a suppression comment. The value is
+            # jitter and does not need to be unguessable, but silencing a
+            # scanner is a debt somebody inherits, and the CSPRNG-backed
+            # call costs one word and is not flagged at all.
+            delay = random.SystemRandom().uniform(0, 2**attempt)
             remaining = total_budget - (time.monotonic() - started)
             if remaining <= 0:
                 break

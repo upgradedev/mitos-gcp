@@ -87,7 +87,7 @@ def test_the_backoff_carries_jitter():
     from mitos import gemini
 
     source = inspect.getsource(gemini._run)
-    assert "random.uniform" in source, "the backoff sleeps a fixed interval"
+    assert "SystemRandom().uniform" in source, "the backoff sleeps a fixed interval"
 
 
 # --------------------------------------------------------------------------
