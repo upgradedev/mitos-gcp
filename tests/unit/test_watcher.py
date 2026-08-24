@@ -215,3 +215,30 @@ def test_several_expiring_at_once_are_one_wakeup_and_n_escalations(n):
     assert len(watcher.wakeups) == 1
     assert watcher.wakeups[0].matched == n
     assert len([e for e in led.all() if e.kind == "finding.escalated"]) == n
+
+
+def test_time_passing_on_its_own_wakes_nothing():
+    """The claim this pins down was in the README for weeks and was false.
+
+    `FirestoreWatcher` subscribes to `kind == "finding.deferred"`, a filter with
+    no date in it. A deferral reaching its expiry writes no document, changes no
+    result set and produces no snapshot, so the callback that evaluates the
+    expiry is never called. What is true is that the next change to the set, for
+    any reason, hands the fleet every open deferral and the expired ones are
+    escalated then.
+
+    Asserted by advancing the clock and delivering nothing: a watcher that woke
+    here would mean the claim was true after all, and this test should be
+    deleted rather than adjusted.
+    """
+    from mitos.watcher import FirestoreWatcher
+
+    clock = {"today": "2026-08-01"}
+    watcher = FirestoreWatcher(client=object(), today=lambda: clock["today"])
+
+    clock["today"] = "2026-12-31"
+
+    assert watcher.wakeups == [], (
+        "the watcher woke without a snapshot, so the calendar alone is enough "
+        "after all and the README claim can be restored"
+    )
