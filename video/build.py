@@ -327,6 +327,21 @@ def stage_mux() -> None:
         title,
         lead,
     )
+    # The closing card holds until the narrator has finished, rather than the
+    # run pace being tuned until the two happen to coincide. Without this the
+    # last line was cut off whenever the recording came in shorter than the
+    # narration, which made the pace a hidden dependency of the script: change
+    # one word of narration and a passing build starts failing.
+    body_s = duration_of(body)
+    speech_ends_at = max((beat.at + lead + dur) for beat, dur in timed)
+    tail = float(cfg["end_card_s"])
+    end_s = max(tail, speech_ends_at - (lead + body_s) + tail)
+    if end_s > tail:
+        print(
+            f"end card held {end_s:.1f}s instead of {tail:.1f}s, so the closing "
+            f"narration finishes on screen"
+        )
+
     end = BUILD / "end.mp4"
     _card(
         [
@@ -335,7 +350,7 @@ def stage_mux() -> None:
             "the reader holds no credential that can write",
         ],
         end,
-        float(cfg["end_card_s"]),
+        end_s,
     )
 
     silent = BUILD / "silent.mp4"
