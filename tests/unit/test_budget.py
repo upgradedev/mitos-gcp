@@ -147,3 +147,46 @@ def test_the_service_reports_the_commit_it_was_built_from():
     assert "MITOS_BUILD_SHA=${MITOS_BUILD_SHA}" in dockerfile, (
         "the build arg is declared but never reaches the environment"
     )
+
+
+def test_every_response_carries_the_security_headers():
+    """A scanner reports their absence and would be right to.
+
+    This service renders HTML containing a pull request title, and a stored
+    cross-site scripting hole in exactly that path was found and fixed here on
+    2026-08-23. These are the defence in depth that should have been sitting
+    behind that fix.
+    """
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+
+    for header in (
+        "Content-Security-Policy",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Strict-Transport-Security",
+    ):
+        assert f'"{header}"' in source, f"{header} is no longer set"
+
+
+def test_the_content_policy_denies_everything_it_does_not_need():
+    """Every page here is self contained: no CDN, no font, no image, no fetch.
+
+    A policy that allows what it does not use is a policy that will not notice
+    when something starts using it.
+    """
+    from service.main import SECURITY_HEADERS
+
+    csp = SECURITY_HEADERS["Content-Security-Policy"]
+
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "base-uri 'none'" in csp
+    # The known weak point, asserted so that removing it is a deliberate act and
+    # tightening it is visible in a diff.
+    assert "script-src 'unsafe-inline'" in csp, (
+        "if this became a nonce, the comment above it should stop saying it has not"
+    )
