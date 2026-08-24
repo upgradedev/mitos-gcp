@@ -2,8 +2,8 @@
   "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "title_card_s": 7.0,
-  "end_card_s": 16.0,
-  "note": "Anchors are seconds from the start of the recorded run, before the title card is added. The total video is the last beat's end plus the closing card, so an anchor moved later here moves the whole artifact toward the 240s cap no matter what pace the run is recorded at.",
+  "end_card_s": 6.0,
+  "note": "Anchors are seconds from the start of the recorded run, before the title card is added. The total video is the last beat's end plus the closing card, so an anchor moved later here moves the whole artifact toward the 240s cap no matter what pace the run is recorded at. The closing card is silent, and `verify` refuses more than 8 seconds of dead air, so this value cannot exceed that: 16.0 did, which made a correct build fail once the narration finished before the recording did.",
   "beats": [
     {
       "id": "01-open",
