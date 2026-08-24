@@ -77,3 +77,83 @@ def test_a_duplicate_is_answered_with_success_not_an_error():
     assert '"accepted": True' in after
     assert '"duplicate": True' in after
     assert "status_code=4" not in after and "status_code=5" not in after
+
+
+def test_a_crash_before_completion_does_not_lose_the_delivery():
+    """The regression this file was written to prevent, and then caused.
+
+    The first version marked the delivery permanently on receipt, before the
+    work started. An instance that died in between left a claim with nothing
+    behind it, so GitHub's retry was answered "duplicate" and the chore never
+    ran: duplicate work traded for lost work, which is strictly worse here,
+    because a duplicate is visible in the thread and a silent loss is not.
+    """
+    from mitos.once import _expired
+
+    abandoned = {"at": "2020-01-01T00:00:00+00:00", "done": False, "note": ""}
+
+    assert _expired(abandoned) is True
+
+
+def test_a_finished_delivery_is_refused_forever():
+    """The other direction, so the lease is not simply a timer that forgets."""
+    from mitos.once import _expired
+
+    old_and_done = {"at": "2020-01-01T00:00:00+00:00", "done": True}
+
+    assert _expired(old_and_done) is False
+
+
+def test_work_still_running_is_not_taken_over():
+    claims = InMemoryClaims()
+    claims.claim("d1")
+
+    with pytest.raises(AlreadySeen):
+        claims.claim("d1")
+
+
+def test_a_completed_claim_cannot_be_reclaimed():
+    claims = InMemoryClaims()
+    claims.claim("d1")
+    claims.complete("d1", outcome="chore finished")
+
+    with pytest.raises(AlreadySeen):
+        claims.claim("d1")
+
+
+def test_an_unreadable_timestamp_counts_as_abandoned():
+    """A claim nobody can date is a claim nobody can rely on.
+
+    Refusing the retry for the sake of a field we cannot parse loses the
+    delivery, which is the failure this whole mechanism exists to avoid.
+    """
+    from mitos.once import _expired
+
+    assert _expired({"at": "not a date", "done": False}) is True
+    assert _expired({"done": False}) is True
+
+
+def test_the_lease_outlasts_the_slowest_run_observed():
+    """Taking a lease from a run that is still going produces exactly the
+    duplicate this exists to prevent. The slowest chore measured against live
+    Gemini was 303 seconds."""
+    from mitos.once import LEASE_SECONDS
+
+    assert LEASE_SECONDS > 303
+
+
+def test_success_closes_the_lease_and_failure_leaves_it_open():
+    """A failed run should be retryable. Completing it on the way out would
+    tell GitHub's next delivery that the work already happened."""
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    handler = source[source.index("def work() -> None:") :][:3000]
+
+    assert "claims().complete(" in handler
+    fail_at = handler.index('kind="trigger.failed"')
+    complete_at = handler.index("claims().complete(")
+    assert complete_at > fail_at, "the lease is closed before the failure branch"
+    assert "else:" in handler[fail_at:complete_at], (
+        "completion is not on the success path only"
+    )

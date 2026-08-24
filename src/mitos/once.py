@@ -14,6 +14,14 @@ same event into the record that is supposed to be the account.
 passes under test and loses under concurrency, which is the worst kind to put on
 a path whose whole purpose is handling a race.
 
+**A claim is a lease, not a tombstone, and the first version got this wrong.**
+It marked the delivery permanently on receipt, before the work started. An
+instance that died in between left a claim with nothing behind it, so GitHub's
+retry was answered "duplicate" and the chore never ran. That traded duplicate
+work for lost work, which is strictly worse here: a duplicate is visible in the
+thread and can be reconciled, and a silent loss cannot. The claim expires unless
+`complete` is called, so a retry after a crash takes it over.
+
 Two implementations behind one protocol, as everywhere else here. The in-memory
 one is what the offline suite runs and needs no credential; it is honest about
 its scope in the docstring rather than pretending to be distributed.
@@ -28,9 +36,33 @@ from typing import Any, Optional, Protocol
 
 COLLECTION = "deliveries"
 
+# How long a claim holds before a retry may take it over. Longer than the
+# slowest chore observed against live Gemini, 303 seconds, with room for the
+# tail: taking a lease from a run that is still going produces exactly the
+# duplicate this exists to prevent.
+LEASE_SECONDS = 900
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _expired(held: dict[str, Any], lease: int = LEASE_SECONDS) -> bool:
+    """Has an unfinished claim been abandoned long enough to take over.
+
+    An unreadable timestamp counts as expired. A claim nobody can date is a
+    claim nobody can rely on, and refusing the retry would lose the delivery
+    for the sake of a field we cannot parse.
+    """
+    if held.get("done"):
+        return False
+    try:
+        at = datetime.fromisoformat(str(held.get("at")))
+    except (TypeError, ValueError):
+        return True
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - at).total_seconds() > lease
 
 
 class AlreadySeen(Exception):
@@ -44,6 +76,8 @@ class AlreadySeen(Exception):
 
 class Claims(Protocol):
     def claim(self, key: str, *, note: str = "") -> None: ...
+
+    def complete(self, key: str, *, outcome: str = "") -> None: ...
 
     def seen(self, key: str) -> Optional[dict[str, Any]]: ...
 
@@ -62,9 +96,18 @@ class InMemoryClaims:
 
     def claim(self, key: str, *, note: str = "") -> None:
         with self._lock:
-            if key in self._seen:
-                raise AlreadySeen(f"{key} was claimed at {self._seen[key]['at']}")
-            self._seen[key] = {"at": _now(), "note": note}
+            held = self._seen.get(key)
+            if held is not None and not _expired(held):
+                raise AlreadySeen(
+                    f"{key} is {'done' if held.get('done') else 'in flight'} "
+                    f"since {held['at']}"
+                )
+            self._seen[key] = {"at": _now(), "note": note, "done": False}
+
+    def complete(self, key: str, *, outcome: str = "") -> None:
+        with self._lock:
+            held = self._seen.get(key) or {"at": _now(), "note": ""}
+            self._seen[key] = {**held, "done": True, "outcome": outcome}
 
     def seen(self, key: str) -> Optional[dict[str, Any]]:
         with self._lock:
@@ -87,10 +130,28 @@ class FirestoreClaims:
     def claim(self, key: str, *, note: str = "") -> None:
         from google.api_core import exceptions  # noqa: PLC0415
 
+        record = {"at": _now(), "note": note, "done": False}
         try:
-            self._docs.document(key).create({"at": _now(), "note": note})
-        except exceptions.AlreadyExists as exc:
-            raise AlreadySeen(f"{key} has been delivered before") from exc
+            self._docs.document(key).create(record)
+            return
+        except exceptions.AlreadyExists:
+            pass
+
+        # Somebody holds it. Finished work stays refused forever; an abandoned
+        # lease is taken over, which is what makes a crash recoverable rather
+        # than a delivery lost.
+        held = self.seen(key) or {}
+        if held.get("done") or not _expired(held):
+            raise AlreadySeen(
+                f"{key} is {'done' if held.get('done') else 'in flight'} "
+                f"since {held.get('at')}"
+            )
+        self._docs.document(key).set(record)
+
+    def complete(self, key: str, *, outcome: str = "") -> None:
+        self._docs.document(key).set(
+            {"done": True, "outcome": outcome, "finished_at": _now()}, merge=True
+        )
 
     def seen(self, key: str) -> Optional[dict[str, Any]]:
         doc = self._docs.document(key).get()
