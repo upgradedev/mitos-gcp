@@ -67,6 +67,7 @@ from mitos.tools import MAX_BYTES_PER_READ, MAX_READS_PER_RUN  # noqa: E402
 from mitos.standards import AUDIT_SCOPE, check_repository  # noqa: E402
 from mitos.tools import build_corpus  # noqa: E402
 
+from .budget import RateLimiter, client_of  # noqa: E402
 from .metrics import summarise  # noqa: E402
 
 from .dashboard import (  # noqa: E402
@@ -261,6 +262,29 @@ def thread(limit: int = 100) -> dict[str, Any]:
 
 
 _APPROVALS = None
+
+# One limiter per process, for the endpoints that spend money or append to
+# the thread. The read-only pages are not limited: they cost a Firestore
+# read and rationing them would only make the demo look broken.
+_LIMITER = RateLimiter()
+
+
+def _within_budget(request) -> None:
+    """Raise 429 if this caller has had its share of the expensive path."""
+    decision = _LIMITER.check(client_of(request))
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"{decision.limit} runs per client per "
+                f"{int(_LIMITER.window_s // 60)} minutes on this public demo. "
+                f"Every run calls Gemini and appends to the provenance thread, "
+                f"so the bound is a cost bound rather than a policy. Try again "
+                f"in {decision.retry_after_s}s, or read /runs for what has "
+                f"already happened."
+            ),
+            headers={"Retry-After": str(decision.retry_after_s)},
+        )
 
 # The repository the specification is published to. Named here rather than
 # taken from the request, so a caller cannot approve bytes for one repository
@@ -596,8 +620,11 @@ async def github_webhook(request: Request) -> JSONResponse:
 
 
 @app.post("/run/stream")
-def run_stream(req: RunRequest) -> StreamingResponse:
+def run_stream(req: RunRequest, request: Request) -> StreamingResponse:
     """The chore, streamed as it happens.
+
+    Bounded like `/run`: it spends the same four model calls, and streaming
+    them does not make them free.
 
     `/run` returns when the whole thing is finished, and with a model in the
     loop that is minutes rather than seconds: the specialists read the
@@ -608,6 +635,7 @@ def run_stream(req: RunRequest) -> StreamingResponse:
     the honest fix for the timeout and a better thing to watch: the reads appear
     one at a time, in the order the agent chose them.
     """
+    _within_budget(request)
     if ROLE != ROLE_READER:
         raise HTTPException(status_code=403, detail=f"the {ROLE} service does not orchestrate chores")
     pr = {4471: PR_4471, 4472: PR_4472}.get(req.pr)
@@ -674,7 +702,8 @@ def run_stream(req: RunRequest) -> StreamingResponse:
 
 
 @app.post("/run")
-def run(req: RunRequest) -> JSONResponse:
+def run(req: RunRequest, request: Request) -> JSONResponse:
+    _within_budget(request)
     if ROLE not in (ROLE_READER,):
         raise HTTPException(
             status_code=403,
@@ -798,7 +827,13 @@ def _audit(
 
 
 @app.get("/standards.json")
-def standards_json(repository: Optional[str] = None) -> dict[str, Any]:
+def standards_json(
+    request: Request, repository: Optional[str] = None
+) -> dict[str, Any]:
+    if repository:
+        # Only when it reaches out. Auditing the demo corpus is a
+        # millisecond of local work and rationing it would be theatre.
+        _within_budget(request)
     findings, summary, note, error = _audit(repository)
     if error:
         raise HTTPException(status_code=400, detail=error)
@@ -826,12 +861,14 @@ def connect_page(request: Request) -> str:
 
 
 @app.get("/standards", response_class=HTMLResponse)
-def standards_page(repository: Optional[str] = None) -> str:
+def standards_page(request: Request, repository: Optional[str] = None) -> str:
     """What a repository fails, and what could not be decided from it.
 
     `?repository=owner/name` points it at real code. Without one it audits the
     demo corpus, which is what the recorded demo and every offline test use.
     """
+    if repository:
+        _within_budget(request)
     findings, summary, note, error = _audit(repository)
     # A typo in the form is not a server fault. It used to raise out of the
     # corpus and land as a 500, which reads as "this is broken" rather than
