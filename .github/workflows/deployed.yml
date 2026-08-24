@@ -246,6 +246,72 @@ jobs:
           echo "bad repository on the page -> $code"
           test "$code" = "200" || { echo "::error::a typo returned $code"; exit 1; }
 
+  # Layer 5. A scanner pointed at the running service, which is the one kind of
+  # evidence the other four cannot produce: they assert what we expected, and
+  # this reports what a stranger's tool finds.
+  #
+  # Only the reader. The evaluator and the writer refuse anonymous callers by
+  # design, so scanning them would produce a page of 403s and prove nothing.
+  #
+  # Baseline, not a full attack. This is a public demo on somebody's billing
+  # account, and an active scan would spend the Gemini budget it is supposed to
+  # be protecting.
+  dast:
+    name: 5 dynamic scan
+    needs: journeys
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: ZAP baseline against the public reader
+        run: |
+          set -o pipefail
+          # The official image rather than a third-party action, so the thing
+          # being trusted is the one ZAP publishes.
+          docker run --rm -v "$PWD:/zap/wrk/:rw"             --network host             ghcr.io/zaproxy/zaproxy:2.16.1             zap-baseline.py               -t "$READER"               -c .zap-baseline.conf               -J zap.json               -r zap.html               -I             || true
+          # `-I` and `|| true` so the scan's own exit code does not decide the
+          # build. What decides it is the assertion below, over the findings we
+          # have looked at, because a tool that fails on informational alerts
+          # gets muted and a muted scanner finds nothing.
+
+      - name: Nothing at medium or above
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          report = Path("zap.json")
+          if not report.exists():
+              sys.exit("::error::the scan produced no report, so it proved nothing")
+
+          alerts = []
+          for site in json.loads(report.read_text()).get("site", []):
+              alerts += site.get("alerts", [])
+
+          # riskcode: 0 informational, 1 low, 2 medium, 3 high.
+          serious = [a for a in alerts if int(a.get("riskcode", 0)) >= 2]
+          for a in sorted(alerts, key=lambda x: -int(x.get("riskcode", 0))):
+              risk = ("info", "low", "MEDIUM", "HIGH")[int(a.get("riskcode", 0))]
+              print(f"  {risk:8} {a.get('alert')}  ({len(a.get('instances', []))} instance(s))")
+
+          if serious:
+              print(f"::error::{len(serious)} finding(s) at medium or above")
+              sys.exit(1)
+          print(f"{len(alerts)} alert(s), none at medium or above")
+          PY
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zap-baseline
+          path: |
+            zap.html
+            zap.json
+          retention-days: 14
+
   # Layer 4. The whole suite, the same one a judge is invited to run, against
   # the same URLs. Last because it is the slowest and it runs a real chore.
   uat:

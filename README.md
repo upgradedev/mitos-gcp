@@ -89,7 +89,7 @@ flowchart TB
         W["governed write<br/><i>refuses any other hash</i>"]
     end
 
-    H --> W --> OUT["spec repo PR<br/>+ red status check on the code PR"]
+    H --> W --> OUT["branch pushed to the spec repo<br/>+ compare URL and approval receipt"]
 
     READER -.->|append only| L[("Firestore<br/>provenance thread")]
     EVAL -.->|append only| L
@@ -100,6 +100,8 @@ flowchart TB
     READER -.->|"PermissionDenied"| SEC
     EVAL -.->|"PermissionDenied"| SEC
 ```
+
+**What the last box is, exactly.** The writer pushes a branch to the specification repository and returns a compare URL and a receipt naming the approval that authorised it. It does **not** open a pull request and it does **not** post a status check back on the code pull request. This diagram said it did, for weeks, and nothing in the repository has ever called a GitHub write endpoint: `open_pull_request` and `set_commit_status` exist only as names in the guard's deny list. Writing back needs a GitHub App with write scope on somebody else's repository, which is a credential this fleet deliberately does not hold, and it is the obvious next thing rather than a thing that quietly works.
 
 The two dotted red-herring arrows into Secret Manager are the point of the whole design. The reader
 and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code

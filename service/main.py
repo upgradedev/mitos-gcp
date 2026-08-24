@@ -96,6 +96,51 @@ app = FastAPI(title=f"Mitos · {ROLE}")
 # handler that will forget. Structured JSON so Cloud Logging parses it into
 # fields, which is also what makes "visible proof it runs on Google Cloud"
 # something a judge can go and look at rather than take on trust.
+# Set on every response, including the JSON ones. A scanner reports their
+# absence and it would be right to: this service renders HTML that contains a
+# pull request title, and a stored cross-site scripting hole in exactly that
+# path was found and fixed here on 2026-08-23. These headers are the defence in
+# depth that should have been sitting behind that fix.
+#
+# The content policy is deliberately narrow rather than aspirational. Every page
+# this service serves is self contained: no CDN, no external font, no image, no
+# fetch. So everything that could reach out is denied outright, and what remains
+# is `unsafe-inline` for the one inline script and the inline styles the pages
+# are built from.
+#
+# `unsafe-inline` on scripts is the weak part and is worth naming. A nonce would
+# be stricter, and the reason it is not here yet is that the thread page embeds
+# per-request data into its script, so the hash moves every request and the
+# nonce has to be threaded through the renderer. That is a real change, not a
+# one-line one, and it is the next thing rather than a thing that is done.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'none'; "
+        "script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; "
+        "form-action 'self'; "
+        "base-uri 'none'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
+    # Cloud Run terminates TLS and serves this origin over HTTPS only, so
+    # declaring it costs nothing and closes the downgrade window for a reader
+    # who typed the host without a scheme.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 @app.middleware("http")
 async def request_lifecycle(request, call_next):
     started = time.monotonic()
