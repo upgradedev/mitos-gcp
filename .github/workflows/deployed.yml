@@ -1,0 +1,251 @@
+# The pyramid, run against what is actually running.
+#
+# CI proves the code that was pushed. It does not prove the thing that is
+# serving traffic, and the gap between the two has already produced two
+# incidents in this repository:
+#
+#   MITOS_WRITER_URL was missing from Terraform, so a rebuild would have
+#   removed the governed write and every test would still have passed. Caught
+#   by reading a plan, not by a check.
+#
+#   allUsers was bound to the writer, whose /execute publishes a body taken
+#   from the request. No test looked for it, because every test read the
+#   identity endpoints anonymously and expected them to answer.
+#
+# So this runs on a schedule as well as on demand, and it runs the same suite a
+# judge can run, with no credential, plus the layers that need one.
+
+name: Deployed
+
+on:
+  schedule:
+    # Twice a day. Often enough that drift is measured in hours, rare enough
+    # that it is not a load test of our own public demo.
+    - cron: "17 6,18 * * *"
+  workflow_dispatch:
+    inputs:
+      reader:
+        description: "Reader base URL"
+        default: "https://mitos-reader-437828525303.europe-west1.run.app"
+      evaluator:
+        description: "Evaluator base URL"
+        default: "https://mitos-evaluator-437828525303.europe-west1.run.app"
+      writer:
+        description: "Writer base URL"
+        default: "https://mitos-writer-437828525303.europe-west1.run.app"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two of these at once would spend the public demo's own rate limit against
+  # itself and report a 429 as a failure.
+  group: deployed
+  cancel-in-progress: false
+
+env:
+  READER: ${{ inputs.reader || 'https://mitos-reader-437828525303.europe-west1.run.app' }}
+  EVALUATOR: ${{ inputs.evaluator || 'https://mitos-evaluator-437828525303.europe-west1.run.app' }}
+  WRITER: ${{ inputs.writer || 'https://mitos-writer-437828525303.europe-west1.run.app' }}
+
+jobs:
+  # Layer 1. The narrowest and the fastest: does each service still say what it
+  # is, and is the contract the same shape the code expects. A failure here
+  # explains every failure above it, so it runs first and the rest wait.
+  contract:
+    name: 1 contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: The reader answers, and answers with the shape we serve
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          base = os.environ["READER"]
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=30) as r:
+                  return r.status, json.loads(r.read())
+          status, ident = get("/identity")
+          assert status == 200, status
+          for key in ("role", "running_as", "model", "may_call_write_tools"):
+              assert key in ident, f"/identity no longer reports {key}"
+          assert ident["role"] == "reader", ident["role"]
+          status, cfg = get("/config")
+          for key in ("read_scope", "webhook_repositories", "max_reads_per_run"):
+              assert key in cfg, f"/config no longer publishes {key}"
+          status, cat = get("/catalog")
+          assert cat["companions"], "the catalogue is empty"
+          print(f"reader ok: {ident['running_as']}, model {ident['model']}, "
+                f"{len(cat['companions'])} companions")
+          PY
+
+      - name: The OpenAPI document describes the routes that are being served
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          base = os.environ["READER"]
+          with urllib.request.urlopen(base + "/openapi.json", timeout=30) as r:
+              spec = json.loads(r.read())
+          paths = set(spec.get("paths", {}))
+          # Not every path, because the document is generated and would drift
+          # for harmless reasons. These are the ones a judge is pointed at.
+          for p in ("/", "/fleet", "/runs", "/standards", "/config", "/thread"):
+              assert p in paths, f"{p} is served but not in the published spec"
+          print(f"spec describes {len(paths)} paths")
+          PY
+
+  # Layer 2. The boundary, which is the entry's central claim and the thing
+  # that was broken. Deliberately its own job so a red square says "security"
+  # rather than "something".
+  boundary:
+    name: 2 security boundary
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: The two private services refuse a stranger
+        run: |
+          set -o pipefail
+          for svc in "$EVALUATOR" "$WRITER"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$svc/identity")
+            echo "$svc/identity -> $code"
+            case "$code" in
+              401|403) ;;
+              *) echo "::error::$svc answered an anonymous caller with $code"; exit 1 ;;
+            esac
+          done
+
+      - name: An anonymous write is refused before it is parsed
+        run: |
+          set -o pipefail
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -X POST "$WRITER/execute" -H 'Content-Type: application/json' \
+            -d '{"path":"docs/probe.md","body":"probe","message":"probe","branch":"main"}')
+          echo "anonymous POST /execute -> $code"
+          # 422 is the failure this is here to catch: it means Cloud Run let the
+          # caller through and FastAPI told them which fields to send next.
+          case "$code" in
+            401|403) ;;
+            422) echo "::error::the writer parsed an anonymous request body"; exit 1 ;;
+            *) echo "::error::unexpected $code from an anonymous write"; exit 1 ;;
+          esac
+
+      - name: The public reader is public, and says it cannot write
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          with urllib.request.urlopen(os.environ["READER"] + "/identity", timeout=30) as r:
+              ident = json.loads(r.read())
+          assert ident["may_call_write_tools"]["write_spec_repo"] is False
+          cred = ident["spec_repo_write_credential"]
+          assert cred["reachable"] is False, cred
+          print(f"reader cannot reach the credential: {cred.get('detail')}")
+          PY
+
+      - name: A repository name that could steer a URL is refused
+        run: |
+          set -o pipefail
+          for probe in "../../user" "a/b%23frag" "a/b%3Fx%3D1"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+              "$READER/standards.json?repository=$probe")
+            echo "repository=$probe -> $code"
+            test "$code" = "400" || { echo "::error::accepted $probe"; exit 1; }
+          done
+
+  # Layer 3. The journeys, which is what a judge does with it. Read-only, so it
+  # spends nothing and cannot trip the demo's own rate limit.
+  journeys:
+    name: 3 judge journeys
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Every page renders and says something only that page says
+        run: |
+          set -o pipefail
+          fail=0
+          while IFS='|' read -r path phrase; do
+            body=$(curl -s --max-time 30 "$READER$path")
+            if printf '%s' "$body" | grep -qF "$phrase"; then
+              echo "ok   $path"
+            else
+              echo "::error::$path did not contain: $phrase"; fail=1
+            fi
+          done <<'PAGES'
+          /|the privilege boundary
+          /fleet|catalogued companions
+          /runs|this window, counted
+          /standards|the audit
+          /connect|three steps
+          /thread/view|Mitos
+          PAGES
+          exit $fail
+
+      - name: The standards audit answers, and reports what it could not decide
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          with urllib.request.urlopen(
+              os.environ["READER"] + "/standards.json", timeout=60
+          ) as r:
+              audit = json.loads(r.read())
+          s = audit["summary"]
+          assert s["rules"] > 0, s
+          # The load-bearing property of that module: silence is never counted
+          # as compliance.
+          assert s["could_not_be_determined"] > 0, s
+          decided = s["passed"] + s["failed"]
+          assert decided + s["could_not_be_determined"] <= s["rules"], s
+          print(f"{s['rules']} rules, {decided} decided, "
+                f"{s['could_not_be_determined']} not")
+          PY
+
+      - name: A typo in the form is not a server error
+        run: |
+          set -o pipefail
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "$READER/standards?repository=not-a-repo")
+          echo "bad repository on the page -> $code"
+          test "$code" = "200" || { echo "::error::a typo returned $code"; exit 1; }
+
+  # Layer 4. The whole suite, the same one a judge is invited to run, against
+  # the same URLs. Last because it is the slowest and it runs a real chore.
+  uat:
+    name: 4 judge UAT
+    needs: [boundary, journeys]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: judge_uat, with no credential, exactly as published
+        run: |
+          set -o pipefail
+          python scripts/judge_uat.py \
+            --base-reader "$READER" \
+            --base-evaluator "$EVALUATOR" \
+            --base-writer "$WRITER" | tee /tmp/uat.txt
+
+      - name: No check may pass by not being run
+        run: |
+          set -o pipefail
+          # A suite that reports green while quietly skipping is worse than a
+          # red one, and this repository has shipped that once already.
+          if grep -q "NOT CHECKED" /tmp/uat.txt; then
+            echo "::warning::some checks need a credential and were announced as not checked"
+            grep "NOT CHECKED" /tmp/uat.txt
+          fi
+          grep -qE "^ *[0-9]+/[0-9]+ passed" /tmp/uat.txt \
+            || { echo "::error::the suite printed no result line"; exit 1; }
