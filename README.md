@@ -128,9 +128,10 @@ remember what was already seen.
 The consequence is architectural rather than cosmetic. **The provenance thread stops being a log and
 becomes the thing that dispatches work.** One store is the memory, the audit trail and the control
 plane at once, which is why a run can be retraced as a single thread instead of reconciled across
-three systems. It is also what makes the track's hardest phrase mechanical: a deferral until
-12 August is a standing query, and the fleet wakes when the world moves past that date with nobody
-scheduling anything.
+three systems. It is also what makes the track's hardest phrase mechanical, with one honest limit: a deferral
+until 12 August is a standing query, and the fleet wakes when that query's result set changes with
+nobody scheduling anything. The date moving past on its own delivers no snapshot, which is stated
+in full above.
 
 Watch it, with no account. `wakeups` only increments when Firestore delivered a snapshot in which a
 deferral had expired:
@@ -277,7 +278,7 @@ class of thing that wrote it.
 | Track wording | Where it is |
 |---|---|
 | "cataloged for cross-department use" | the catalogue is a queried structure, not a table in a document. The router reads it to decide who wakes, so adding a companion changes behaviour. `GET /catalog` |
-| "safely maintain context across weeks of asynchronous operations" | **the query subscription is the mechanism, not the storage.** A deferral until 12 August is a standing query; the fleet wakes when the world moves past that date with nobody scheduling anything. `GET /watch` counts how many times it has. The demo also runs the chore twice and the second run recalls what the first wrote, live |
+| "safely maintain context across weeks of asynchronous operations" | **the query subscription is the mechanism, not the storage.** Writing or changing any deferral hands the fleet the whole open set and it escalates the expired ones with nobody scheduling anything. The calendar alone delivers no snapshot. `GET /watch` counts the wakes. The demo also runs the chore twice and the second run recalls what the first wrote, live |
 | "without violating enterprise compliance, data sovereignty, or security policies" | three identities, one write credential, an append-only ledger with no mutation method, and a write addressed by sha256 |
 
 ## Run it
