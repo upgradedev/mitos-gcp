@@ -3,7 +3,7 @@
   "model_id": "eleven_multilingual_v2",
   "title_card_s": 7.0,
   "end_card_s": 16.0,
-  "note": "`at` is the second in the captured run where the beat starts speaking, so each line lands on what is actually on screen. The build fails if a beat runs past the next beat's start. Measured rate for this voice is about 0.09 s per character, which is what the anchors are spaced against; a rewrite that gets longer trips the check rather than quietly talking over the next line. Anchors set against a run captured at --pace 3.4, total 199.7s.",
+  "note": "Anchors are seconds from the start of the recorded run, before the title card is added. The total video is the last beat's end plus the closing card, so an anchor moved later here moves the whole artifact toward the 240s cap no matter what pace the run is recorded at.",
   "beats": [
     {
       "id": "01-open",
@@ -67,18 +67,18 @@
     },
     {
       "id": "13-backlog",
-      "at": 178.0,
+      "at": 148.0,
       "text": "Then the rest of the morning, unattended. Some complete, some are parked, and each names who refused and why."
     },
     {
       "id": "14-decisive",
-      "at": 191.0,
+      "at": 163.0,
       "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model reads the register, and refuses."
     },
     {
       "id": "15-close",
-      "at": 209.0,
-      "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so a finding deferred until the twelfth of August wakes the fleet on the twelfth of August, because the query itself is the subscription."
+      "at": 181.0,
+      "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so writing one deferral hands the fleet every open one, and the expired ones are escalated with nobody watching."
     }
   ]
 }
