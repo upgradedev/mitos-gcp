@@ -346,6 +346,26 @@ def catalog() -> dict[str, Any]:
     return {"companions": [c.as_dict() for c in CATALOG]}
 
 
+@app.get("/github/app/install")
+def github_app_install() -> RedirectResponse:
+    """Start the real GitHub App installation flow.
+
+    The application slug is deployment configuration rather than browser data.
+    Refuse clearly when it is absent instead of sending a user to a mock setup.
+    GitHub returns the installation to the callback configured on the App.
+    """
+    slug = os.environ.get("MITOS_GITHUB_APP_SLUG", "").strip()
+    if not slug:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub App installation is not configured for this deployment",
+        )
+    return RedirectResponse(
+        url=f"https://github.com/apps/{slug}/installations/new",
+        status_code=302,
+    )
+
+
 @app.get("/thread")
 def thread(limit: int = 100) -> dict[str, Any]:
     entries = ledger().all()[-limit:]

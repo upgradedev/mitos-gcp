@@ -12,23 +12,23 @@ import { useEffect, useState } from "react";
 // scrolling or with a real route, never with an anchor.
 
 export type RouteId =
-  | "overview"
-  | "run"
-  | "boundary"
-  | "thread"
-  | "repositories";
+  | "dashboard"
+  | "pull-requests"
+  | "repositories"
+  | "activity"
+  | "settings";
 
 export const ROUTES: RouteId[] = [
-  "overview",
-  "run",
-  "boundary",
-  "thread",
+  "dashboard",
+  "pull-requests",
   "repositories",
+  "activity",
+  "settings",
 ];
 
 function parse(): RouteId {
   const raw = window.location.hash.replace(/^#\/?/, "");
-  return (ROUTES as string[]).includes(raw) ? (raw as RouteId) : "overview";
+  return (ROUTES as string[]).includes(raw) ? (raw as RouteId) : "dashboard";
 }
 
 export function useRoute(): [RouteId, (id: RouteId) => void] {

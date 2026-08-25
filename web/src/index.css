@@ -3,48 +3,29 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    -webkit-text-size-adjust: 100%;
-  }
-
-  body {
-    @apply bg-ink-50 text-ink-900 antialiased;
-    @apply dark:bg-ink-950 dark:text-ink-100;
-    /* No horizontal scroll at 375. Anything genuinely wide scrolls inside its
-       own container instead of moving the page. */
-    overflow-x: hidden;
-  }
-
-  /* A visible focus ring everywhere, not only where a designer remembered.
-     :focus-visible keeps it off mouse clicks and on for keyboard travel. */
-  :focus-visible {
-    @apply outline-none ring-2 ring-offset-2;
-    @apply ring-sky-600 ring-offset-ink-50;
-    @apply dark:ring-sky-400 dark:ring-offset-ink-950;
-  }
+  html { @apply bg-ink-950; -webkit-text-size-adjust: 100%; color-scheme: dark; }
+  body { @apply m-0 min-h-screen bg-ink-950 font-sans text-ink-100 antialiased; overflow-x: hidden; }
+  button, a, input, select { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950; }
+  button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 @layer components {
-  .card {
-    @apply rounded-xl border border-ink-200 bg-white;
-    @apply dark:border-ink-800 dark:bg-ink-900;
-  }
-
-  /* Wide content scrolls in place. Used by the stream, which carries long
-     unbroken hashes and file paths. */
-  .scroll-x {
-    @apply overflow-x-auto;
-  }
+  .page-wrap { @apply mx-auto w-full max-w-[1500px] px-5 py-8 md:px-8 md:py-10 xl:px-10; }
+  .card-dark { @apply rounded-xl border border-ink-800 bg-ink-900; }
+  .metric-card { @apply rounded-xl border border-ink-800 bg-ink-900 p-5 transition hover:border-ink-700; }
+  .button-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-cyan-300; }
+  .button-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-900 px-3.5 py-2 text-sm font-medium text-ink-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-ink-100; }
+  .icon-button { @apply inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition hover:bg-ink-800 hover:text-ink-200; }
+  .search-field { @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-ink-800 bg-ink-900 px-3 text-ink-500 focus-within:border-cyan-500/60; }
+  .search-field input { @apply h-10 min-w-0 flex-1 bg-transparent text-sm text-ink-200 outline-none placeholder:text-ink-600; }
+  .status-success { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300; }
+  .status-danger { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-300; }
+  .status-warning { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300; }
+  .status-neutral { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-ink-700 bg-ink-800 px-2.5 py-1 text-xs font-medium text-ink-300; }
+  .field-label { @apply flex flex-col gap-2 text-xs font-medium text-ink-400; }
+  .field-label input, .field-label select { @apply h-10 rounded-lg border border-ink-700 bg-ink-950 px-3 text-sm text-ink-200 outline-none; }
 }
 
-/* Respect the setting rather than assuming everyone wants motion. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
