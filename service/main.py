@@ -23,6 +23,7 @@ import sys
 import time
 import urllib.parse
 import uuid
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -357,8 +358,51 @@ def catalog() -> dict[str, Any]:
     return {"companions": [c.as_dict() for c in CATALOG]}
 
 
+class NoPublicUrl(Exception):
+    """This service cannot say what its own public address is.
+
+    Raised rather than returning something plausible. Every caller of
+    `_public_url` is building a URL that GitHub will store and call back, and a
+    wrong one fails later, somewhere else, with a message about GitHub rather
+    than about us.
+    """
+
+
 def _public_url(request: Request) -> str:
-    return os.environ.get("MITOS_PUBLIC_URL", str(request.base_url).rstrip("/")).rstrip("/")
+    """The absolute https origin a caller outside Cloud Run would use.
+
+    Three things went wrong in the one line this replaces, and the first two are
+    the same mistake made twice.
+
+    `request.base_url` reports the scheme of the connection this process saw,
+    and behind Cloud Run's proxy that is http. Every URL in the GitHub App
+    manifest came out `http://`, GitHub refused the whole manifest with
+    "redirect_url must be a valid URL", and `hook_attributes.url` would have
+    registered a plain text endpoint for an HMAC-signed delivery. `/connect` had
+    exactly this bug and `dashboard.public_base` was written and tested to fix
+    it; this helper did not use it.
+
+    `os.environ.get(name, default)` returns the empty string when the variable
+    is SET AND EMPTY, so a blank `MITOS_PUBLIC_URL` produced `""` and every
+    manifest URL became a relative path. `or` rather than a default.
+
+    And nothing checked the result. It does now: a caller gets an absolute https
+    URL or an exception, never a string that looks like one.
+    """
+    configured = (os.environ.get("MITOS_PUBLIC_URL") or "").strip().rstrip("/")
+    if not configured:
+        configured = public_base(
+            str(request.base_url), request.headers.get("x-forwarded-proto", "")
+        ).rstrip("/")
+
+    parsed = urlparse(configured)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise NoPublicUrl(
+            f"{configured!r} is not an absolute https URL. Set MITOS_PUBLIC_URL "
+            f"to this deployment's own address, or run behind a proxy that "
+            f"sets X-Forwarded-Proto."
+        )
+    return configured
 
 
 def _github_app_metadata() -> dict[str, Any]:
@@ -869,6 +913,27 @@ def github_app_status() -> dict[str, Any]:
         "events": ["installation", "installation_repositories", "pull_request", "ping"],
         "write_mode": "approval_required",
     }
+
+
+# A configuration problem, answered as one. Raising out of the route produced
+# `500 Internal Server Error` with no body, which tells an operator nothing and
+# reads like a bug in the flow rather than a missing setting. 503 because the
+# service cannot perform this function until it is configured, and it is not the
+# caller who got anything wrong.
+@app.exception_handler(NoPublicUrl)
+async def _no_public_url(request, exc: NoPublicUrl):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "this deployment cannot say what its own public address is",
+            "detail": str(exc),
+            "fix": (
+                "set MITOS_PUBLIC_URL to this service's https address. Terraform "
+                "sets it from the Cloud Run URL; a deployment made another way "
+                "has to pass it."
+            ),
+        },
+    )
 
 
 @app.get("/github/app/new")

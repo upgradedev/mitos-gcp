@@ -46,8 +46,15 @@ locals {
   # and one instance referencing another inside the same resource is a cycle.
   writer_url = "https://mitos-writer-${var.project_number}.${var.region}.run.app"
 
+  # Deterministic, the same way `writer_url` above is. Deriving the public
+  # address from a request header works and is one proxy misconfiguration away
+  # from registering a callback URL nobody controls, on an app installation that
+  # outlives the deployment that made it.
+  reader_url = "https://mitos-reader-${var.project_number}.${var.region}.run.app"
+
   common_env = {
     GOOGLE_CLOUD_PROJECT      = var.project_id
+    MITOS_PUBLIC_URL          = local.reader_url
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
     GOOGLE_CLOUD_LOCATION     = "global"
