@@ -71,7 +71,9 @@ def _json_for_script(value: Any) -> str:
     return blob
 
 
-def render(entries: list[dict[str, Any]], role: str, wakeups: int) -> str:
+def render(
+    entries: list[dict[str, Any]], role: str, wakeups: int, nonce: str = ""
+) -> str:
     """One page. `entries` is exactly what GET /thread returns."""
     # The data substitution goes last. Done first, a pull request titled
     # `__ROLE__` would be rewritten by the next replace, which is untrusted
@@ -81,12 +83,16 @@ def render(entries: list[dict[str, Any]], role: str, wakeups: int) -> str:
         .replace("__WAKEUPS__", str(wakeups))
         .replace("__STYLE__", _json_for_script(KIND_STYLE))
         .replace("__DATA__", _json_for_script(entries))
+        # Escaped, though the value is generated here and never reaches this
+        # function from a request. A nonce interpolated into an attribute is
+        # still an interpolation into an attribute.
+        .replace("__NONCE__", html.escape(nonce, quote=True))
     )
 
 
 _PAGE = """<!doctype html><meta charset=utf-8>
 <title>Mitos · the thread</title>
-<style>
+<style nonce="__NONCE__">
 :root{--bg:#0f0f12;--fg:#e8e6ea;--dim:#8a8790;--line:#2a2a31;--card:#17171c}
 @media(prefers-color-scheme:light){
   :root{--bg:#fbfbfd;--fg:#1b1b1f;--dim:#66646c;--line:#e0e0e6;--card:#fff}}
@@ -130,7 +136,7 @@ b{font-weight:600}
   <div class="list rail" id=list></div>
   <div class=side id=side><div class=hint>Select an entry.</div></div>
 </div>
-<script>
+<script nonce="__NONCE__">
 const DATA = __DATA__, STYLE = __STYLE__;
 const byId = Object.fromEntries(DATA.map(e => [e.entry_id, e]));
 const list = document.getElementById('list'), side = document.getElementById('side');

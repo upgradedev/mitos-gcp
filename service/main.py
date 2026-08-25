@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 import time
 import uuid
@@ -108,16 +109,20 @@ app = FastAPI(title=f"Mitos · {ROLE}")
 # is `unsafe-inline` for the one inline script and the inline styles the pages
 # are built from.
 #
-# `unsafe-inline` on scripts is the weak part and is worth naming. A nonce would
-# be stricter, and the reason it is not here yet is that the thread page embeds
-# per-request data into its script, so the hash moves every request and the
-# nonce has to be threaded through the renderer. That is a real change, not a
-# one-line one, and it is the next thing rather than a thing that is done.
+# `unsafe-inline` was the weak part and it is gone. The first dynamic scan
+# reported it at MEDIUM twice, which is the same thing this comment already
+# said, arrived at independently by somebody else's tool.
+#
+# A per-request nonce replaces it. The middleware mints one before the handler
+# runs, so the same value reaches the tag and the header; a nonce that does not
+# match the tag it authorises is worse than none, because the browser blocks the
+# script and the page silently stops working, which is how a policy gets
+# loosened again.
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; "
-        "script-src 'unsafe-inline'; "
-        "style-src 'unsafe-inline'; "
+        "script-src 'nonce-{nonce}'; "
+        "style-src 'nonce-{nonce}'; "
         "form-action 'self'; "
         "base-uri 'none'; "
         "frame-ancestors 'none'"
@@ -142,9 +147,20 @@ SECURITY_HEADERS = {
 
 @app.middleware("http")
 async def security_headers(request, call_next):
+    # Generated before the handler runs, so the same value reaches the page and
+    # the header. A nonce that does not match the tag it authorises is worse
+    # than no nonce: the browser blocks the script and the page silently stops
+    # working, which is the failure mode that gets a policy loosened again.
+    #
+    # `token_urlsafe` rather than `random`: this is the one value in the policy
+    # an attacker would want to guess, and guessing it turns the whole thing
+    # back into `unsafe-inline`.
+    request.state.csp_nonce = secrets.token_urlsafe(16)
     response = await call_next(request)
     for name, value in SECURITY_HEADERS.items():
-        response.headers.setdefault(name, value)
+        response.headers.setdefault(
+            name, value.replace("{nonce}", request.state.csp_nonce)
+        )
     return response
 
 
@@ -885,6 +901,17 @@ def config() -> dict[str, Any]:
     }
 
 
+def _nonce(request) -> str:
+    """The nonce the middleware minted for this request.
+
+    Empty when there is none, which happens only if a caller renders a page
+    outside the request cycle. An empty nonce produces a tag the policy does not
+    authorise, so the page fails visibly rather than falling back to something
+    permissive.
+    """
+    return getattr(request.state, "csp_nonce", "")
+
+
 def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
     """Entries for a page, and how many exist, so a page can say it is a window.
 
@@ -968,6 +995,7 @@ def connect_page(request: Request) -> str:
         base=public_base(
             str(request.base_url), request.headers.get("x-forwarded-proto", "")
         ),
+        nonce=_nonce(request),
     )
 
 
@@ -991,11 +1019,12 @@ def standards_page(request: Request, repository: Optional[str] = None) -> str:
         repository=None if error else repository,
         note=note,
         form=audit_form(repository, error),
+        nonce=_nonce(request),
     )
 
 
 @app.get("/fleet", response_class=HTMLResponse)
-def fleet_page(limit: int = 300) -> str:
+def fleet_page(request: Request, limit: int = 300) -> str:
     """Which companions exist, and which of them ever did anything.
 
     The catalog on its own is a table that could be aspirational. Joined to the
@@ -1003,18 +1032,20 @@ def fleet_page(limit: int = 300) -> str:
     refused twice, this one has never run.
     """
     entries, total = _page_data(limit)
-    return render_fleet(catalog()["companions"], entries, ROLE, total=total)
+    return render_fleet(
+        catalog()["companions"], entries, ROLE, total=total, nonce=_nonce(request)
+    )
 
 
 @app.get("/runs", response_class=HTMLResponse)
-def runs_page(limit: int = 300) -> str:
+def runs_page(request: Request, limit: int = 300) -> str:
     """What ran, and where each run stopped."""
     entries, total = _page_data(limit)
-    return render_runs(entries, ROLE, total=total)
+    return render_runs(entries, ROLE, total=total, nonce=_nonce(request))
 
 
 @app.get("/thread/view", response_class=HTMLResponse)
-def thread_view(limit: int = 300) -> str:
+def thread_view(request: Request, limit: int = 300) -> str:
     """The thread as the graph it is.
 
     The product is named for a thread you can follow back, and rendering it as
@@ -1023,11 +1054,11 @@ def thread_view(limit: int = 300) -> str:
     """
     entries = [e.to_doc() for e in ledger().all()[-limit:]]
     wakeups = len(_WATCHER.wakeups) if _WATCHER is not None else 0
-    return render_thread(entries, ROLE, wakeups)
+    return render_thread(entries, ROLE, wakeups, nonce=_nonce(request))
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(limit: int = 300) -> str:
+def index(request: Request, limit: int = 300) -> str:
     """The overview: is the boundary holding, and is the fleet awake.
 
     This used to be a three-row identity card. It was true and it answered a
@@ -1044,4 +1075,5 @@ def index(limit: int = 300) -> str:
         total=total,
         config=config(),
         metrics=summarise(entries),
+        nonce=_nonce(request),
     )

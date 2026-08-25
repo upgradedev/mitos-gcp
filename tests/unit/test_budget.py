@@ -189,8 +189,9 @@ def test_the_content_policy_denies_everything_it_does_not_need():
     assert "default-src 'none'" in csp
     assert "frame-ancestors 'none'" in csp
     assert "base-uri 'none'" in csp
-    # The known weak point, asserted so that removing it is a deliberate act and
-    # tightening it is visible in a diff.
-    assert "script-src 'unsafe-inline'" in csp, (
-        "if this became a nonce, the comment above it should stop saying it has not"
-    )
+    # This asserted `unsafe-inline` for one day, so that tightening it would be
+    # visible in a diff. The dynamic scan then reported it at MEDIUM, twice, and
+    # it is a per-request nonce now. The assertion follows rather than being
+    # deleted: an accidental return to `unsafe-inline` should fail here.
+    assert "unsafe-inline" not in csp, "the policy went back to allowing inline"
+    assert "'nonce-{nonce}'" in csp, "the nonce placeholder is gone from the policy"
