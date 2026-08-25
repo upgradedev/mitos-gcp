@@ -175,9 +175,17 @@ jobs:
 
       # The runner disables the gcloud component manager and the emulator is
       # not in the default apt repos, so it comes from Google's own image.
+      #
+      # Pinned, and it was not. The tag was `:emulators`, which floats, and
+      # a new publication overnight started rejecting the database name the
+      # pinned client sends: `Illegal string "%28default%29" in database`.
+      # Every green build in this repository turned red for a reason nobody
+      # had changed, which is what an unpinned dependency buys. The client
+      # was pinned and the thing it talks to was not, so one half of the
+      # pair moved.
       - name: Start the Firestore emulator
         run: |
-          docker run -d --name firestore -p 8089:8089             gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators             gcloud emulators firestore start --host-port=0.0.0.0:8089
+          docker run -d --name firestore -p 8089:8089             gcr.io/google.com/cloudsdktool/google-cloud-cli:579.0.0-emulators             gcloud emulators firestore start --host-port=0.0.0.0:8089
           for i in $(seq 1 90); do
             if curl -s http://127.0.0.1:8089 >/dev/null 2>&1; then
               echo "emulator up after ${i}s"; exit 0
