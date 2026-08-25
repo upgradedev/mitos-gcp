@@ -2,6 +2,7 @@ import type {
   Beat,
   Catalog,
   Config,
+  GitHubAppStatus,
   Identity,
   Loaded,
   Standards,
@@ -63,6 +64,8 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
 
 export const getIdentity = () => getJson<Identity>("/identity");
 export const getConfig = () => getJson<Config>("/config");
+export const getGitHubAppStatus = () =>
+  getJson<GitHubAppStatus>("/github/app/status");
 export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
 export const getThread = (limit = 80) =>

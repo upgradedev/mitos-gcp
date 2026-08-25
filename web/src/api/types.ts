@@ -25,6 +25,17 @@ export interface Config {
   max_bytes_per_read: number;
 }
 
+export interface GitHubAppStatus {
+  configured: boolean;
+  app_slug: string | null;
+  install_url: string | null;
+  webhook_endpoint: string;
+  webhook_secret_configured: boolean;
+  accepted_repositories: string[];
+  events: string[];
+  write_mode: "approval_required";
+}
+
 export interface Companion {
   name: string;
   department: string;

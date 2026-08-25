@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getConfig, getIdentity, getThread, load } from "./api/client";
-import type { Config, Identity, Loaded, Thread } from "./api/types";
+import { getConfig, getGitHubAppStatus, getIdentity, getThread, load } from "./api/client";
+import type { Config, GitHubAppStatus, Identity, Loaded, Thread } from "./api/types";
 import Header from "./shell/Header";
 import Sidebar from "./shell/Sidebar";
 import { useRoute } from "./ui/router";
@@ -19,15 +19,17 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [identity, setIdentity] = useState<Loaded<Identity>>({ status: "loading" });
   const [config, setConfig] = useState<Loaded<Config>>({ status: "loading" });
+  const [githubApp, setGitHubApp] = useState<Loaded<GitHubAppStatus>>({ status: "loading" });
   const [thread, setThread] = useState<Loaded<Thread>>({ status: "loading" });
 
   useEffect(() => {
     load(getIdentity).then(setIdentity);
     load(getConfig).then(setConfig);
+    load(getGitHubAppStatus).then(setGitHubApp);
     load(() => getThread(500)).then(setThread);
   }, []);
 
-  const data = { identity, config, thread, onNavigate: go };
+  const data = { identity, config, githubApp, thread, onNavigate: go };
 
   return (
     <div className="flex min-h-screen bg-ink-950 text-ink-100">

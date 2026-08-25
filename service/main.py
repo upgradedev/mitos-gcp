@@ -346,6 +346,23 @@ def catalog() -> dict[str, Any]:
     return {"companions": [c.as_dict() for c in CATALOG]}
 
 
+@app.get("/github/app/status")
+def github_app_status() -> dict[str, Any]:
+    """Expose non-secret installation readiness for the product UI."""
+    slug = os.environ.get("MITOS_GITHUB_APP_SLUG", "").strip()
+    secret_configured = _webhook_secret() != NO_SECRET_CONFIGURED
+    return {
+        "configured": bool(slug and secret_configured),
+        "app_slug": slug or None,
+        "install_url": f"/github/app/install" if slug else None,
+        "webhook_endpoint": "/webhook/github",
+        "webhook_secret_configured": secret_configured,
+        "accepted_repositories": sorted(ALLOWED_REPOS),
+        "events": ["pull_request"],
+        "write_mode": "approval_required",
+    }
+
+
 @app.get("/github/app/install")
 def github_app_install() -> RedirectResponse:
     """Start the real GitHub App installation flow.

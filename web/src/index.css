@@ -17,7 +17,8 @@
   .button-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-900 px-3.5 py-2 text-sm font-medium text-ink-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-ink-100; }
   .icon-button { @apply inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition hover:bg-ink-800 hover:text-ink-200; }
   .search-field { @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-ink-800 bg-ink-900 px-3 text-ink-500 focus-within:border-cyan-500/60; }
-  .search-field input { @apply h-10 min-w-0 flex-1 bg-transparent text-sm text-ink-200 outline-none placeholder:text-ink-600; }
+  .search-field input, .search-field select { @apply h-10 min-w-0 flex-1 bg-transparent text-sm text-ink-200 outline-none placeholder:text-ink-600; }
+  .search-field select option { @apply bg-ink-900 text-ink-200; }
   .status-success { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300; }
   .status-danger { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-300; }
   .status-warning { @apply inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300; }
