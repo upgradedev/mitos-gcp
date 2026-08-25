@@ -52,9 +52,24 @@ locals {
   # outlives the deployment that made it.
   reader_url = "https://mitos-reader-${var.project_number}.${var.region}.run.app"
 
+  # MITOS_DEMO_MODE: the public demo IS this deployment. Four endpoints are
+  # gated behind it, `/thread`, `/config`, `/run` and `/run/stream`, and it
+  # was set nowhere, so all four answered 404 in production while the
+  # interface that depends on them was reported as checked. The hero button,
+  # the thread view, the boundary view and the repositories view were all
+  # dead on the deployed service.
+  #
+  # The gating itself is right: these are the anonymous demo surfaces and a
+  # tenant deployment should not carry them. What was missing is that
+  # somebody has to turn them on for the deployment that is the demo.
+  #
+  # The comment lives here rather than inside the map because a comment
+  # between entries splits terraform fmt's alignment group and the build
+  # fails on the padding of the line above it.
   common_env = {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     MITOS_PUBLIC_URL          = local.reader_url
+    MITOS_DEMO_MODE           = "true"
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
     GOOGLE_CLOUD_LOCATION     = "global"
