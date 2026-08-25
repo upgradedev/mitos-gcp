@@ -171,13 +171,29 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0
+      # The client was pinned and what it depends on was not, so the pin
+      # bought nothing. Overnight `google-api-core` moved 2.34.0 to 2.35.0
+      # and `google-cloud-core` 2.6.1 to 2.7.0, and the emulator started
+      # refusing the database name they now send:
+      #   Illegal string "%28default%29" in database
+      # which is `(default)` arriving URL-encoded. Nothing in this
+      # repository changed; every build went red while it sat still.
+      #
+      # Pinned to the versions of the last green run, 32770320303.
+      - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0 google-api-core==2.34.0 google-cloud-core==2.6.1
 
       # The runner disables the gcloud component manager and the emulator is
       # not in the default apt repos, so it comes from Google's own image.
+      #
+      # Pinned, and it was not. This was not what broke the build overnight,
+      # which was the client's own dependencies moving, and pinning it here
+      # did not fix that. It stays pinned anyway: a floating tag on the only
+      # external service the integration suite talks to is a build that can
+      # break while the repository sits still, which is exactly what just
+      # happened on the other side of the same conversation.
       - name: Start the Firestore emulator
         run: |
-          docker run -d --name firestore -p 8089:8089             gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators             gcloud emulators firestore start --host-port=0.0.0.0:8089
+          docker run -d --name firestore -p 8089:8089             gcr.io/google.com/cloudsdktool/google-cloud-cli:579.0.0-emulators             gcloud emulators firestore start --host-port=0.0.0.0:8089
           for i in $(seq 1 90); do
             if curl -s http://127.0.0.1:8089 >/dev/null 2>&1; then
               echo "emulator up after ${i}s"; exit 0

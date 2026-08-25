@@ -126,6 +126,13 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
+    # Found by the first dynamic scan, which reported "Insufficient Site
+    # Isolation Against Spectre" on nine responses. Nothing this service
+    # serves is meant to be embedded in, or opened by, another origin, so
+    # the strictest values are also the correct ones.
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin",
     # Cloud Run terminates TLS and serves this origin over HTTPS only, so
     # declaring it costs nothing and closes the downgrade window for a reader
     # who typed the host without a scheme.
