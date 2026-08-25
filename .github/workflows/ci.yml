@@ -19,7 +19,18 @@
 name: CI
 
 on:
+  # `main` only, deliberately. `push:` with no branches plus `pull_request:`
+  # started TWO runs of this whole workflow for every commit on a pull request
+  # branch, so every check appeared twice on every pull request and each one was
+  # paid for twice — including `Gemini, live`, which spends Vertex AI tokens, and
+  # the Firestore emulator suite.
+  #
+  # A pull request commit is still covered, by the `pull_request` event, which
+  # tests the merge result rather than the branch tip and is the better of the
+  # two. The same mistake in `infra.yml` was not merely wasteful there: both runs
+  # went at one Terraform state lock and one of them died every time.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

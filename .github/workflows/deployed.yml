@@ -366,6 +366,36 @@ jobs:
           PAGES
           exit $fail
 
+      - name: The GitHub App manifest is one GitHub would accept
+        run: |
+          set -o pipefail
+          # The manifest is the only artefact here that a third party parses and
+          # stores, and it is checked nowhere else in this file. It shipped with
+          # every URL on http, and the failure surfaced as GitHub refusing the
+          # whole thing with a message naming one field and none of the cause.
+          #
+          # Same module as the integration suite, so the repository and the
+          # deployment cannot disagree about what a valid manifest is. Not a
+          # POST to github.com: that endpoint's unauthenticated answer depends
+          # on session and anti-abuse state, not on the manifest, so it makes a
+          # flaky gate rather than a check.
+          python scripts/check_manifest.py "$READER/github/app/new"
+
+      - name: The manifest page is never cached
+        run: |
+          set -o pipefail
+          # It mints a single-use state paired with a ten minute cookie. A
+          # cached copy carries a state the cookie no longer matches, and that
+          # failure appears at GitHub, one step after the one that caused it.
+          header=$(curl -s -D - -o /dev/null --max-time 60 \
+            "$READER/github/app/new" | tr -d '\r' \
+            | grep -i '^cache-control:' || true)
+          echo "${header:-no cache-control header}"
+          case "$header" in
+            *no-store*) ;;
+            *) echo "::error::the manifest page is cacheable: ${header:-absent}"; exit 1 ;;
+          esac
+
       - name: The standards audit answers, and reports what it could not decide
         run: |
           set -o pipefail

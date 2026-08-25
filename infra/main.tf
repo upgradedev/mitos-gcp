@@ -174,10 +174,27 @@ resource "google_project_iam_member" "fleet_model" {
 # and the judge suite failed on exactly that line, which is the check earning
 # its place.
 #
-# So the secret exists before the flow runs, created here with no version, and
-# the reader is granted two roles on that ONE secret. Nothing project-wide.
+# So the secrets exist before the flow runs, created here with no version, and
+# the reader is granted two roles on THOSE secrets. Nothing project-wide.
+#
+# Three of them, and the names are not decorative. `github_app_manifest_callback`
+# writes `{prefix}-private-key`, `{prefix}-client-secret` and
+# `{prefix}-webhook-secret`, and three separate places read them back. Removing
+# the project-level role took away the runtime's ability to create what it
+# writes to, and the first version of this block declared one secret under a
+# name nothing reads. Nobody would have noticed until an App was created for
+# real, at which point GitHub has already returned the credentials it returns
+# exactly once and the callback fails storing them.
+#
+# `tests/unit/test_secret_names.py` asserts these names against the ones in
+# `service/main.py`, so the two cannot drift again in silence.
+locals {
+  github_app_credentials = ["private-key", "client-secret", "webhook-secret"]
+}
+
 resource "google_secret_manager_secret" "github_app" {
-  secret_id = "mitos-${var.stage}-github-app"
+  for_each  = toset(local.github_app_credentials)
+  secret_id = "mitos-${var.stage}-github-app-${each.value}"
 
   replication {
     auto {}
@@ -187,16 +204,18 @@ resource "google_secret_manager_secret" "github_app" {
 }
 
 # Add a version, and read the versions it added. `secretVersionAdder` cannot
-# read and `secretAccessor` cannot write, which is why this is two bindings on
-# one secret rather than one convenient role.
+# read and `secretAccessor` cannot write, which is why this is two bindings per
+# secret rather than one convenient role.
 resource "google_secret_manager_secret_iam_member" "reader_writes_github_app" {
-  secret_id = google_secret_manager_secret.github_app.id
+  for_each  = google_secret_manager_secret.github_app
+  secret_id = each.value.id
   role      = "roles/secretmanager.secretVersionAdder"
   member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "reader_reads_github_app" {
-  secret_id = google_secret_manager_secret.github_app.id
+  for_each  = google_secret_manager_secret.github_app
+  secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
 }

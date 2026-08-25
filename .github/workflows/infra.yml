@@ -1,16 +1,25 @@
 # Infrastructure is planned in a pipeline, never changed from a laptop.
 #
-# `validate` runs on every push, so a broken change is caught before anyone
-# reads it. `plan` runs against the real project so the diff between what is
-# written down and what actually exists is visible on a pull request, which is
-# the only way to find out that somebody fixed something with gcloud at 2am.
+# `validate` runs on pull requests and on pushes to main, so a broken change is
+# caught before anyone reads it. `plan` runs against the real project so the
+# diff between what is written down and what actually exists is visible on a
+# pull request, which is the only way to find out that somebody fixed something
+# with gcloud at 2am.
 #
 # `apply` is manual on purpose. Nothing here should surprise anybody.
 
 name: Infrastructure
 
 on:
+  # `main` only. A push to a branch that has a pull request open used to start a
+  # SECOND run of this workflow for the same commit, and the two raced each
+  # other for the Terraform state lock. One won and one died with
+  # `Error 412: At least one of the pre-conditions you specified did not hold`,
+  # so every pull request touching infra got a red X on a coin toss, and the
+  # notes in the workspace called it a trap that had cost four commits in one
+  # day. It was not a trap. It was this trigger.
   push:
+    branches: [main]
     paths: [infra/**, .github/workflows/infra.yml]
   pull_request:
     paths: [infra/**, .github/workflows/infra.yml]
@@ -32,7 +41,17 @@ permissions:
 
 concurrency:
   # Two applies at once against one state file is how state gets corrupted.
-  group: infra-${{ github.ref }}
+  #
+  # Constant, not `github.ref`. There is ONE state file for the whole project,
+  # so the thing that must not overlap is any two runs of this workflow, not any
+  # two runs on the same branch. `github.ref` was worse than useless here: it is
+  # `refs/heads/<branch>` for a push and `refs/pull/<n>/merge` for a pull
+  # request, so the duplicate runs it was meant to serialise landed in two
+  # different groups and both went straight at the lock.
+  #
+  # `cancel-in-progress: false` because a cancelled apply leaves the state
+  # locked and half the project changed.
+  group: infra-terraform-state
   cancel-in-progress: false
 
 env:
@@ -275,6 +294,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # To start the deployed pyramid at the end of this job. See that step.
+      actions: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
@@ -296,3 +317,17 @@ jobs:
             -var="image=${{ inputs.image }}"
           terraform -chdir=infra output -json > /tmp/outputs.json
           cat /tmp/outputs.json
+
+      # ADR-010 says the pyramid runs "on a schedule, on demand, and after every
+      # apply". The first two were true and the third was not: `deployed.yml`
+      # had only `schedule` and `workflow_dispatch`, so every apply relied on a
+      # person remembering. That is precisely the gap the ADR was written about,
+      # left open in the workflow that closes it.
+      #
+      # Not `if: success()` by accident — a failed apply can still have changed
+      # half the project, and that is the state most worth measuring.
+      - name: Run the deployed pyramid against what was just applied
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deployed.yml --ref ${{ github.ref_name }}
