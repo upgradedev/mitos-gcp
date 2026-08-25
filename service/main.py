@@ -955,7 +955,7 @@ def github_app_new(request: Request) -> HTMLResponse:
         "name": os.environ.get("MITOS_GITHUB_APP_NAME", "Mitos Change Intelligence"),
         "url": base,
         "hook_attributes": {"url": f"{base}/webhook/github", "active": True},
-        "redirect_url": f"{base}/github/app/manifest/callback?state={state}",
+        "redirect_url": f"{base}/github/app/manifest/callback",
         "setup_url": f"{base}/github/app/setup/callback",
         "callback_urls": [f"{base}/github/auth/callback"],
         "public": False,
@@ -965,15 +965,16 @@ def github_app_new(request: Request) -> HTMLResponse:
             "metadata": "read",
             "pull_requests": "write",
         },
-        "default_events": ["installation", "installation_repositories", "pull_request", "ping"],
+        "default_events": ["pull_request"],
     }
     nonce = request.state.csp_nonce
     body = html.escape(json.dumps(manifest), quote=True)
     page = f'''<!doctype html><html><head><meta charset="utf-8"><title>Create Mitos GitHub App</title></head>
-<body><form id="manifest" method="post" action="https://github.com/settings/apps/new">
+<body><form id="manifest" method="post" action="https://github.com/settings/apps/new?state={html.escape(state, quote=True)}">
 <input type="hidden" name="manifest" value="{body}"></form>
 <p>Redirecting to GitHub to create the App…</p><script nonce="{nonce}">document.getElementById("manifest").submit()</script></body></html>'''
     response = HTMLResponse(page)
+    response.headers["Cache-Control"] = "no-store"
     response.set_cookie(
         "mitos_github_manifest_state",
         state,
