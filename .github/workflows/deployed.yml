@@ -223,7 +223,13 @@ jobs:
             cat /tmp/index.html; exit 1
           fi
           fail=0
-          for pair in "$js:application/javascript" "$css:text/css"; do
+          # `javascript` rather than `application/javascript`. The service sends
+          # `text/javascript`, which is the type the current specification names
+          # and the one `application/javascript` was superseded by, so asserting
+          # the older spelling failed a correct deployment. Matching the subtype
+          # accepts both and still refuses `text/html`, which is what a missing
+          # asset falling through to the app shell would look like.
+          for pair in "$js:javascript" "$css:text/css"; do
             path=${pair%%:*}; want=${pair##*:}
             # Fields separated by a character curl cannot produce inside one of
             # them. `read code type size` was wrong here: the content type is
