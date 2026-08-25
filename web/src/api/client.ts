@@ -25,6 +25,16 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new HttpError(res.status, await safeDetail(res));
+  return (await res.json()) as T;
+}
+
 export class HttpError extends Error {
   status: number;
   detail: string;
@@ -72,6 +82,8 @@ export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
 export const getThread = (limit = 80) =>
   getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
+export const approveSuggestedChange = (runId: string) =>
+  postJson<{ status: string; receipt: { url?: string } }>("/api/workspace/suggested-changes/approve", { run_id: runId });
 
 // The audit. Passing null audits the built-in demo corpus, which is local work
 // and costs no GitHub request; passing a name reaches out over the public

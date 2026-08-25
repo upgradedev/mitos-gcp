@@ -14,6 +14,7 @@ config flag we set ourselves.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
@@ -89,6 +90,12 @@ from .dashboard import (  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "upgradegr-mitos")
+DEMO_MODE = os.environ.get("MITOS_DEMO_MODE", "").lower() in {"1", "true", "yes"}
+
+
+def _require_demo_mode() -> None:
+    if not DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo route is disabled")
 SECRET = os.environ.get(
     "MITOS_WRITE_SECRET", "mitos-prod-settings-writer-spec-repo-deploy-key"
 )  # nosec B105 - the secret's NAME, not its value
@@ -546,6 +553,70 @@ def _safe_github_check(**kwargs: Any) -> Optional[int]:
         return kwargs.get("check_run_id")
 
 
+def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: int,
+                         expected_head: str, path: str, body: str, run_id: str) -> dict[str, Any]:
+    token = _github_installation_token(installation_id)
+    headers = {
+        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    api = f"https://api.github.com/repos/{repository}"
+    source = httpx.get(f"{api}/pulls/{source_pr}", headers=headers, timeout=30.0)
+    source.raise_for_status()
+    source_doc = source.json()
+    current_head = str((source_doc.get("head") or {}).get("sha") or "")
+    if not current_head or current_head != expected_head:
+        raise HTTPException(status_code=409, detail="The pull request head changed; run analysis again before approval")
+
+    repository_response = httpx.get(api, headers=headers, timeout=30.0)
+    repository_response.raise_for_status()
+    base_branch = str(repository_response.json().get("default_branch") or "main")
+    base_response = httpx.get(f"{api}/git/ref/heads/{urllib.parse.quote(base_branch, safe='')}", headers=headers, timeout=30.0)
+    base_response.raise_for_status()
+    base_sha = str((base_response.json().get("object") or {}).get("sha") or "")
+    branch = f"mitos/suggestion-{source_pr}-{run_id[:8]}"
+    create_ref = httpx.post(
+        f"{api}/git/refs", headers=headers,
+        json={"ref": f"refs/heads/{branch}", "sha": base_sha}, timeout=30.0,
+    )
+    if create_ref.status_code not in (201, 422):
+        create_ref.raise_for_status()
+    content = httpx.put(
+        f"{api}/contents/{urllib.parse.quote(path, safe='/')}", headers=headers,
+        json={
+            "message": f"docs: apply Mitos suggestion for #{source_pr}",
+            "content": base64.b64encode(body.encode("utf-8")).decode("ascii"),
+            "branch": branch,
+        }, timeout=30.0,
+    )
+    content.raise_for_status()
+    pull = httpx.post(
+        f"{api}/pulls", headers=headers,
+        json={
+            "title": f"Mitos suggestion for #{source_pr}", "head": branch, "base": base_branch,
+            "body": f"Approval-gated suggestion generated from Mitos analysis `{run_id}` for #{source_pr}.\n\nSource head: `{expected_head}`",
+        }, timeout=30.0,
+    )
+    pull.raise_for_status()
+    document = pull.json()
+    return {"published": True, "branch": branch, "url": document.get("html_url"), "pull_number": document.get("number"), "commit": (content.json().get("commit") or {}).get("sha")}
+
+
+def _persist_suggested_change(*, result: Any, delivery: Any, installation_id: Optional[int]) -> None:
+    if result.card is None or not isinstance(installation_id, int):
+        return
+    from google.cloud import firestore  # noqa: PLC0415
+
+    firestore.Client(project=PROJECT).collection("suggested_changes").document(delivery.delivery_id).set({
+        "run_id": delivery.delivery_id, "repository": delivery.repository,
+        "source_pr": delivery.number, "source_head_sha": delivery.head_sha,
+        "installation_id": installation_id, "path": result.card.target_path,
+        "body": result.card.body, "plan_hash": result.card.plan_hash,
+        "findings": result.card.findings, "advisories": result.card.advisories,
+        "status": "awaiting_approval", "created_at": firestore.SERVER_TIMESTAMP,
+    })
+
+
 def _session_user(request: Request) -> Optional[dict[str, Any]]:
     session_id = request.cookies.get("mitos_session")
     if not session_id:
@@ -889,6 +960,72 @@ def workspace_config(request: Request) -> dict[str, Any]:
     }
 
 
+class SuggestedChangeApprovalRequest(BaseModel):
+    run_id: str
+
+
+@app.post("/api/workspace/suggested-changes/approve")
+def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Request) -> dict[str, Any]:
+    user, membership = _workspace_context(request)
+    workspace_id = str(membership["workspace_id"])
+    _require_role(request, workspace_id, frozenset({"owner", "reviewer"}))
+    from google.cloud import firestore  # noqa: PLC0415
+
+    db = firestore.Client(project=PROJECT)
+    reference = db.collection("suggested_changes").document(req.run_id)
+    snapshot = reference.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Suggested change not found")
+    change = snapshot.to_dict() or {}
+    repository = str(change.get("repository") or "")
+    repository_matches = list(
+        db.collection("repositories")
+        .where(filter=firestore.FieldFilter("full_name", "==", repository))
+        .limit(1)
+        .stream()
+    )
+    repository_doc = repository_matches[0].to_dict() if repository_matches else {}
+    if repository_doc.get("workspace_id") != workspace_id or not repository_doc.get("active"):
+        raise HTTPException(status_code=403, detail="Suggested change is outside this workspace")
+    if change.get("status") == "published":
+        return {"status": "published", "receipt": change.get("receipt") or {}}
+    if change.get("status") != "awaiting_approval":
+        raise HTTPException(status_code=409, detail="Suggested change is not awaiting approval")
+
+    actor = str(user["login"])
+    approval = approvals().grant(Approval(
+        repository=repository,
+        path=str(change["path"]),
+        branch=f"mitos/suggestion-{change['source_pr']}-{req.run_id[:8]}",
+        digest=body_digest(
+            repository=repository, path=str(change["path"]),
+            branch=f"mitos/suggestion-{change['source_pr']}-{req.run_id[:8]}",
+            body=str(change["body"]), commit=str(change["source_head_sha"]),
+        ),
+        run_id=req.run_id, actor=actor, commit=str(change["source_head_sha"]),
+        intent="create_suggested_pull_request",
+    ))
+    approval.check(
+        repository=repository, path=str(change["path"]), branch=approval.branch,
+        body=str(change["body"]), commit=str(change["source_head_sha"]),
+    )
+    receipt = _github_suggested_pr(
+        installation_id=int(change["installation_id"]), repository=repository,
+        source_pr=int(change["source_pr"]), expected_head=str(change["source_head_sha"]),
+        path=str(change["path"]), body=str(change["body"]), run_id=req.run_id,
+    )
+    approvals().consume(approval.nonce, by=actor)
+    reference.set({
+        "status": "published", "approved_by": actor, "approval_nonce": approval.nonce,
+        "approved_at": firestore.SERVER_TIMESTAMP, "receipt": receipt,
+    }, merge=True)
+    ledger().append(Entry(
+        kind="write.executed", actor=actor, subject=f"{repository}#{change['source_pr']}",
+        run_id=req.run_id, payload={"approved": True, "plan_hash": change.get("plan_hash"), **receipt},
+    ))
+    return {"status": "published", "receipt": receipt}
+
+
 @app.get("/api/workspace/thread")
 def workspace_thread(request: Request, limit: int = 500) -> dict[str, Any]:
     _, membership = _workspace_context(request)
@@ -918,6 +1055,7 @@ def workspace_thread(request: Request, limit: int = 500) -> dict[str, Any]:
 
 @app.get("/thread")
 def thread(limit: int = 100) -> dict[str, Any]:
+    _require_demo_mode()
     entries = ledger().all()[-limit:]
     return {
         "count": len(entries),
@@ -1297,7 +1435,7 @@ async def github_webhook(request: Request) -> JSONResponse:
     check_run_id: Optional[int] = None
     if isinstance(installation_id, int):
         try:
-            check_run_id = _github_check(
+            check_run_id = _safe_github_check(
                 repository=delivery.repository,
                 installation_id=installation_id,
                 head_sha=delivery.head_sha,
@@ -1309,7 +1447,7 @@ async def github_webhook(request: Request) -> JSONResponse:
     def work() -> None:
         try:
             if isinstance(installation_id, int) and check_run_id is not None:
-                _github_check(
+                _safe_github_check(
                     repository=delivery.repository, installation_id=installation_id,
                     head_sha=delivery.head_sha, status="in_progress", check_run_id=check_run_id,
                 )
@@ -1324,13 +1462,13 @@ async def github_webhook(request: Request) -> JSONResponse:
                     )
                 )
                 if isinstance(installation_id, int) and check_run_id is not None:
-                    _github_check(
+                    _safe_github_check(
                         repository=delivery.repository, installation_id=installation_id,
                         head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
                         conclusion="neutral", summary="No readable patch required analysis.",
                     )
                 return
-            run_chore(
+            result = run_chore(
                 wh.to_pull_request(delivery, files), led,
                 run_id=delivery.delivery_id,
                 repository=delivery.repository,
@@ -1350,6 +1488,9 @@ async def github_webhook(request: Request) -> JSONResponse:
                 classifier=build_classifier(PROJECT),
                 doc_agent=build_doc_agent(PROJECT, role=ROLE),
             )
+            _persist_suggested_change(
+                result=result, delivery=delivery, installation_id=installation_id,
+            )
             run_entries = [item for item in led.all() if item.run_id == delivery.delivery_id]
             finding_count = sum(item.kind.startswith("finding.") for item in run_entries)
             needs_review = finding_count > 0 or any(
@@ -1358,7 +1499,7 @@ async def github_webhook(request: Request) -> JSONResponse:
             )
             plans = sum(item.kind == "plan.proposed" for item in run_entries)
             if isinstance(installation_id, int) and check_run_id is not None:
-                _github_check(
+                _safe_github_check(
                     repository=delivery.repository, installation_id=installation_id,
                     head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
                     conclusion="action_required" if needs_review else "success",
@@ -1415,6 +1556,7 @@ def run_stream(req: RunRequest, request: Request) -> StreamingResponse:
     the honest fix for the timeout and a better thing to watch: the reads appear
     one at a time, in the order the agent chose them.
     """
+    _require_demo_mode()
     _within_budget(request)
     if ROLE != ROLE_READER:
         raise HTTPException(status_code=403, detail=f"the {ROLE} service does not orchestrate chores")
@@ -1483,6 +1625,7 @@ def run_stream(req: RunRequest, request: Request) -> StreamingResponse:
 
 @app.post("/run")
 def run(req: RunRequest, request: Request) -> JSONResponse:
+    _require_demo_mode()
     _within_budget(request)
     if ROLE not in (ROLE_READER,):
         raise HTTPException(
@@ -1551,6 +1694,7 @@ def config() -> dict[str, Any]:
     verifier will accept, and publishing them is the difference between a
     dashboard that says a boundary exists and one that shows you where it is.
     """
+    _require_demo_mode()
     return {
         "read_scope": list(READ_SCOPE),
         "webhook_repositories": _connected_repositories(),
