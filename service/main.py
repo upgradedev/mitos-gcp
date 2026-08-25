@@ -457,6 +457,16 @@ def _store_github_app_secret(secret_id: str, value: str) -> None:
 
     client = secretmanager.SecretManagerServiceClient()
     parent = f"projects/{PROJECT}"
+    # The secret is created by Terraform, empty, and this only ever adds a
+    # version to it. Creating it here needed `secretmanager.admin` at the
+    # project level, which also grants read on every other secret, including
+    # the deploy key this service is architecturally forbidden to hold. That
+    # was deployed and the reader really could read it.
+    #
+    # `AlreadyExists` is still caught rather than removed: a deployment whose
+    # apply has not run yet should fail on the add below, with a message about
+    # a missing secret, rather than here with a permission error that reads as
+    # a bug in this function.
     try:
         client.create_secret(
             request={
@@ -466,6 +476,8 @@ def _store_github_app_secret(secret_id: str, value: str) -> None:
             }
         )
     except AlreadyExists:
+        pass
+    except Exception:  # noqa: BLE001 - creating is Terraform's job, not ours
         pass
     client.add_secret_version(
         request={

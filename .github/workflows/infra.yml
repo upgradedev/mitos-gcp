@@ -71,11 +71,32 @@ jobs:
           cd infra
           grep -q 'google_secret_manager_secret_iam_member" "only_the_writer"' main.tf \
             || { echo "::error::the write credential is no longer bound to a single identity"; exit 1; }
-          # Two secrets, each bound to exactly one identity. The property being
-          # protected is that no secret gains a second reader, not that there is
-          # only ever one secret.
-          test "$(grep -c 'google_secret_manager_secret_iam_member' main.tf)" -eq 2 \
+          # Three secrets and four bindings: the deploy key and the webhook
+          # secret have one identity each, and the GitHub App secret has the
+          # reader twice, once to add a version and once to read one, because
+          # `secretVersionAdder` cannot read and `secretAccessor` cannot write.
+          # The property being protected is that no secret gains a reader it
+          # should not have, not that the count never moves.
+          test "$(grep -c 'google_secret_manager_secret_iam_member' main.tf)" -eq 4 \
             || { echo "::error::the number of secret bindings changed; check each is still a single identity"; exit 1; }
+          # The guard this file did not have, and the reason it needed one.
+          #
+          # A project-level `roles/secretmanager.admin` was granted to the
+          # reader so the GitHub App flow could create a secret at runtime. That
+          # role includes accessing every version of every secret in the
+          # project, and the spec repository deploy key is one of them, so the
+          # reader could read the single credential the whole architecture says
+          # it cannot. It shipped, and the live service reported
+          # `spec_repo_write_credential: reachable true, secret accessed`.
+          #
+          # Every check above counted the SCOPED bindings and none of them
+          # looked at project-level grants, so four correct assertions passed
+          # over a boundary that was gone. Secret access is per secret here, or
+          # it is not least privilege.
+          if grep -n 'google_project_iam_member' -A4 main.tf | grep -q 'roles/secretmanager'; then
+            echo "::error::a project-level secretmanager role grants access to every secret, including the write credential"
+            exit 1
+          fi
           grep -q 'google_secret_manager_secret_iam_member" "only_the_reader"' main.tf \
             || { echo "::error::the webhook secret is no longer bound to a single identity"; exit 1; }
           grep -q 'cpu_idle = each.value != "reader"' main.tf \
