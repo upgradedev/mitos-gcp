@@ -79,6 +79,14 @@ jobs:
           status, cfg = get("/config")
           for key in ("read_scope", "webhook_repositories", "max_reads_per_run"):
               assert key in cfg, f"/config no longer publishes {key}"
+          # Every endpoint the interface fetches. Four of these were gated
+          # behind MITOS_DEMO_MODE, which was set nowhere, so they answered 404
+          # in production while the app that needs them was reported as checked.
+          # /catalog answered, so a narrower check passed over a dead portal.
+          for path in ("/config", "/thread?limit=5", "/metrics.json",
+                       "/standards.json"):
+              code, _ = get(path)
+              assert code == 200, f"{path} answered {code}; the interface needs it"
           status, cat = get("/catalog")
           assert cat["companions"], "the catalogue is empty"
           print(f"reader ok: {ident['running_as']}, model {ident['model']}, "

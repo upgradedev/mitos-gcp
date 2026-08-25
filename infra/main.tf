@@ -55,6 +55,17 @@ locals {
   common_env = {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     MITOS_PUBLIC_URL          = local.reader_url
+    # The public demo IS this deployment. Four endpoints are gated behind
+    # this flag, `/thread`, `/config`, `/run` and `/run/stream`, and it was
+    # never set anywhere, so all four answered 404 in production while the
+    # interface that depends on them was reported as checked. The hero
+    # button, the thread view, the boundary view and the repositories view
+    # were all dead on the deployed service.
+    #
+    # The gating itself is right: these are the anonymous demo surfaces and
+    # a tenant deployment should not carry them. What was missing is that
+    # somebody has to turn them on for the deployment that is the demo.
+    MITOS_DEMO_MODE           = "true"
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
     GOOGLE_CLOUD_LOCATION     = "global"
