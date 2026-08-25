@@ -321,6 +321,7 @@ def _shell(
     role: str,
     active: str,
     body_html: str,
+    nonce: str = "",
 ) -> str:
     """The chrome every dashboard page shares, so the role badge sits in the
     same place on all of them.
@@ -339,7 +340,7 @@ def _shell(
         "<!doctype html><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width,initial-scale=1">'
         f"<title>{_esc(title)}</title>"
-        f"<style>{_CSS}{APP_CSS}</style>"
+        f'<style nonce="{_esc(nonce)}">{_CSS}{APP_CSS}</style>'
         f"<header><h1>{_esc(heading)}{_badge(role)}</h1>"
         f"<div class=sub>{sub_html}</div></header>"
         f"<nav>{nav}</nav>"
@@ -651,6 +652,7 @@ def render_overview(
     peers: Optional[list[dict[str, Any]]] = None,
     metrics: Optional[dict[str, Any]] = None,
     now: Optional[str] = None,
+    nonce: str = "",
 ) -> str:
     """Page 1. What the fleet did, then what it was not allowed to do.
 
@@ -694,6 +696,7 @@ def render_overview(
         role=role,
         active="/",
         body_html=body,
+        nonce=nonce,
     )
 
 
@@ -777,6 +780,7 @@ def render_fleet(
     *,
     total: Optional[int] = None,
     now: Optional[str] = None,
+    nonce: str = "",
 ) -> str:
     """Page 2. `companions` is the list from GET /catalog, joined to the thread
     by actor.
@@ -833,6 +837,7 @@ def render_fleet(
         role=role,
         active="/fleet",
         body_html=body,
+        nonce=nonce,
     )
 
 
@@ -1064,6 +1069,7 @@ def render_runs(
     *,
     total: Optional[int] = None,
     now: Optional[str] = None,
+    nonce: str = "",
 ) -> str:
     """Page 3. `entries` is the `entries` list from GET /thread."""
     entries = list(entries or [])
@@ -1103,6 +1109,7 @@ def render_runs(
         role=role,
         active="/runs",
         body_html=body,
+        nonce=nonce,
     )
 
 
@@ -1211,6 +1218,7 @@ def render_standards(
     repository: Optional[str] = None,
     note: str = "",
     form: str = "",
+    nonce: str = "",
 ) -> str:
     """Page 4. `findings` and `summary` are what GET /standards.json returns.
 
@@ -1242,6 +1250,7 @@ def render_standards(
         role=role,
         active="/standards",
         body_html=body,
+        nonce=nonce,
     )
 
 
@@ -1335,7 +1344,7 @@ def public_base(base_url: str, forwarded_proto: str = "") -> str:
     return f"{proto}://{rest}" if rest else base
 
 
-def render_connect(role: str, *, base: str = "") -> str:
+def render_connect(role: str, *, base: str = "", nonce: str = "") -> str:
     """Page 5. What somebody does with this, in three steps.
 
     Written for a reader who has decided the idea is interesting and wants to
@@ -1372,4 +1381,5 @@ def render_connect(role: str, *, base: str = "") -> str:
         role=role,
         active="/connect",
         body_html=body,
+        nonce=nonce,
     )
