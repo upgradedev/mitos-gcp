@@ -266,8 +266,15 @@ jobs:
           set -o pipefail
           # Fetched again rather than reusing the previous step's file. Sharing
           # it looked tidy and meant that when the document changed shape this
-          # step silently greppped the home page instead of the bundle, and
+          # step silently grepped the home page instead of the bundle, and
           # reported four missing phrases with no hint of the real cause.
+          #
+          # The phrases below were rewritten when the interface was replaced.
+          # The old ones came from the interface before it, so the check went
+          # red on a deployment that was fine, which is a check reporting its
+          # own staleness as a product failure. Anchor on copy that carries
+          # meaning, not on headings, so a rewording that keeps the claim keeps
+          # the check.
           curl -sf --max-time 90 "$READER/" -o /tmp/index.html
           js=$(grep -oE '/assets/[^"]+[.]js' /tmp/index.html | head -1)
           test -n "$js" || { echo "::error::the document at / names no script"; exit 1; }
@@ -280,10 +287,11 @@ jobs:
               echo "::error::the bundle does not contain the $screen copy: $phrase"; fail=1
             fi
           done <<'SCREENS'
-          overview|Mitos stops an AI-written change
-          run|Run a governed change
-          boundary|What the reader may reach
-          thread|This walk leaves the run it started in
+          value|Turn every pull request into an explainable change decision.
+          policy|Schema, API, and security checks run deterministically.
+          write safety|No write action is simulated or sent from the browser.
+          webhook|Signatures and delivery IDs are checked server-side.
+          repositories|No repository activity yet. Demo and unscoped entries are hidden.
           SCREENS
           exit $fail
 
