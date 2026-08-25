@@ -46,8 +46,15 @@ locals {
   # and one instance referencing another inside the same resource is a cycle.
   writer_url = "https://mitos-writer-${var.project_number}.${var.region}.run.app"
 
+  # Deterministic, the same way `writer_url` above is. Deriving the public
+  # address from a request header works and is one proxy misconfiguration away
+  # from registering a callback URL nobody controls, on an app installation that
+  # outlives the deployment that made it.
+  reader_url = "https://mitos-reader-${var.project_number}.${var.region}.run.app"
+
   common_env = {
     GOOGLE_CLOUD_PROJECT      = var.project_id
+    MITOS_PUBLIC_URL          = local.reader_url
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
     GOOGLE_CLOUD_LOCATION     = "global"
@@ -140,13 +147,43 @@ resource "google_project_iam_member" "fleet_model" {
   member  = "serviceAccount:${google_service_account.fleet[each.value].email}"
 }
 
-# GitHub's manifest conversion returns credentials exactly once. The reader is
-# the only public control-plane service, so it alone may create versions during
-# setup and read them to mint short-lived installation tokens afterward.
-resource "google_project_iam_member" "reader_manages_github_app_secrets" {
-  project = var.project_id
-  role    = "roles/secretmanager.admin"
-  member  = "serviceAccount:${google_service_account.fleet["reader"].email}"
+# GitHub's manifest conversion returns credentials exactly once, so the reader
+# has to be able to store them. It does NOT follow that it may administer every
+# secret in the project.
+#
+# It did, for one deployment. `roles/secretmanager.admin` at the project level
+# includes accessing every version of every secret, and the spec repository
+# deploy key is a secret in this project, so the reader could read the one
+# credential the entire architecture says it cannot. The live service reported
+# `spec_repo_write_credential: {"reachable": true, "detail": "secret accessed"}`
+# and the judge suite failed on exactly that line, which is the check earning
+# its place.
+#
+# So the secret exists before the flow runs, created here with no version, and
+# the reader is granted two roles on that ONE secret. Nothing project-wide.
+resource "google_secret_manager_secret" "github_app" {
+  secret_id = "mitos-${var.stage}-github-app"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.enabled]
+}
+
+# Add a version, and read the versions it added. `secretVersionAdder` cannot
+# read and `secretAccessor` cannot write, which is why this is two bindings on
+# one secret rather than one convenient role.
+resource "google_secret_manager_secret_iam_member" "reader_writes_github_app" {
+  secret_id = google_secret_manager_secret.github_app.id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "reader_reads_github_app" {
+  secret_id = google_secret_manager_secret.github_app.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
 }
 
 # The CI identity cannot read Firestore and cannot reach the write credential.
