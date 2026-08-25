@@ -270,6 +270,45 @@ paths:
                 type: object
           description: Successful Response
       summary: Identity
+  /metrics.json:
+    get:
+      description: 'The same figures the overview renders, as data.
+
+
+        Added because a client that cannot fetch these has to compute them, and a
+
+        client computing its own headline numbers is a second implementation that
+
+        will disagree with the first. Every value here is counted from the
+
+        provenance thread; `summarise` refuses a median under three runs rather
+
+        than producing one.'
+      operationId: metrics_json_metrics_json_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 300
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Metrics Json Metrics Json Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Metrics Json
   /run:
     post:
       operationId: run_run_post

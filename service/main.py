@@ -959,6 +959,20 @@ def _audit(
     )
 
 
+@app.get("/metrics.json")
+def metrics_json(limit: int = 300) -> dict[str, Any]:
+    """The same figures the overview renders, as data.
+
+    Added because a client that cannot fetch these has to compute them, and a
+    client computing its own headline numbers is a second implementation that
+    will disagree with the first. Every value here is counted from the
+    provenance thread; `summarise` refuses a median under three runs rather
+    than producing one.
+    """
+    entries, total = _page_data(limit)
+    return {"window": {"shown": len(entries), "total": total}, **summarise(entries)}
+
+
 @app.get("/standards.json")
 def standards_json(
     request: Request, repository: Optional[str] = None
