@@ -602,6 +602,38 @@ def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: in
     return {"published": True, "branch": branch, "url": document.get("html_url"), "pull_number": document.get("number"), "commit": (content.json().get("commit") or {}).get("sha")}
 
 
+def _run_webhook_chore(*, wh: Any, delivery: Any, files: Any, led: Any) -> Any:
+    return run_chore(
+        wh.to_pull_request(delivery, files), led,
+        run_id=delivery.delivery_id, repository=delivery.repository,
+        approve=lambda card: False,
+        analyst=build_agentic_analyst(
+            PROJECT, role=ROLE, repository=delivery.repository,
+            ref=delivery.head_sha or "HEAD", scope=READ_SCOPE,
+        ),
+        critic=build_critic(PROJECT), classifier=build_classifier(PROJECT),
+        doc_agent=build_doc_agent(PROJECT, role=ROLE),
+    )
+
+
+def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Optional[int], check_run_id: Optional[int]) -> None:
+    if not isinstance(installation_id, int) or check_run_id is None:
+        return
+    entries = [item for item in led.all() if item.run_id == delivery.delivery_id]
+    findings = sum(item.kind.startswith("finding.") for item in entries)
+    needs_review = findings > 0 or any(
+        item.kind == "evaluator.verdict" and item.payload.get("passed") is False
+        for item in entries
+    )
+    plans = sum(item.kind == "plan.proposed" for item in entries)
+    _safe_github_check(
+        repository=delivery.repository, installation_id=installation_id,
+        head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
+        conclusion="action_required" if needs_review else "success",
+        summary=f"Analysis completed with {findings} finding(s) and {plans} suggested plan(s). Any repository write remains blocked until an authorised reviewer approves it.",
+    )
+
+
 def _persist_suggested_change(*, result: Any, delivery: Any, installation_id: Optional[int]) -> None:
     if result.card is None or not isinstance(installation_id, int):
         return
@@ -1468,46 +1500,14 @@ async def github_webhook(request: Request) -> JSONResponse:
                         conclusion="neutral", summary="No readable patch required analysis.",
                     )
                 return
-            result = run_chore(
-                wh.to_pull_request(delivery, files), led,
-                run_id=delivery.delivery_id,
-                repository=delivery.repository,
-                approve=lambda card: False,  # a webhook never approves a write
-                # The specialists read the repository the pull request came
-                # from. Without this they read the built-in demo corpus, and
-                # produce confident findings about a repository that does not
-                # exist.
-                analyst=build_agentic_analyst(
-                    PROJECT,
-                    role=ROLE,
-                    repository=delivery.repository,
-                    ref=delivery.head_sha or "HEAD",
-                    scope=READ_SCOPE,
-                ),
-                critic=build_critic(PROJECT),
-                classifier=build_classifier(PROJECT),
-                doc_agent=build_doc_agent(PROJECT, role=ROLE),
-            )
+            result = _run_webhook_chore(wh=wh, delivery=delivery, files=files, led=led)
             _persist_suggested_change(
                 result=result, delivery=delivery, installation_id=installation_id,
             )
-            run_entries = [item for item in led.all() if item.run_id == delivery.delivery_id]
-            finding_count = sum(item.kind.startswith("finding.") for item in run_entries)
-            needs_review = finding_count > 0 or any(
-                item.kind == "evaluator.verdict" and item.payload.get("passed") is False
-                for item in run_entries
+            _complete_analysis_check(
+                led=led, delivery=delivery, installation_id=installation_id,
+                check_run_id=check_run_id,
             )
-            plans = sum(item.kind == "plan.proposed" for item in run_entries)
-            if isinstance(installation_id, int) and check_run_id is not None:
-                _safe_github_check(
-                    repository=delivery.repository, installation_id=installation_id,
-                    head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
-                    conclusion="action_required" if needs_review else "success",
-                    summary=(
-                        f"Analysis completed with {finding_count} finding(s) and {plans} suggested plan(s). "
-                        "Any repository write remains blocked until an authorised reviewer approves it."
-                    ),
-                )
         except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
             led.append(
                 Entry(
