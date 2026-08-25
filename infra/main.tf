@@ -140,6 +140,15 @@ resource "google_project_iam_member" "fleet_model" {
   member  = "serviceAccount:${google_service_account.fleet[each.value].email}"
 }
 
+# GitHub's manifest conversion returns credentials exactly once. The reader is
+# the only public control-plane service, so it alone may create versions during
+# setup and read them to mint short-lived installation tokens afterward.
+resource "google_project_iam_member" "reader_manages_github_app_secrets" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${google_service_account.fleet["reader"].email}"
+}
+
 # The CI identity cannot read Firestore and cannot reach the write credential.
 # A test run that could publish would not be a test run.
 resource "google_project_iam_member" "ci_model" {

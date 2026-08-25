@@ -25,6 +25,39 @@ export interface Config {
   max_bytes_per_read: number;
 }
 
+export interface SessionUser {
+  github_user_id: number;
+  login: string;
+  name: string;
+  avatar_url: string;
+}
+
+export interface WorkspaceMembership {
+  workspace_id: string;
+  user_id: string;
+  github_user_id: number;
+  role: "owner" | "reviewer" | "viewer";
+  installation_id: number;
+}
+
+export interface SessionStatus {
+  authenticated: boolean;
+  user: SessionUser | null;
+  memberships: WorkspaceMembership[];
+}
+
+export interface GitHubAppStatus {
+  configured: boolean;
+  app_slug: string | null;
+  install_url: string | null;
+  create_url: string;
+  webhook_endpoint: string;
+  webhook_secret_configured: boolean;
+  accepted_repositories: string[];
+  events: string[];
+  write_mode: "approval_required";
+}
+
 export interface Companion {
   name: string;
   department: string;
@@ -53,6 +86,20 @@ export interface ThreadEntry {
 export interface Thread {
   count: number;
   entries: ThreadEntry[];
+}
+
+export interface WorkspaceAnalytics {
+  summary: {
+    repositories: number;
+    analysed_prs: number;
+    findings: number;
+    pending_approvals: number;
+    published_suggestions: number;
+  };
+  trend: { date: string; analysed: number; attention: number; published: number }[];
+  findings_by_severity: { severity: "critical" | "high" | "medium" | "low"; count: number }[];
+  repositories: { repository: string; analyses: number; attention: number; last_activity: string | null; status: "healthy" | "attention" }[];
+  recent_activity: { run_id: string; repository: string; pr: number | null; event: string; actor: string; recorded_at: string }[];
 }
 
 // GET /standards.json. Transcribed from live responses for the demo corpus and

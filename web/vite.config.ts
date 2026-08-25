@@ -22,6 +22,7 @@ const api = [
   "/watch",
   "/thread",
   "/run",
+  "/github",
 ];
 
 export default defineConfig({
@@ -32,6 +33,7 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
+    allowedHosts: true,
     proxy: Object.fromEntries(
       api.map((path) => [
         path,

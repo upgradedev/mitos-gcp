@@ -2,11 +2,14 @@ import type {
   Beat,
   Catalog,
   Config,
+  GitHubAppStatus,
   Identity,
   Loaded,
+  SessionStatus,
   Standards,
   Thread,
   Watch,
+  WorkspaceAnalytics,
 } from "./types";
 import { RateLimited } from "./types";
 
@@ -20,6 +23,16 @@ async function getJson<T>(path: string): Promise<T> {
   if (!res.ok) {
     throw new HttpError(res.status, await safeDetail(res));
   }
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new HttpError(res.status, await safeDetail(res));
   return (await res.json()) as T;
 }
 
@@ -62,11 +75,18 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
 }
 
 export const getIdentity = () => getJson<Identity>("/identity");
-export const getConfig = () => getJson<Config>("/config");
+export const getConfig = () => getJson<Config>("/api/workspace/config");
+export const getGitHubAppStatus = () =>
+  getJson<GitHubAppStatus>("/github/app/status");
+export const getSession = () => getJson<SessionStatus>("/api/session");
 export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
 export const getThread = (limit = 80) =>
-  getJson<Thread>(`/thread?limit=${limit}`);
+  getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
+export const getWorkspaceAnalytics = () =>
+  getJson<WorkspaceAnalytics>("/api/workspace/analytics");
+export const approveSuggestedChange = (runId: string) =>
+  postJson<{ status: string; receipt: { url?: string } }>("/api/workspace/suggested-changes/approve", { run_id: runId });
 
 // The audit. Passing null audits the built-in demo corpus, which is local work
 // and costs no GitHub request; passing a name reaches out over the public
