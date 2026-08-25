@@ -62,6 +62,15 @@ components:
           type: boolean
       title: RunRequest
       type: object
+    SuggestedChangeApprovalRequest:
+      properties:
+        run_id:
+          title: Run Id
+          type: string
+      required:
+      - run_id
+      title: SuggestedChangeApprovalRequest
+      type: object
     ValidationError:
       properties:
         ctx:
@@ -129,6 +138,108 @@ paths:
                 type: string
           description: Successful Response
       summary: Index
+  /api/session:
+    get:
+      operationId: session_status_api_session_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Session Status Api Session Get
+                type: object
+          description: Successful Response
+      summary: Session Status
+  /api/session/logout:
+    post:
+      operationId: session_logout_api_session_logout_post
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Session Logout
+  /api/workspace/analytics:
+    get:
+      operationId: workspace_analytics_api_workspace_analytics_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Workspace Analytics Api Workspace Analytics Get
+                type: object
+          description: Successful Response
+      summary: Workspace Analytics
+  /api/workspace/config:
+    get:
+      operationId: workspace_config_api_workspace_config_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Workspace Config Api Workspace Config Get
+                type: object
+          description: Successful Response
+      summary: Workspace Config
+  /api/workspace/suggested-changes/approve:
+    post:
+      operationId: approve_suggested_change_api_workspace_suggested_changes_approve_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedChangeApprovalRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Approve Suggested Change Api Workspace Suggested Changes
+                  Approve Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Approve Suggested Change
+  /api/workspace/thread:
+    get:
+      operationId: workspace_thread_api_workspace_thread_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 500
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Workspace Thread Api Workspace Thread Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Workspace Thread
   /catalog:
     get:
       operationId: catalog_catalog_get
@@ -227,6 +338,141 @@ paths:
         '302':
           description: Successful Response
       summary: Fleet Moved
+  /github/app/install:
+    get:
+      operationId: github_app_install_github_app_install_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Github App Install
+  /github/app/manifest/callback:
+    get:
+      operationId: github_app_manifest_callback_github_app_manifest_callback_get
+      parameters:
+      - in: query
+        name: code
+        required: true
+        schema:
+          title: Code
+          type: string
+      - in: query
+        name: state
+        required: true
+        schema:
+          title: State
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Github App Manifest Callback
+  /github/app/new:
+    get:
+      description: Create a new GitHub App through GitHub's official manifest flow.
+      operationId: github_app_new_github_app_new_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Github App New
+  /github/app/setup/callback:
+    get:
+      description: Return from GitHub installation; webhook data remains the source
+        of truth.
+      operationId: github_app_setup_callback_github_app_setup_callback_get
+      parameters:
+      - in: query
+        name: installation_id
+        required: true
+        schema:
+          title: Installation Id
+          type: integer
+      - in: query
+        name: setup_action
+        required: false
+        schema:
+          default: install
+          title: Setup Action
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Github App Setup Callback
+  /github/app/status:
+    get:
+      description: Expose readiness and installation metadata, never credentials.
+      operationId: github_app_status_github_app_status_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Github App Status Github App Status Get
+                type: object
+          description: Successful Response
+      summary: Github App Status
+  /github/auth/callback:
+    get:
+      operationId: github_auth_callback_github_auth_callback_get
+      parameters:
+      - in: query
+        name: code
+        required: true
+        schema:
+          title: Code
+          type: string
+      - in: query
+        name: state
+        required: true
+        schema:
+          title: State
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Github Auth Callback
+  /github/auth/login:
+    get:
+      operationId: github_auth_login_github_auth_login_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Github Auth Login
   /identity:
     get:
       operationId: identity_identity_get

@@ -833,8 +833,8 @@ def session_logout(request: Request) -> RedirectResponse:
             from google.cloud import firestore  # noqa: PLC0415
 
             firestore.Client(project=PROJECT).collection("sessions").document(session_id).delete()
-        except Exception:  # noqa: BLE001 - cookie removal still logs the browser out
-            pass
+        except Exception as exc:  # noqa: BLE001 - cookie removal still logs the browser out
+            print(json.dumps({"event": "session.delete_failed", "error": type(exc).__name__}), flush=True)
     response = RedirectResponse(url="/#dashboard", status_code=303)
     response.delete_cookie("mitos_session")
     return response
