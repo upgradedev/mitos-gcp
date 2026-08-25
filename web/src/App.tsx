@@ -36,9 +36,9 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-ink-950 text-ink-100">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-3 focus:py-2 focus:text-sm focus:text-ink-950">Skip to content</a>
-      <Sidebar route={route} onNavigate={go} open={sidebarOpen} />
+      <Sidebar route={route} onNavigate={go} open={sidebarOpen} session={session} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header identity={identity} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={() => setSidebarOpen((value) => !value)} />
+        <Header identity={identity} session={session} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={() => setSidebarOpen((value) => !value)} />
         <main id="main" className="min-w-0 flex-1">
           {route === "dashboard" && <DashboardView {...data} />}
           {route === "pull-requests" && <PullRequestsView {...data} />}

@@ -64,14 +64,14 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
 }
 
 export const getIdentity = () => getJson<Identity>("/identity");
-export const getConfig = () => getJson<Config>("/config");
+export const getConfig = () => getJson<Config>("/api/workspace/config");
 export const getGitHubAppStatus = () =>
   getJson<GitHubAppStatus>("/github/app/status");
 export const getSession = () => getJson<SessionStatus>("/api/session");
 export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
 export const getThread = (limit = 80) =>
-  getJson<Thread>(`/thread?limit=${limit}`);
+  getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
 
 // The audit. Passing null audits the built-in demo corpus, which is local work
 // and costs no GitHub request; passing a name reaches out over the public

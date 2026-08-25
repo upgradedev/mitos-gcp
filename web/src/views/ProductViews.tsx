@@ -18,13 +18,14 @@ import {
   ShieldCheck,
   Webhook,
 } from "lucide-react";
-import type { Config, GitHubAppStatus, Identity, Loaded, Thread } from "../api/types";
+import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread } from "../api/types";
 import { groupIntoRuns, type RunSummary } from "./thread-model";
 
 interface DataProps {
   thread: Loaded<Thread>;
   config: Loaded<Config>;
   githubApp: Loaded<GitHubAppStatus>;
+  session: Loaded<SessionStatus>;
   identity: Loaded<Identity>;
   onNavigate: (route: "dashboard" | "pull-requests" | "repositories" | "activity" | "settings") => void;
 }
@@ -192,7 +193,9 @@ export function ActivityView(props: DataProps) {
 
 export function SettingsView(props: DataProps) {
   const identity = props.identity.status === "ok" ? props.identity.value : null;
-  return <div className="page-wrap"><PageHeading eyebrow="Workspace administration" title="Settings" detail="Manage policy defaults, team access, and the runtime boundary for this workspace." />
-    <div className="mt-8 grid gap-6 lg:grid-cols-[220px_1fr]"><nav className="flex flex-col gap-1">{["General", "Members & roles", "GitHub App", "Policies", "Notifications", "Audit retention"].map((item, index) => <button key={item} className={`rounded-lg px-3 py-2 text-left text-sm ${index === 0 ? "bg-ink-800 text-ink-100" : "text-ink-500 hover:bg-ink-900 hover:text-ink-300"}`}>{item}</button>)}</nav><section className="card-dark divide-y divide-ink-800"><div className="p-6"><h2 className="text-base font-semibold text-ink-100">Workspace</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="field-label">Name<input disabled value="Current deployment" readOnly /></label><label className="field-label">Default role<select disabled value="viewer" onChange={() => undefined}><option value="viewer">Viewer</option><option value="reviewer">Reviewer</option></select></label></div></div><div className="p-6"><h2 className="text-base font-semibold text-ink-100">Runtime boundary</h2><div className="mt-5 grid gap-3 sm:grid-cols-3">{[["Service role", identity?.role], ["GCP project", identity?.project], ["Build", identity?.build_sha]].map(([label, value]) => <div key={label} className="rounded-lg border border-ink-800 bg-ink-950 p-4"><p className="text-xs text-ink-600">{label}</p><p className="mt-2 truncate font-mono text-xs text-ink-300">{value ?? "Unavailable"}</p></div>)}</div></div><div className="flex items-center justify-between gap-4 p-6"><p className="text-xs text-ink-500">Workspace changes unlock after team authentication is configured.</p><button disabled className="button-secondary cursor-not-allowed opacity-50"><LockKeyhole size={16} /> Read only</button></div></section></div>
+  const session = props.session.status === "ok" ? props.session.value : null;
+  const membership = session?.memberships[0];
+  return <div className="page-wrap"><PageHeading eyebrow="Workspace administration" title="Settings" detail="Inspect team access, GitHub installation state, and the deployed runtime boundary." action={!session?.authenticated ? <a href="/github/auth/login" className="button-primary"><Github size={16} /> Sign in with GitHub</a> : undefined} />
+    <div className="mt-8 grid gap-6 lg:grid-cols-[220px_1fr]"><nav className="flex flex-col gap-1">{["General", "Members & roles", "GitHub App", "Policies", "Audit retention"].map((item, index) => <button key={item} className={`rounded-lg px-3 py-2 text-left text-sm ${index === 0 ? "bg-ink-800 text-ink-100" : "text-ink-500 hover:bg-ink-900 hover:text-ink-300"}`}>{item}</button>)}</nav><section className="card-dark divide-y divide-ink-800"><div className="p-6"><h2 className="text-base font-semibold text-ink-100">Team access</h2>{session?.authenticated && session.user ? <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center"><img src={session.user.avatar_url} alt="" className="h-12 w-12 rounded-full border border-ink-700" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-ink-100">{session.user.name}</p><p className="mt-1 text-xs text-ink-500">@{session.user.login} · {membership?.workspace_id ?? "No installed workspace"}</p></div><span className={membership?.role === "owner" ? "status-success" : "status-warning"}>{membership?.role ?? "No role"}</span></div> : <p className="mt-4 text-sm leading-6 text-ink-500">Sign in through the installed GitHub App to resolve your real workspace membership and role.</p>}</div><div className="p-6"><h2 className="text-base font-semibold text-ink-100">Runtime boundary</h2><div className="mt-5 grid gap-3 sm:grid-cols-3">{[["Service role", identity?.role], ["GCP project", identity?.project], ["Build", identity?.build_sha]].map(([label, value]) => <div key={label} className="rounded-lg border border-ink-800 bg-ink-950 p-4"><p className="text-xs text-ink-600">{label}</p><p className="mt-2 truncate font-mono text-xs text-ink-300">{value ?? "Unavailable"}</p></div>)}</div></div><div className="flex items-center justify-between gap-4 p-6"><p className="text-xs text-ink-500">Policy mutations require an owner role and are enforced by the service.</p><button disabled={!membership || membership.role !== "owner"} className="button-secondary disabled:cursor-not-allowed disabled:opacity-50"><LockKeyhole size={16} /> {membership?.role === "owner" ? "Owner access" : "Read only"}</button></div></section></div>
   </div>;
 }

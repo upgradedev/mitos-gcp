@@ -28,6 +28,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import httpx  # noqa: E402
+import jwt  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 
@@ -475,6 +476,76 @@ def _read_managed_secret(secret_id: str) -> str:
     return client.access_secret_version(name=name).payload.data.decode("utf-8").strip()
 
 
+def _github_installation_token(installation_id: int) -> str:
+    metadata = _github_app_metadata()
+    secret_prefix = str(metadata.get("secret_prefix") or "")
+    app_id = metadata.get("app_id")
+    if not secret_prefix or not app_id:
+        raise RuntimeError("GitHub App credentials are unavailable")
+    private_key = _read_managed_secret(f"{secret_prefix}-private-key")
+    now = int(time.time())
+    app_token = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": str(app_id)}, private_key, algorithm="RS256")
+    response = httpx.post(
+        f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+        headers={
+            "Authorization": f"Bearer {app_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    token = str(response.json().get("token") or "")
+    if not token:
+        raise RuntimeError("GitHub did not return an installation token")
+    return token
+
+
+def _github_check(
+    *, repository: str, installation_id: int, head_sha: str, status: str,
+    check_run_id: Optional[int] = None, conclusion: Optional[str] = None,
+    summary: str = "Mitos is analysing this pull request.",
+) -> Optional[int]:
+    """Create or update the Mitos Check without affecting webhook acceptance."""
+    if not head_sha:
+        return check_run_id
+    token = _github_installation_token(installation_id)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload: dict[str, Any] = {
+        "name": "Mitos change governance",
+        "status": status,
+        "output": {"title": "Mitos change governance", "summary": summary[:65000]},
+    }
+    if conclusion:
+        payload["conclusion"] = conclusion
+    if check_run_id is None:
+        payload["head_sha"] = head_sha
+        response = httpx.post(
+            f"https://api.github.com/repos/{repository}/check-runs",
+            headers=headers, json=payload, timeout=30.0,
+        )
+    else:
+        response = httpx.patch(
+            f"https://api.github.com/repos/{repository}/check-runs/{check_run_id}",
+            headers=headers, json=payload, timeout=30.0,
+        )
+    response.raise_for_status()
+    value = response.json().get("id")
+    return int(value) if isinstance(value, int) else check_run_id
+
+
+def _safe_github_check(**kwargs: Any) -> Optional[int]:
+    try:
+        return _github_check(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - GitHub Checks are reporting, not orchestration
+        print(json.dumps({"event": "github.check_failed", "error": type(exc).__name__}), flush=True)
+        return kwargs.get("check_run_id")
+
+
 def _session_user(request: Request) -> Optional[dict[str, Any]]:
     session_id = request.cookies.get("mitos_session")
     if not session_id:
@@ -493,6 +564,24 @@ def _session_user(request: Request) -> Optional[dict[str, Any]]:
         return user.to_dict() if user.exists else None
     except Exception:  # noqa: BLE001 - an unavailable session store means signed out
         return None
+
+
+def _workspace_context(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
+    user = _session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from google.cloud import firestore  # noqa: PLC0415
+
+    memberships = list(
+        firestore.Client(project=PROJECT)
+        .collection("workspace_memberships")
+        .where(filter=firestore.FieldFilter("github_user_id", "==", user["github_user_id"]))
+        .limit(1)
+        .stream()
+    )
+    if not memberships:
+        raise HTTPException(status_code=403, detail="No installed GitHub workspace is available")
+    return user, memberships[0].to_dict() or {}
 
 
 def _require_role(request: Request, workspace_id: str, roles: frozenset[str]) -> dict[str, Any]:
@@ -578,11 +667,23 @@ def github_auth_callback(request: Request, code: str, state: str) -> RedirectRes
             if isinstance(installation_id, int) and isinstance(account_id, int):
                 workspace_id = f"github-{account_id}"
                 membership_id = f"{workspace_id}:{github_user_id}"
-                db.collection("workspace_memberships").document(membership_id).set({
+                membership_ref = db.collection("workspace_memberships").document(membership_id)
+                existing_membership = membership_ref.get()
+                if existing_membership.exists:
+                    assigned_role = str((existing_membership.to_dict() or {}).get("role") or "reviewer")
+                else:
+                    existing_workspace_members = list(
+                        db.collection("workspace_memberships")
+                        .where(filter=firestore.FieldFilter("workspace_id", "==", workspace_id))
+                        .limit(1)
+                        .stream()
+                    )
+                    assigned_role = "owner" if not existing_workspace_members else "reviewer"
+                membership_ref.set({
                     "workspace_id": workspace_id,
                     "user_id": user_id,
                     "github_user_id": github_user_id,
-                    "role": "owner",
+                    "role": assigned_role,
                     "installation_id": installation_id,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 }, merge=True)
@@ -604,11 +705,25 @@ def github_auth_callback(request: Request, code: str, state: str) -> RedirectRes
 @app.get("/api/session")
 def session_status(request: Request) -> dict[str, Any]:
     user = _session_user(request)
-    return {"authenticated": bool(user), "user": user}
+    if not user:
+        return {"authenticated": False, "user": None, "memberships": []}
+    try:
+        from google.cloud import firestore  # noqa: PLC0415
+
+        memberships = [
+            document.to_dict()
+            for document in firestore.Client(project=PROJECT)
+            .collection("workspace_memberships")
+            .where(filter=firestore.FieldFilter("github_user_id", "==", user["github_user_id"]))
+            .stream()
+        ]
+    except Exception:  # noqa: BLE001 - identity remains valid if membership projection is unavailable
+        memberships = []
+    return {"authenticated": True, "user": user, "memberships": memberships}
 
 
 @app.post("/api/session/logout")
-def session_logout(request: Request) -> JSONResponse:
+def session_logout(request: Request) -> RedirectResponse:
     session_id = request.cookies.get("mitos_session")
     if session_id:
         try:
@@ -617,7 +732,7 @@ def session_logout(request: Request) -> JSONResponse:
             firestore.Client(project=PROJECT).collection("sessions").document(session_id).delete()
         except Exception:  # noqa: BLE001 - cookie removal still logs the browser out
             pass
-    response = JSONResponse({"authenticated": False})
+    response = RedirectResponse(url="/#dashboard", status_code=303)
     response.delete_cookie("mitos_session")
     return response
 
@@ -743,6 +858,62 @@ def github_app_setup_callback(installation_id: int, setup_action: str = "install
         url=f"/#repositories?installation_id={installation_id}&setup_action={setup_action}",
         status_code=303,
     )
+
+
+@app.get("/api/workspace/config")
+def workspace_config(request: Request) -> dict[str, Any]:
+    _, membership = _workspace_context(request)
+    workspace_id = str(membership["workspace_id"])
+    from google.cloud import firestore  # noqa: PLC0415
+
+    repositories = [
+        document.to_dict() or {}
+        for document in firestore.Client(project=PROJECT)
+        .collection("repositories")
+        .where(filter=firestore.FieldFilter("workspace_id", "==", workspace_id))
+        .stream()
+    ]
+    active = sorted(
+        str(repository["full_name"])
+        for repository in repositories
+        if repository.get("active") and repository.get("full_name")
+    )
+    return {
+        "workspace_id": workspace_id,
+        "role": membership.get("role"),
+        "installation_id": membership.get("installation_id"),
+        "read_scope": list(READ_SCOPE),
+        "webhook_repositories": active,
+        "max_reads_per_run": MAX_READS_PER_RUN,
+        "max_bytes_per_read": MAX_BYTES_PER_READ,
+    }
+
+
+@app.get("/api/workspace/thread")
+def workspace_thread(request: Request, limit: int = 500) -> dict[str, Any]:
+    _, membership = _workspace_context(request)
+    workspace_id = str(membership["workspace_id"])
+    from google.cloud import firestore  # noqa: PLC0415
+
+    repository_docs = (
+        firestore.Client(project=PROJECT)
+        .collection("repositories")
+        .where(filter=firestore.FieldFilter("workspace_id", "==", workspace_id))
+        .stream()
+    )
+    repositories = {
+        str(document.to_dict().get("full_name"))
+        for document in repository_docs
+        if document.to_dict().get("active") and document.to_dict().get("full_name")
+    }
+    all_entries = ledger().all()
+    scoped_run_ids = {
+        entry.run_id
+        for entry in all_entries
+        if str(entry.payload.get("repository") or entry.payload.get("repo") or "") in repositories
+    }
+    entries = [entry for entry in all_entries if entry.run_id in scoped_run_ids][-max(1, min(limit, 1000)):]
+    return {"count": len(entries), "entries": [entry.to_doc() for entry in entries]}
 
 
 @app.get("/thread")
@@ -1122,9 +1293,26 @@ async def github_webhook(request: Request) -> JSONResponse:
             run_id=delivery.delivery_id,
         )
     )
+    installation_id = (payload.get("installation") or {}).get("id")
+    check_run_id: Optional[int] = None
+    if isinstance(installation_id, int):
+        try:
+            check_run_id = _github_check(
+                repository=delivery.repository,
+                installation_id=installation_id,
+                head_sha=delivery.head_sha,
+                status="queued",
+            )
+        except Exception as exc:  # noqa: BLE001 - check delivery must not reject the webhook
+            print(json.dumps({"event": "github.check_create_failed", "error": type(exc).__name__}), flush=True)
 
     def work() -> None:
         try:
+            if isinstance(installation_id, int) and check_run_id is not None:
+                _github_check(
+                    repository=delivery.repository, installation_id=installation_id,
+                    head_sha=delivery.head_sha, status="in_progress", check_run_id=check_run_id,
+                )
             files = _fetch_diff(delivery.repository, delivery.number)
             if not files:
                 led.append(
@@ -1135,6 +1323,12 @@ async def github_webhook(request: Request) -> JSONResponse:
                         run_id=delivery.delivery_id,
                     )
                 )
+                if isinstance(installation_id, int) and check_run_id is not None:
+                    _github_check(
+                        repository=delivery.repository, installation_id=installation_id,
+                        head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
+                        conclusion="neutral", summary="No readable patch required analysis.",
+                    )
                 return
             run_chore(
                 wh.to_pull_request(delivery, files), led,
@@ -1156,6 +1350,23 @@ async def github_webhook(request: Request) -> JSONResponse:
                 classifier=build_classifier(PROJECT),
                 doc_agent=build_doc_agent(PROJECT, role=ROLE),
             )
+            run_entries = [item for item in led.all() if item.run_id == delivery.delivery_id]
+            finding_count = sum(item.kind.startswith("finding.") for item in run_entries)
+            needs_review = finding_count > 0 or any(
+                item.kind == "evaluator.verdict" and item.payload.get("passed") is False
+                for item in run_entries
+            )
+            plans = sum(item.kind == "plan.proposed" for item in run_entries)
+            if isinstance(installation_id, int) and check_run_id is not None:
+                _github_check(
+                    repository=delivery.repository, installation_id=installation_id,
+                    head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
+                    conclusion="action_required" if needs_review else "success",
+                    summary=(
+                        f"Analysis completed with {finding_count} finding(s) and {plans} suggested plan(s). "
+                        "Any repository write remains blocked until an authorised reviewer approves it."
+                    ),
+                )
         except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
             led.append(
                 Entry(

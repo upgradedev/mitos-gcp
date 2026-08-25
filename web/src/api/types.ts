@@ -32,9 +32,18 @@ export interface SessionUser {
   avatar_url: string;
 }
 
+export interface WorkspaceMembership {
+  workspace_id: string;
+  user_id: string;
+  github_user_id: number;
+  role: "owner" | "reviewer" | "viewer";
+  installation_id: number;
+}
+
 export interface SessionStatus {
   authenticated: boolean;
   user: SessionUser | null;
+  memberships: WorkspaceMembership[];
 }
 
 export interface GitHubAppStatus {
