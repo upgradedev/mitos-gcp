@@ -181,7 +181,7 @@ jobs:
       #
       # Pinned to the versions of the last green run, 32770320303.
       - run: |
-          pip install -r requirements/spike.txt \n            google-cloud-firestore==2.21.0 \n            google-api-core==2.34.0 \n            google-cloud-core==2.6.1
+          - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0 google-api-core==2.34.0 google-cloud-core==2.6.1
 
       # The runner disables the gcloud component manager and the emulator is
       # not in the default apt repos, so it comes from Google's own image.
