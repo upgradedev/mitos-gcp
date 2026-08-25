@@ -23,7 +23,7 @@ const ITEMS: Item[] = [
 export default function Sidebar({ route, onNavigate, open, session }: Props) {
   const membership = session.status === "ok" ? session.value.memberships[0] : undefined;
   return (
-    <aside className={`${open ? "w-64" : "w-0"} sticky top-0 h-screen shrink-0 overflow-hidden border-r border-ink-800 bg-[#0b0d12] transition-[width]`}>
+    <aside className={`${open ? "w-64" : "w-0"} fixed inset-y-0 left-0 z-40 h-screen shrink-0 overflow-hidden border-r border-ink-800 bg-[#0b0d12] shadow-2xl transition-[width] lg:sticky lg:top-0 lg:z-auto lg:shadow-none`}>
       {!open ? null : <div className="flex h-full w-64 flex-col">
         <div className="flex h-16 items-center gap-3 border-b border-ink-800 px-5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-400 text-ink-950"><ShieldCheck size={18} strokeWidth={2.5} /></div>

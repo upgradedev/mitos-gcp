@@ -992,6 +992,76 @@ def workspace_config(request: Request) -> dict[str, Any]:
     }
 
 
+def _workspace_analytics_payload(*, repositories: list[dict[str, Any]], entries: list[Entry], suggestions: list[dict[str, Any]]) -> dict[str, Any]:
+    active = sorted(str(repo["full_name"]) for repo in repositories if repo.get("active") and repo.get("full_name"))
+    active_set = set(active)
+    run_ids = {
+        entry.run_id for entry in entries
+        if str(entry.payload.get("repository") or entry.payload.get("repo") or "") in active_set
+    }
+    scoped = [entry for entry in entries if entry.run_id in run_ids]
+    runs: dict[str, list[Entry]] = {}
+    for entry in scoped:
+        runs.setdefault(entry.run_id, []).append(entry)
+    findings = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    activity: list[dict[str, Any]] = []
+    trend: dict[str, dict[str, Any]] = {}
+    repository_rows: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    for offset in range(13, -1, -1):
+        day = (now - timedelta(days=offset)).date().isoformat()
+        trend[day] = {"date": day, "analysed": 0, "attention": 0, "published": 0}
+    for run_id, run_entries in runs.items():
+        ordered = sorted(run_entries, key=lambda item: item.recorded_at)
+        trigger = next((item for item in ordered if item.kind == "trigger.webhook"), ordered[0])
+        repository = str(trigger.payload.get("repository") or "")
+        pr = trigger.payload.get("pr")
+        attention = False
+        for item in ordered:
+            if item.kind.startswith("finding."):
+                severity = str(item.payload.get("severity") or "medium").lower()
+                findings[severity if severity in findings else "medium"] += 1
+                attention = True
+            if item.kind == "evaluator.verdict" and item.payload.get("passed") is False:
+                attention = True
+        day = ordered[-1].recorded_at[:10]
+        if day in trend:
+            trend[day]["analysed"] += 1
+            trend[day]["attention"] += int(attention)
+            trend[day]["published"] += int(any(item.kind == "write.executed" for item in ordered))
+        activity.append({
+            "run_id": run_id, "repository": repository, "pr": pr,
+            "event": "Needs attention" if attention else "Analysis completed",
+            "actor": ordered[-1].actor, "recorded_at": ordered[-1].recorded_at,
+        })
+    for repository in active:
+        repository_runs = [items for items in runs.values() if any(str(item.payload.get("repository") or "") == repository for item in items)]
+        latest = max((item.recorded_at for items in repository_runs for item in items), default=None)
+        attention_count = sum(any(item.kind.startswith("finding.") or (item.kind == "evaluator.verdict" and item.payload.get("passed") is False) for item in items) for items in repository_runs)
+        repository_rows.append({"repository": repository, "analyses": len(repository_runs), "attention": attention_count, "last_activity": latest, "status": "attention" if attention_count else "healthy"})
+    pending = sum(item.get("status") == "awaiting_approval" for item in suggestions)
+    published = sum(item.get("status") == "published" for item in suggestions)
+    activity.sort(key=lambda item: item["recorded_at"], reverse=True)
+    return {
+        "summary": {"repositories": len(active), "analysed_prs": len(runs), "findings": sum(findings.values()), "pending_approvals": pending, "published_suggestions": published},
+        "trend": list(trend.values()), "findings_by_severity": [{"severity": key, "count": value} for key, value in findings.items()],
+        "repositories": repository_rows, "recent_activity": activity[:12],
+    }
+
+
+@app.get("/api/workspace/analytics")
+def workspace_analytics(request: Request) -> dict[str, Any]:
+    _, membership = _workspace_context(request)
+    workspace_id = str(membership["workspace_id"])
+    from google.cloud import firestore  # noqa: PLC0415
+
+    db = firestore.Client(project=PROJECT)
+    repositories = [doc.to_dict() or {} for doc in db.collection("repositories").where(filter=firestore.FieldFilter("workspace_id", "==", workspace_id)).stream()]
+    active = {str(repo.get("full_name")) for repo in repositories if repo.get("active") and repo.get("full_name")}
+    suggestions = [doc.to_dict() or {} for doc in db.collection("suggested_changes").stream() if str((doc.to_dict() or {}).get("repository") or "") in active]
+    return _workspace_analytics_payload(repositories=repositories, entries=ledger().all(), suggestions=suggestions)
+
+
 class SuggestedChangeApprovalRequest(BaseModel):
     run_id: str
 

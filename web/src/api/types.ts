@@ -88,6 +88,20 @@ export interface Thread {
   entries: ThreadEntry[];
 }
 
+export interface WorkspaceAnalytics {
+  summary: {
+    repositories: number;
+    analysed_prs: number;
+    findings: number;
+    pending_approvals: number;
+    published_suggestions: number;
+  };
+  trend: { date: string; analysed: number; attention: number; published: number }[];
+  findings_by_severity: { severity: "critical" | "high" | "medium" | "low"; count: number }[];
+  repositories: { repository: string; analyses: number; attention: number; last_activity: string | null; status: "healthy" | "attention" }[];
+  recent_activity: { run_id: string; repository: string; pr: number | null; event: string; actor: string; recorded_at: string }[];
+}
+
 // GET /standards.json. Transcribed from live responses for the demo corpus and
 // for a public repository, and from the vocabulary declared in
 // src/mitos/standards.py.

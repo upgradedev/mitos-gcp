@@ -9,6 +9,7 @@ import type {
   Standards,
   Thread,
   Watch,
+  WorkspaceAnalytics,
 } from "./types";
 import { RateLimited } from "./types";
 
@@ -82,6 +83,8 @@ export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
 export const getThread = (limit = 80) =>
   getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
+export const getWorkspaceAnalytics = () =>
+  getJson<WorkspaceAnalytics>("/api/workspace/analytics");
 export const approveSuggestedChange = (runId: string) =>
   postJson<{ status: string; receipt: { url?: string } }>("/api/workspace/suggested-changes/approve", { run_id: runId });
 

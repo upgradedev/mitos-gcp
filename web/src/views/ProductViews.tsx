@@ -18,8 +18,9 @@ import {
   ShieldCheck,
   Webhook,
 } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { approveSuggestedChange } from "../api/client";
-import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread } from "../api/types";
+import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread, WorkspaceAnalytics } from "../api/types";
 import { groupIntoRuns, type RunSummary } from "./thread-model";
 
 interface DataProps {
@@ -27,6 +28,7 @@ interface DataProps {
   config: Loaded<Config>;
   githubApp: Loaded<GitHubAppStatus>;
   session: Loaded<SessionStatus>;
+  analytics: Loaded<WorkspaceAnalytics>;
   identity: Loaded<Identity>;
   onNavigate: (route: "dashboard" | "pull-requests" | "repositories" | "activity" | "settings") => void;
 }
@@ -92,24 +94,30 @@ function EmptyWorkspace({ onNavigate }: Pick<DataProps, "onNavigate">) {
 export function DashboardView(props: DataProps) {
   const runs = useMemo(() => realRuns(props.thread), [props.thread]);
   const repos = props.config.status === "ok" ? props.config.value.webhook_repositories : [];
-  const failures = runs.filter((run) => run.gatePassed === false || run.findings > 0);
-  const pending = runs.filter((run) => run.plans > 0 && !run.write).length;
+  const analytics = props.analytics.status === "ok" ? props.analytics.value : null;
+  const summary = analytics?.summary;
+  const severityColors = ["#fb7185", "#f59e0b", "#22d3ee", "#64748b"];
 
   return (
     <div className="page-wrap">
-      <PageHeading eyebrow="Workspace overview" title="Good afternoon, engineering." detail="A live view of changes Mitos has received from connected GitHub repositories. Demo and fixture runs are intentionally excluded." action={<button onClick={() => props.onNavigate("repositories")} className="button-secondary"><Github size={16} /> Connect repository</button>} />
+      <PageHeading eyebrow="Workspace intelligence" title="Change governance, at a glance." detail="Repository health, pull request analysis, policy findings, and human approvals from your connected GitHub workspace." action={<button onClick={() => props.onNavigate("repositories")} className="button-secondary"><Github size={16} /> Connect repository</button>} />
       {repos.length === 0 && runs.length === 0 ? <EmptyWorkspace onNavigate={props.onNavigate} /> : (
         <>
           <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {([
-              ["Repositories", repos.length, "Connected to webhook intake", ServerCog],
-              ["PR analyses", runs.length, "Real GitHub-triggered runs", GitPullRequest],
-              ["Open findings", failures.reduce((sum, run) => sum + run.findings, 0), "Require team attention", AlertTriangle],
-              ["Awaiting approval", pending, "No write happens automatically", Clock3],
+              ["Repositories", summary?.repositories ?? repos.length, "Active webhook coverage", ServerCog],
+              ["Analysed PRs", summary?.analysed_prs ?? runs.length, "Workspace-scoped decisions", GitPullRequest],
+              ["Policy findings", summary?.findings ?? 0, "Across active repositories", AlertTriangle],
+              ["Awaiting approval", summary?.pending_approvals ?? 0, "No autonomous writes", Clock3],
             ] as const).map(([label, value, detail, Icon]) => (
               <article className="metric-card" key={String(label)}><div className="flex items-start justify-between"><p className="text-sm text-ink-400">{String(label)}</p><Icon size={18} className="text-ink-500" /></div><p className="mt-6 text-3xl font-semibold tracking-tight text-ink-50">{String(value)}</p><p className="mt-2 text-xs text-ink-500">{String(detail)}</p></article>
             ))}
           </div>
+          {analytics && <div className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_.75fr]">
+            <section className="card-dark p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="text-sm font-semibold text-ink-100">Governance activity</h2><p className="mt-1 text-xs text-ink-500">Analyses and interventions over the last 14 days</p></div><span className="status-neutral">Live ledger</span></div><div className="mt-6 h-64" aria-label="Governance activity chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={analytics.trend}><defs><linearGradient id="analysedFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#22d3ee" stopOpacity={0.35}/><stop offset="100%" stopColor="#22d3ee" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#253042" vertical={false}/><XAxis dataKey="date" tickFormatter={(value) => String(value).slice(5)} tick={{ fill: "#7d899b", fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis allowDecimals={false} tick={{ fill: "#7d899b", fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip contentStyle={{ background: "#111827", border: "1px solid #253042", borderRadius: 10, color: "#e7edf5" }}/><Area type="monotone" dataKey="analysed" stroke="#22d3ee" fill="url(#analysedFill)" strokeWidth={2}/><Area type="monotone" dataKey="attention" stroke="#fb7185" fill="transparent" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></section>
+            <section className="card-dark p-5"><h2 className="text-sm font-semibold text-ink-100">Findings by severity</h2><p className="mt-1 text-xs text-ink-500">Current analysed workspace</p><div className="mt-6 h-52" aria-label="Findings by severity chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={analytics.findings_by_severity} layout="vertical" margin={{ left: 4 }}><CartesianGrid stroke="#253042" horizontal={false}/><XAxis type="number" allowDecimals={false} hide/><YAxis type="category" dataKey="severity" width={62} tick={{ fill: "#9aa6b8", fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip cursor={{ fill: "#182235" }} contentStyle={{ background: "#111827", border: "1px solid #253042", borderRadius: 10, color: "#e7edf5" }}/><Bar dataKey="count" radius={[0, 6, 6, 0]}>{analytics.findings_by_severity.map((item, index) => <Cell key={item.severity} fill={severityColors[index]} />)}</Bar></BarChart></ResponsiveContainer></div><p className="mt-3 text-xs text-ink-500">{summary?.published_suggestions ?? 0} approval-gated suggestions published</p></section>
+          </div>}
+          {analytics && <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_.9fr]"><section className="card-dark overflow-hidden"><div className="border-b border-ink-800 px-5 py-4"><h2 className="text-sm font-semibold text-ink-100">Repository health</h2></div><div className="divide-y divide-ink-800">{analytics.repositories.map((repo) => <div key={repo.repository} className="flex items-center justify-between gap-4 px-5 py-4"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink-200">{repo.repository}</p><p className="mt-1 text-xs text-ink-500">{repo.analyses} analyses · {repo.last_activity ? repo.last_activity.slice(0, 10) : "No activity yet"}</p></div><span className={repo.status === "healthy" ? "status-success" : "status-warning"}>{repo.status === "healthy" ? "Healthy" : `${repo.attention} need attention`}</span></div>)}</div></section><section className="card-dark overflow-hidden"><div className="border-b border-ink-800 px-5 py-4"><h2 className="text-sm font-semibold text-ink-100">Recent activity</h2></div><div className="divide-y divide-ink-800">{analytics.recent_activity.slice(0, 5).map((item) => <div key={item.run_id} className="px-5 py-4"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm text-ink-200">{item.repository} {item.pr ? `#${item.pr}` : ""}</p><span className="text-[11px] text-ink-600">{item.recorded_at.slice(5, 16).replace("T", " ")}</span></div><p className="mt-1 text-xs text-ink-500">{item.event} · {item.actor}</p></div>)}</div></section></div>}
           <RunTable runs={runs.slice(0, 6)} onNavigate={props.onNavigate} />
         </>
       )}
