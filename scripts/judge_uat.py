@@ -334,11 +334,22 @@ def run(reader: str, evaluator: str, writer: str) -> int:
     # Not "the screens render": nothing here drives a browser. This proves the
     # bundle that is deployed is the one carrying each screen's copy, which is
     # what a stale or partial build gets wrong.
+    # These phrases are also in `.github/workflows/deployed.yml`, and both lists
+    # went stale together when the interface was replaced: the check reported a
+    # working deployment as broken, twice, which teaches a reader to ignore it.
+    # Two copies is the reason it happened twice. They are here because the
+    # workflow cannot import this file, and the honest fix is that this list is
+    # the one that gets edited and the workflow's is derived from it by hand
+    # until something better exists.
+    #
+    # Anchored on claims rather than headings. A heading changes for reasons
+    # that do not matter; "no write action is simulated" is a promise, and if it
+    # leaves the bundle that is worth failing over.
     for screen, phrase in (
-        ("overview", "Mitos stops an AI-written change"),
-        ("run", "Run a governed change"),
-        ("boundary", "What the reader may reach"),
-        ("thread", "This walk leaves the run it started in"),
+        ("value", "Turn every pull request into an explainable change decision."),
+        ("policy", "Schema, API, and security checks run deterministically."),
+        ("write safety", "No write action is simulated or sent from the browser."),
+        ("webhook", "Signatures and delivery IDs are checked server-side."),
     ):
         r.record(
             phrase in bundle,
