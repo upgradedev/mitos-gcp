@@ -733,3 +733,22 @@ def test_zero_writes_only_means_the_gate_held_when_there_was_something_to_hold()
     assert "gate holding" not in nothing_proposed
     assert "gate holding" in gate_held
     assert "approved by a person" in approved
+
+
+def test_the_metrics_endpoint_exists_so_a_client_never_computes_its_own():
+    """A client that cannot fetch these has to compute them.
+
+    Two implementations of the same headline figure disagree eventually, and
+    the one on the page is the one somebody quotes. Asserted against the source
+    because the offline suite cannot import the service.
+    """
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '@app.get("/metrics.json")' in source
+    assert "**summarise(entries)" in source, (
+        "the endpoint no longer serves what the page renders, so the two can drift"
+    )

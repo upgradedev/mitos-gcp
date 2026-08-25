@@ -98,8 +98,13 @@ def test_a_caller_with_no_forwarded_header_still_counts_as_somebody():
 def test_only_the_endpoints_that_cost_money_are_bounded():
     """Asserted against the source, because the offline suite is stdlib only.
 
-    The distinction is the whole design. Rationing `/runs` or `/fleet` would
-    cost a judge the page and save nothing: those are one Firestore read.
+    The distinction is the whole design. Rationing the interface or the thread
+    would cost a judge the page and save nothing: they are a file off disk and
+    one Firestore read.
+
+    The names checked below changed when the interface became a built
+    application: `fleet_page` and `runs_page` no longer exist, and pretending
+    otherwise made this test raise rather than report.
     """
     source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
         encoding="utf-8"
@@ -115,7 +120,11 @@ def test_only_the_endpoints_that_cost_money_are_bounded():
         "/run/stream and one each for the two standards endpoints when they "
         "name a repository"
     )
-    for free in ("def fleet_page", "def runs_page", "def index", "def thread_view"):
+    for free in ("def index", "def connect_page", "def metrics_json", "def thread"):
+        # `index` on a substring rather than a regex, and a missing name is a
+        # ValueError rather than a silent pass, which is the behaviour wanted:
+        # a handler that was renamed should stop this test, not slip past it.
+        assert free in source, f"{free} no longer exists; this check stopped checking"
         start = source.index(free)
         body = source[start : start + 700]
         assert "_within_budget" not in body, f"{free} is rationed and should not be"

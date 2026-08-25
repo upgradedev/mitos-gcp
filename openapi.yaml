@@ -101,27 +101,26 @@ openapi: 3.1.0
 paths:
   /:
     get:
-      description: 'The overview: is the boundary holding, and is the fleet awake.
+      description: 'The application, or a plain account of why it is not here.
 
 
-        This used to be a three-row identity card. It was true and it answered a
+        Registered whether or not the build exists, rather than only when it does.
 
-        question nobody had, because the interesting thing about a privilege
+        `openapi.yaml` is generated from these routes and CI fails on drift, and CI
 
-        boundary is not that it is configured, it is that it held while work was
+        checks out a tree with no `web/dist` in it, so a route that appeared only
 
-        happening. So the same three rows are still here, now next to the thread
+        when the directory did would make the committed document depend on which
 
-        that shows what they refused.'
+        machine generated it.
+
+
+        503 rather than a 200 carrying an apology. A service whose interface is
+
+        missing is not serving that interface, and the deployed check that fetches
+
+        this path should go red rather than pass on a page of text.'
       operationId: index__get
-      parameters:
-      - in: query
-        name: limit
-        required: false
-        schema:
-          default: 300
-          title: Limit
-          type: integer
       responses:
         '200':
           content:
@@ -129,12 +128,6 @@ paths:
               schema:
                 type: string
           description: Successful Response
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
       summary: Index
   /catalog:
     get:
@@ -226,37 +219,14 @@ paths:
       summary: Execute
   /fleet:
     get:
-      description: 'Which companions exist, and which of them ever did anything.
+      description: 'The companions and the boundary they sit behind, which the application
 
-
-        The catalog on its own is a table that could be aspirational. Joined to the
-
-        thread it becomes a record: this one was dispatched nine times, this one
-
-        refused twice, this one has never run.'
-      operationId: fleet_page_fleet_get
-      parameters:
-      - in: query
-        name: limit
-        required: false
-        schema:
-          default: 300
-          title: Limit
-          type: integer
+        draws as one picture instead of two tables.'
+      operationId: fleet_moved_fleet_get
       responses:
-        '200':
-          content:
-            text/html:
-              schema:
-                type: string
+        '302':
           description: Successful Response
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
-      summary: Fleet Page
+      summary: Fleet Moved
   /identity:
     get:
       operationId: identity_identity_get
@@ -270,6 +240,45 @@ paths:
                 type: object
           description: Successful Response
       summary: Identity
+  /metrics.json:
+    get:
+      description: 'The same figures the overview renders, as data.
+
+
+        Added because a client that cannot fetch these has to compute them, and a
+
+        client computing its own headline numbers is a second implementation that
+
+        will disagree with the first. Every value here is counted from the
+
+        provenance thread; `summarise` refuses a median under three runs rather
+
+        than producing one.'
+      operationId: metrics_json_metrics_json_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 300
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Metrics Json Metrics Json Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Metrics Json
   /run:
     post:
       operationId: run_run_post
@@ -338,30 +347,15 @@ paths:
       summary: Run Stream
   /runs:
     get:
-      description: What ran, and where each run stopped.
-      operationId: runs_page_runs_get
-      parameters:
-      - in: query
-        name: limit
-        required: false
-        schema:
-          default: 300
-          title: Limit
-          type: integer
+      description: 'What ran and where each run stopped, which the thread screen groups
+        by
+
+        run and shows in the same place.'
+      operationId: runs_moved_runs_get
       responses:
-        '200':
-          content:
-            text/html:
-              schema:
-                type: string
+        '302':
           description: Successful Response
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
-      summary: Runs Page
+      summary: Runs Moved
   /standards:
     get:
       description: 'What a repository fails, and what could not be decided from it.
@@ -451,37 +445,19 @@ paths:
       summary: Thread
   /thread/view:
     get:
-      description: 'The thread as the graph it is.
+      description: 'The thread, now drawn by the application.
 
 
-        The product is named for a thread you can follow back, and rendering it as
+        This is the URL the README leads with and the one the recorded demo opens,
 
-        a list asks the reader to do the walking in their head. Here a click lights
+        so it keeps working. What it opens is the same graph over the same entries,
 
-        the whole path from an outcome to the pull request that caused it.'
-      operationId: thread_view_thread_view_get
-      parameters:
-      - in: query
-        name: limit
-        required: false
-        schema:
-          default: 300
-          title: Limit
-          type: integer
+        fetched from /thread rather than rendered here.'
+      operationId: thread_view_moved_thread_view_get
       responses:
-        '200':
-          content:
-            text/html:
-              schema:
-                type: string
+        '302':
           description: Successful Response
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
-      summary: Thread View
+      summary: Thread View Moved
   /watch:
     get:
       description: 'Proof the subscription is real, and countable.

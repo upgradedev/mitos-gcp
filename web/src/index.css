@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 antialiased;
+    @apply dark:bg-ink-950 dark:text-ink-100;
+    /* No horizontal scroll at 375. Anything genuinely wide scrolls inside its
+       own container instead of moving the page. */
+    overflow-x: hidden;
+  }
+
+  /* A visible focus ring everywhere, not only where a designer remembered.
+     :focus-visible keeps it off mouse clicks and on for keyboard travel. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-offset-2;
+    @apply ring-sky-600 ring-offset-ink-50;
+    @apply dark:ring-sky-400 dark:ring-offset-ink-950;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-ink-200 bg-white;
+    @apply dark:border-ink-800 dark:bg-ink-900;
+  }
+
+  /* Wide content scrolls in place. Used by the stream, which carries long
+     unbroken hashes and file paths. */
+  .scroll-x {
+    @apply overflow-x-auto;
+  }
+}
+
+/* Respect the setting rather than assuming everyone wants motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

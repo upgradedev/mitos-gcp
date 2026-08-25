@@ -70,6 +70,61 @@ def as_json(raw: str):
         return None
 
 
+def get_with_headers(url: str) -> tuple[int, str, dict[str, str]]:
+    """As `get`, and the response headers, lowercased.
+
+    Separate rather than folded into `get` so the twenty calls above keep
+    reading as two values.
+    """
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # nosec B310
+            body = resp.read().decode("utf-8", "replace")
+            return resp.status, body, {k.lower(): v for k, v in resp.headers.items()}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        return exc.code, body, {k.lower(): v for k, v in exc.headers.items()}
+    except Exception as exc:  # noqa: BLE001
+        return 0, f"{type(exc).__name__}: {exc}", {}
+
+
+class _KeepTheRedirect(urllib.request.HTTPRedirectHandler):
+    """Report a redirect instead of following it.
+
+    `urlopen` follows by default, and a check that follows cannot tell a
+    redirect that lands in the right place from one that lands anywhere at all:
+    it would fetch the application shell either way and see a page.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def redirect_of(url: str) -> tuple[int, str]:
+    opener = urllib.request.build_opener(_KeepTheRedirect)
+    try:
+        with opener.open(url, timeout=TIMEOUT) as resp:  # nosec B310
+            return resp.status, resp.headers.get("location", "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("location", "")
+    except Exception as exc:  # noqa: BLE001
+        return 0, f"{type(exc).__name__}: {exc}"
+
+
+def _asset(document: str, suffix: str) -> str:
+    """The first /assets/... path in the document ending in this suffix.
+
+    Read out of the document rather than written down here, because the file
+    name carries a content hash that changes with every build. A name pinned in
+    this file would go red on the first rebuild for a reason that is not a
+    fault, and a check that cries wolf gets deleted.
+    """
+    for piece in document.replace("'", '"').split('"'):
+        if piece.startswith("/assets/") and piece.endswith(suffix):
+            return piece
+    return ""
+
+
 def _id_token(audience: str):
     """An OIDC token for a Cloud Run audience, or None if none can be minted.
 
@@ -99,7 +154,12 @@ def run(reader: str, evaluator: str, writer: str) -> int:
     seen["reader"] = as_json(raw) or {}
     r.record(status == 200, "reader /identity answers with no account", f"HTTP {status}")
     r.record(
-        seen["reader"].get("running_as", "").startswith("mitos-reader@"),
+        # `or ""` because running_as is null anywhere off Google Cloud, where
+        # there is no metadata server to ask. This used to raise, and a suite
+        # that dies on its second check prints no result line at all, which the
+        # workflow reads as "the suite printed no result" rather than as the
+        # failure it is.
+        (seen["reader"].get("running_as") or "").startswith("mitos-reader@"),
         "reader runs as its own service account",
         seen["reader"].get("running_as", raw[:120]),
     )
@@ -219,12 +279,6 @@ def run(reader: str, evaluator: str, writer: str) -> int:
     status, raw = get(f"{reader}/thread?limit=5")
     doc = as_json(raw) or {}
     r.record(status == 200, "the provenance thread is readable", f"HTTP {status}")
-    status, raw = get(f"{reader}/thread/view")
-    r.record(
-        status == 200 and "<title>" in raw,
-        "the thread view renders, which is the one thing here worth looking at",
-        f"HTTP {status}",
-    )
 
     print("\n== The API surface")
     status, raw = get(f"{reader}/openapi.json")
@@ -235,18 +289,103 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         f"HTTP {status}, {len(doc.get('paths', {}))} paths",
     )
 
-    # The pages a judge actually clicks. Left out of this suite once already:
-    # the dashboard shipped, the rebuild would have gone green, and nothing here
+    # The surface a judge clicks. Left out of this suite once already: the
+    # dashboard shipped, the rebuild would have gone green, and nothing here
     # would have noticed a deploy that dropped it. Same shape as the missing
     # MITOS_WRITER_URL, which was caught by luck rather than by a check.
+    #
+    # It is a built application now, so most of what this section used to do
+    # cannot be done: every screen is the same document with a different
+    # fragment, and the fragment never reaches the server. Fetching four paths
+    # that return the same document and grepping each for a word would be a
+    # check that can no longer fail. What replaces it asserts the things that
+    # can actually go wrong.
     print("\n== The surface a judge clicks")
+    status, shell = get(f"{reader}/")
+    r.record(
+        status == 200,
+        "the interface is served at /",
+        f"HTTP {status}" + (" - 503 means the image was built without it" if status == 503 else ""),
+    )
+    js = _asset(shell, ".js")
+    css = _asset(shell, ".css")
+    r.record(
+        bool(js and css),
+        "and the document names a script and a stylesheet",
+        f"script={js or 'none'} stylesheet={css or 'none'}",
+    )
+    # Read out of the document rather than pinned here: the file names carry a
+    # content hash that changes with every build.
+    bundle = ""
+    for kind, path in (("script", js), ("stylesheet", css)):
+        if not path:
+            continue
+        status, body = get(f"{reader}{path}")
+        # A truncated asset is served with a 200 and breaks the whole
+        # interface, so the size is asserted rather than assumed.
+        r.record(
+            status == 200 and len(body) > 10000,
+            f"the {kind} it names is served and is a real build",
+            f"{path}: HTTP {status}, {len(body)} bytes",
+        )
+        if kind == "script":
+            bundle = body
+
+    # Not "the screens render": nothing here drives a browser. This proves the
+    # bundle that is deployed is the one carrying each screen's copy, which is
+    # what a stale or partial build gets wrong.
+    for screen, phrase in (
+        ("overview", "Mitos stops an AI-written change"),
+        ("run", "Run a governed change"),
+        ("boundary", "What the reader may reach"),
+        ("thread", "This walk leaves the run it started in"),
+    ):
+        r.record(
+            phrase in bundle,
+            f"the bundle carries the {screen} copy",
+            phrase,
+        )
+
+    # The policy had to be widened for the bundle. A widening nobody checks is
+    # a widening that keeps going.
+    status, _, headers = get_with_headers(f"{reader}/")
+    csp = headers.get("content-security-policy", "")
+    for directive in (
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+    ):
+        r.record(directive in csp, f"the content policy still says {directive}", "")
+    r.record(
+        "unsafe-inline" not in csp,
+        "and does not allow inline script or style",
+        csp[:120],
+    )
+
+    # The three URLs that used to render a page here. They are in the README,
+    # in the recorded demo and in merged pull request comments, so they redirect
+    # rather than 404. Asserted without following: a suite that follows lands on
+    # the application shell and passes no matter where the redirect pointed.
+    for path, target in (
+        ("/thread/view", "#/thread"),
+        ("/runs", "#/thread"),
+        ("/fleet", "#/boundary"),
+    ):
+        status, location = redirect_of(f"{reader}{path}")
+        r.record(
+            status in (301, 302, 307, 308) and location.endswith(target),
+            f"{path} redirects into the application",
+            f"HTTP {status} -> {location or 'no location'}",
+        )
+
+    # The two pages the application does not implement. Nothing replaced them,
+    # so they are still rendered by the service.
     for path, must_contain in (
-        ("/", "the privilege boundary"),
-        ("/fleet", "catalogued companions"),
-        ("/runs", "this window, counted"),
         ("/standards", "the audit"),
         ("/connect", "three steps"),
-        ("/thread/view", "Mitos"),
     ):
         status, raw = get(f"{reader}{path}")
         r.record(

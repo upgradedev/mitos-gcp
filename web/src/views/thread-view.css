@@ -1,0 +1,645 @@
+/* The thread view.
+ *
+ * Every colour here is one of the eight already in service/thread_view.py
+ * KIND_STYLE. Nothing is invented: the tints are those same hexes at low
+ * alpha so a row can carry its meaning as a wash rather than only as a dot.
+ *
+ * There are no style attributes anywhere in this view, because the deployed
+ * policy is script-src and style-src by nonce with no unsafe-inline. Tree
+ * depth is therefore a class per level rather than a computed padding.
+ *
+ * The shell sets darkMode: "class" and index.html ships class="dark", so the
+ * light values are the base and html.dark overrides them.
+ */
+
+.mitos-thread {
+  --bg: #fbfbfd;
+  --fg: #1b1b1f;
+  --dim: #5f5d66;
+  --line: #dcdce4;
+  --card: #ffffff;
+  --raised: #f2f2f6;
+
+  --tone-trigger: #2f9a9a;
+  --tone-route: #3f66c4;
+  --tone-quiet: #6f6c76;
+  --tone-refusal: #c62f2f;
+  --tone-parked: #8a6a00;
+  --tone-plan: #3a3a42;
+  --tone-write: #1f7a2e;
+  --tone-finding: #b25a17;
+
+  --tint-trigger: rgba(95, 215, 215, 0.18);
+  --tint-route: rgba(122, 162, 247, 0.18);
+  --tint-quiet: rgba(138, 135, 144, 0.14);
+  --tint-refusal: rgba(255, 107, 107, 0.18);
+  --tint-parked: rgba(255, 215, 95, 0.28);
+  --tint-plan: rgba(58, 58, 66, 0.1);
+  --tint-write: rgba(95, 215, 95, 0.22);
+  --tint-finding: rgba(255, 158, 100, 0.22);
+
+  /* The dot keeps the exact hex from the server vocabulary in both themes.
+   * The text tones above are the same hues taken darker, because #ffd75f on
+   * a white page is not readable and an unreadable label carries no meaning. */
+  --dot-trigger: #5fd7d7;
+  --dot-route: #7aa2f7;
+  --dot-quiet: #8a8790;
+  --dot-refusal: #ff6b6b;
+  --dot-parked: #ffd75f;
+  --dot-plan: #3a3a42;
+  --dot-write: #5fd75f;
+  --dot-finding: #ff9e64;
+
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  min-height: 100%;
+}
+
+html.dark .mitos-thread {
+  --bg: #0f0f12;
+  --fg: #e8e6ea;
+  --dim: #98959e;
+  --line: #2a2a31;
+  --card: #17171c;
+  --raised: #1f1f26;
+
+  --tone-trigger: #5fd7d7;
+  --tone-route: #7aa2f7;
+  --tone-quiet: #8a8790;
+  --tone-refusal: #ff6b6b;
+  --tone-parked: #ffd75f;
+  --tone-plan: #ffffff;
+  --tone-write: #5fd75f;
+  --tone-finding: #ff9e64;
+
+  --dot-plan: #ffffff;
+}
+
+.mitos-thread *,
+.mitos-thread *::before,
+.mitos-thread *::after {
+  box-sizing: border-box;
+}
+
+/* ---- header ------------------------------------------------------------ */
+
+.mitos-thread__head {
+  padding: 1.25rem 1rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.mitos-thread__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.mitos-thread__lede {
+  margin: 0.4rem 0 0;
+  max-width: 60ch;
+  color: var(--dim);
+  font-size: 0.92rem;
+}
+
+.mitos-thread__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+
+.mitos-thread__facts b {
+  color: var(--fg);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.mitos-thread__caveat {
+  margin: 0.6rem 0 0;
+  max-width: 70ch;
+  font-size: 0.8rem;
+  color: var(--dim);
+  border-left: 2px solid var(--line);
+  padding-left: 0.6rem;
+}
+
+/* ---- layout ------------------------------------------------------------ */
+
+.mitos-thread__layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.mitos-thread__pane {
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+/* Stacked on a phone, an unbounded run list puts fifty cards between the
+ * reader and the graph, so step 2 is never seen. Each pane scrolls inside
+ * itself instead, which keeps the three numbered steps within one screen. */
+@media (max-width: 899px) {
+  .mitos-thread__pane--runs {
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .mitos-thread__pane--graph {
+    max-height: 62vh;
+    overflow-y: auto;
+  }
+}
+
+.mitos-thread__pane-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  padding: 0.7rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+
+@media (min-width: 900px) {
+  .mitos-thread__layout {
+    grid-template-columns: 17rem minmax(0, 1fr) 21rem;
+  }
+
+  /* Each pane scrolls inside itself rather than lengthening the page, so the
+   * run list, the graph and the detail stay side by side and visible at once.
+   *
+   * The cap is a max-height, not a height: a pane with little in it stays
+   * short instead of becoming a tall empty box. The reserve covers the
+   * shell header and this view's own header, which this file does not own
+   * and therefore approximates. Getting it slightly wrong costs a short page
+   * scroll; a `height` that was slightly wrong would cost a second scrollbar
+   * next to three inner ones.
+   */
+  .mitos-thread__pane {
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    min-height: 0;
+    max-height: calc(100vh - 15rem);
+  }
+
+  .mitos-thread__pane:last-child {
+    border-right: 0;
+  }
+}
+
+/* ---- run list ---------------------------------------------------------- */
+
+.mitos-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mitos-runs__group {
+  padding: 0.75rem 1rem 0.25rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.mitos-run {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.mitos-run:hover {
+  background: var(--raised);
+}
+
+.mitos-run.is-open {
+  background: var(--raised);
+  border-left-color: var(--tone-route);
+}
+
+.mitos-run__top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.mitos-run__name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitos-run__when {
+  color: var(--dim);
+  font-size: 0.74rem;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.mitos-run__sub {
+  color: var(--dim);
+  font-size: 0.8rem;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitos-run__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 0.4rem;
+}
+
+/* ---- the kind vocabulary ---------------------------------------------- */
+
+.mitos-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+
+.mitos-dot.tone-trigger { background: var(--dot-trigger); }
+.mitos-dot.tone-route { background: var(--dot-route); }
+.mitos-dot.tone-quiet { background: var(--dot-quiet); }
+.mitos-dot.tone-refusal { background: var(--dot-refusal); }
+.mitos-dot.tone-parked { background: var(--dot-parked); }
+.mitos-dot.tone-plan { background: var(--dot-plan); }
+.mitos-dot.tone-write { background: var(--dot-write); }
+.mitos-dot.tone-finding { background: var(--dot-finding); }
+
+.mitos-kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mitos-kind.tone-trigger { color: var(--tone-trigger); }
+.mitos-kind.tone-route { color: var(--tone-route); }
+.mitos-kind.tone-quiet { color: var(--tone-quiet); }
+.mitos-kind.tone-refusal { color: var(--tone-refusal); }
+.mitos-kind.tone-parked { color: var(--tone-parked); }
+.mitos-kind.tone-plan { color: var(--tone-plan); }
+.mitos-kind.tone-write { color: var(--tone-write); }
+.mitos-kind.tone-finding { color: var(--tone-finding); }
+
+/* ---- the graph --------------------------------------------------------- */
+
+.mitos-graph {
+  padding: 0.5rem 0 2rem;
+}
+
+.mitos-graph__intro {
+  padding: 0.6rem 1rem 0.8rem;
+  color: var(--dim);
+  font-size: 0.82rem;
+  max-width: 62ch;
+}
+
+.mitos-node {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  padding: 0.3rem 0.75rem 0.3rem 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  position: relative;
+}
+
+.mitos-node:hover {
+  background: var(--raised);
+}
+
+/* Depth as a class per level, because a computed padding would have to be a
+ * style attribute and the policy refuses one. Eight is above the deepest
+ * chain the thread currently holds; deeper entries clamp to it and still
+ * show their parent link in the detail panel. */
+.mitos-node.depth-0 { padding-left: 0.5rem; }
+.mitos-node.depth-1 { padding-left: 1.6rem; }
+.mitos-node.depth-2 { padding-left: 2.7rem; }
+.mitos-node.depth-3 { padding-left: 3.8rem; }
+.mitos-node.depth-4 { padding-left: 4.9rem; }
+.mitos-node.depth-5 { padding-left: 6rem; }
+.mitos-node.depth-6 { padding-left: 7.1rem; }
+.mitos-node.depth-7 { padding-left: 8.2rem; }
+.mitos-node.depth-8 { padding-left: 9.3rem; }
+
+.mitos-node.is-selected {
+  background: var(--tint-route);
+  border-left-color: var(--tone-route);
+}
+
+.mitos-node.on-path {
+  background: var(--tint-route);
+}
+
+.mitos-node.is-dimmed {
+  opacity: 0.32;
+}
+
+.mitos-node__dot {
+  margin-top: 0.42rem;
+}
+
+.mitos-node__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mitos-node__line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.mitos-node__actor {
+  color: var(--dim);
+  font-size: 0.83rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitos-node__time {
+  color: var(--dim);
+  font-size: 0.72rem;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* Two lines, because some refusals record a full sentence of explanation and
+ * a row that grows to six lines stops being scannable. The whole text is in
+ * the detail panel, so nothing is lost by clamping it here. */
+.mitos-node__gloss {
+  color: var(--dim);
+  font-size: 0.8rem;
+  margin-top: 0.05rem;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mitos-node__from {
+  display: inline-block;
+  margin-top: 0.15rem;
+  font-size: 0.74rem;
+  color: var(--tone-parked);
+}
+
+/* ---- badges ------------------------------------------------------------ */
+
+.mitos-badge {
+  display: inline-block;
+  padding: 0.02rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.71rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.mitos-badge.tone-trigger { background: var(--tint-trigger); color: var(--tone-trigger); }
+.mitos-badge.tone-route { background: var(--tint-route); color: var(--tone-route); }
+.mitos-badge.tone-quiet { background: var(--tint-quiet); color: var(--tone-quiet); }
+.mitos-badge.tone-refusal { background: var(--tint-refusal); color: var(--tone-refusal); }
+.mitos-badge.tone-parked { background: var(--tint-parked); color: var(--tone-parked); }
+.mitos-badge.tone-plan { background: var(--tint-plan); color: var(--tone-plan); }
+.mitos-badge.tone-write { background: var(--tint-write); color: var(--tone-write); }
+.mitos-badge.tone-finding { background: var(--tint-finding); color: var(--tone-finding); }
+
+/* ---- detail ------------------------------------------------------------ */
+
+.mitos-detail {
+  padding: 1rem;
+}
+
+.mitos-detail__hint {
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+.mitos-detail__kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.mitos-detail__meta {
+  color: var(--dim);
+  font-size: 0.8rem;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-detail__section {
+  margin-top: 1.1rem;
+}
+
+.mitos-detail__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin-bottom: 0.35rem;
+}
+
+.mitos-retrace {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mitos-retrace__step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0.22rem 0.3rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.mitos-retrace__step:hover {
+  background: var(--raised);
+}
+
+.mitos-retrace__arrow {
+  color: var(--dim);
+  padding-left: 0.55rem;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.mitos-retrace__who {
+  color: var(--dim);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mitos-retrace__cross {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--tone-parked);
+  background: var(--tint-parked);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+}
+
+.mitos-retrace__truncated {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--dim);
+  border-left: 2px solid var(--line);
+  padding-left: 0.55rem;
+}
+
+/* ---- the write, told honestly ------------------------------------------ */
+
+.mitos-write {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mitos-write__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+  align-items: baseline;
+}
+
+.mitos-write__row:last-child {
+  border-bottom: 0;
+}
+
+.mitos-write__key {
+  color: var(--dim);
+  flex: 0 0 auto;
+}
+
+.mitos-write__val {
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.mitos-write__note {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
+/* ---- payload ----------------------------------------------------------- */
+
+.mitos-payload {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.mitos-payload__row {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mitos-payload__key {
+  color: var(--dim);
+}
+
+.mitos-payload__nest {
+  padding-left: 0.9rem;
+  border-left: 1px solid var(--line);
+  margin-left: 0.15rem;
+}
+
+.mitos-payload__empty {
+  color: var(--dim);
+}
+
+/* ---- states ------------------------------------------------------------ */
+
+.mitos-state {
+  padding: 2rem 1rem;
+  max-width: 62ch;
+}
+
+.mitos-state__title {
+  font-weight: 650;
+  margin-bottom: 0.4rem;
+}
+
+.mitos-state__body {
+  color: var(--dim);
+  font-size: 0.88rem;
+}
+
+.mitos-state__detail {
+  margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mitos-thread :focus-visible,
+.mitos-boundary :focus-visible {
+  outline: 2px solid var(--tone-route);
+  outline-offset: -2px;
+}
