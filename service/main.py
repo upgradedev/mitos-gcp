@@ -496,7 +496,10 @@ def _persist_installation_event(payload: dict[str, Any], delivery_id: str) -> di
 
 def _store_github_app_secret(secret_id: str, value: str) -> None:
     """Create or rotate one GitHub App credential without persisting it in Firestore."""
-    from google.api_core.exceptions import AlreadyExists  # noqa: PLC0415
+    from google.api_core.exceptions import (  # noqa: PLC0415
+        AlreadyExists,
+        PermissionDenied,
+    )
     from google.cloud import secretmanager  # noqa: PLC0415
 
     client = secretmanager.SecretManagerServiceClient()
@@ -519,9 +522,16 @@ def _store_github_app_secret(secret_id: str, value: str) -> None:
                 "secret": {"replication": {"automatic": {}}},
             }
         )
-    except AlreadyExists:
-        pass
-    except Exception:  # noqa: BLE001 - creating is Terraform's job, not ours
+    except (AlreadyExists, PermissionDenied):
+        # Both are expected and neither is a problem. The secret exists because
+        # Terraform made it, and this identity deliberately cannot create
+        # secrets: holding that permission project-wide is what let the reader
+        # read the write credential.
+        #
+        # Named rather than caught broadly. `except Exception: pass` here would
+        # swallow a quota error or a wrong project id and leave the add below
+        # failing for a reason nobody could see, which is the same shape as the
+        # bug this function is recovering from.
         pass
     client.add_secret_version(
         request={
