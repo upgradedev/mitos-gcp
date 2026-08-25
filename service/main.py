@@ -14,11 +14,13 @@ config flag we set ourselves.
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import secrets
 import sys
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -27,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import httpx  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import threading  # noqa: E402
 
@@ -346,40 +349,399 @@ def catalog() -> dict[str, Any]:
     return {"companions": [c.as_dict() for c in CATALOG]}
 
 
+def _public_url(request: Request) -> str:
+    return os.environ.get("MITOS_PUBLIC_URL", str(request.base_url).rstrip("/")).rstrip("/")
+
+
+def _github_app_metadata() -> dict[str, Any]:
+    try:
+        from google.cloud import firestore  # noqa: PLC0415
+
+        snapshot = firestore.Client(project=PROJECT).collection("system").document("github_app").get()
+        return snapshot.to_dict() if snapshot.exists else {}
+    except Exception:  # noqa: BLE001 - status must remain useful before Firestore setup
+        return {}
+
+
+def _connected_repositories() -> list[str]:
+    try:
+        from google.cloud import firestore  # noqa: PLC0415
+
+        docs = firestore.Client(project=PROJECT).collection("repositories").where(
+            filter=firestore.FieldFilter("active", "==", True)
+        ).stream()
+        return sorted({str(doc.to_dict().get("full_name", "")) for doc in docs if doc.to_dict().get("full_name")})
+    except Exception:  # noqa: BLE001 - legacy allowlist remains readable during migration
+        return sorted(ALLOWED_REPOS)
+
+
+def _persist_installation_event(payload: dict[str, Any], delivery_id: str) -> dict[str, Any]:
+    """Project a verified GitHub installation event into tenant-scoped records."""
+    from google.cloud import firestore  # noqa: PLC0415
+
+    installation = payload.get("installation") or {}
+    account = installation.get("account") or {}
+    installation_id = installation.get("id")
+    account_id = account.get("id")
+    if not isinstance(installation_id, int) or not isinstance(account_id, int):
+        raise wh.Rejected("installation or account identity is missing", 400)
+    action = str(payload.get("action", ""))
+    workspace_id = f"github-{account_id}"
+    active = action not in {"deleted", "suspend"}
+    db = firestore.Client(project=PROJECT)
+    db.collection("workspaces").document(workspace_id).set(
+        {
+            "name": str(account.get("login") or "GitHub workspace")[:100],
+            "github_account_id": account_id,
+            "github_account_type": str(account.get("type") or "Organization"),
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    db.collection("github_installations").document(str(installation_id)).set(
+        {
+            "workspace_id": workspace_id,
+            "installation_id": installation_id,
+            "account_id": account_id,
+            "account_login": str(account.get("login") or "")[:100],
+            "target_type": str(installation.get("target_type") or ""),
+            "permissions": installation.get("permissions") or {},
+            "events": installation.get("events") or [],
+            "active": active,
+            "suspended_at": installation.get("suspended_at"),
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "last_delivery_id": delivery_id,
+        },
+        merge=True,
+    )
+    repositories = payload.get("repositories") or payload.get("repositories_added") or []
+    removed = payload.get("repositories_removed") or []
+    for repository in repositories:
+        repository_id = repository.get("id")
+        full_name = str(repository.get("full_name") or "")
+        if isinstance(repository_id, int) and full_name:
+            db.collection("repositories").document(str(repository_id)).set(
+                {
+                    "workspace_id": workspace_id,
+                    "installation_id": installation_id,
+                    "github_repository_id": repository_id,
+                    "full_name": full_name[:200],
+                    "private": bool(repository.get("private", False)),
+                    "default_branch": str(repository.get("default_branch") or "main")[:100],
+                    "active": active,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+    for repository in removed:
+        repository_id = repository.get("id")
+        if isinstance(repository_id, int):
+            db.collection("repositories").document(str(repository_id)).set(
+                {"active": False, "updated_at": firestore.SERVER_TIMESTAMP}, merge=True
+            )
+    return {"workspace_id": workspace_id, "installation_id": installation_id, "active": active}
+
+
+def _store_github_app_secret(secret_id: str, value: str) -> None:
+    """Create or rotate one GitHub App credential without persisting it in Firestore."""
+    from google.api_core.exceptions import AlreadyExists  # noqa: PLC0415
+    from google.cloud import secretmanager  # noqa: PLC0415
+
+    client = secretmanager.SecretManagerServiceClient()
+    parent = f"projects/{PROJECT}"
+    try:
+        client.create_secret(
+            request={
+                "parent": parent,
+                "secret_id": secret_id,
+                "secret": {"replication": {"automatic": {}}},
+            }
+        )
+    except AlreadyExists:
+        pass
+    client.add_secret_version(
+        request={
+            "parent": f"{parent}/secrets/{secret_id}",
+            "payload": {"data": value.encode("utf-8")},
+        }
+    )
+
+
+def _read_managed_secret(secret_id: str) -> str:
+    from google.cloud import secretmanager  # noqa: PLC0415
+
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{PROJECT}/secrets/{secret_id}/versions/latest"
+    return client.access_secret_version(name=name).payload.data.decode("utf-8").strip()
+
+
+def _session_user(request: Request) -> Optional[dict[str, Any]]:
+    session_id = request.cookies.get("mitos_session")
+    if not session_id:
+        return None
+    try:
+        from google.cloud import firestore  # noqa: PLC0415
+
+        snapshot = firestore.Client(project=PROJECT).collection("sessions").document(session_id).get()
+        if not snapshot.exists:
+            return None
+        session = snapshot.to_dict() or {}
+        expires_at = session.get("expires_at")
+        if not expires_at or expires_at <= datetime.now(timezone.utc):
+            return None
+        user = firestore.Client(project=PROJECT).collection("users").document(str(session["user_id"])).get()
+        return user.to_dict() if user.exists else None
+    except Exception:  # noqa: BLE001 - an unavailable session store means signed out
+        return None
+
+
+def _require_role(request: Request, workspace_id: str, roles: frozenset[str]) -> dict[str, Any]:
+    user = _session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from google.cloud import firestore  # noqa: PLC0415
+
+    membership_id = f"{workspace_id}:{user['github_user_id']}"
+    membership = firestore.Client(project=PROJECT).collection("workspace_memberships").document(membership_id).get()
+    record = membership.to_dict() if membership.exists else None
+    if not record or record.get("role") not in roles:
+        raise HTTPException(status_code=403, detail="Workspace role does not permit this action")
+    return user
+
+
+@app.get("/github/auth/login")
+def github_auth_login(request: Request) -> RedirectResponse:
+    metadata = _github_app_metadata()
+    client_id = str(metadata.get("client_id") or "")
+    if not client_id:
+        raise HTTPException(status_code=503, detail="Create the GitHub App before signing in")
+    state = secrets.token_urlsafe(32)
+    callback = f"{_public_url(request)}/github/auth/callback"
+    query = urllib.parse.urlencode({"client_id": client_id, "redirect_uri": callback, "state": state})
+    response = RedirectResponse(
+        url=f"https://github.com/login/oauth/authorize?{query}",
+        status_code=302,
+    )
+    response.set_cookie(
+        "mitos_github_oauth_state", state, max_age=600, httponly=True,
+        secure=request.url.scheme == "https", samesite="lax",
+    )
+    return response
+
+
+@app.get("/github/auth/callback")
+def github_auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+    expected = request.cookies.get("mitos_github_oauth_state")
+    if not expected or not secrets.compare_digest(expected, state):
+        raise HTTPException(status_code=400, detail="Invalid or expired GitHub login state")
+    metadata = _github_app_metadata()
+    secret_prefix = str(metadata.get("secret_prefix") or "")
+    if not secret_prefix or not metadata.get("client_id"):
+        raise HTTPException(status_code=503, detail="GitHub App credentials are unavailable")
+    client_secret = _read_managed_secret(f"{secret_prefix}-client-secret")
+    token_response = httpx.post(
+        "https://github.com/login/oauth/access_token",
+        data={"client_id": metadata["client_id"], "client_secret": client_secret, "code": code},
+        headers={"Accept": "application/json"}, timeout=30.0,
+    )
+    token_response.raise_for_status()
+    access_token = str(token_response.json().get("access_token") or "")
+    if not access_token:
+        raise HTTPException(status_code=502, detail="GitHub did not return a user access token")
+    github_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    profile_response = httpx.get("https://api.github.com/user", headers=github_headers, timeout=30.0)
+    profile_response.raise_for_status()
+    profile = profile_response.json()
+    github_user_id = profile.get("id")
+    if not isinstance(github_user_id, int):
+        raise HTTPException(status_code=502, detail="GitHub user identity is invalid")
+    from google.cloud import firestore  # noqa: PLC0415
+
+    db = firestore.Client(project=PROJECT)
+    user_id = str(github_user_id)
+    db.collection("users").document(user_id).set({
+        "github_user_id": github_user_id,
+        "login": str(profile.get("login") or "")[:100],
+        "name": str(profile.get("name") or profile.get("login") or "GitHub user")[:150],
+        "avatar_url": str(profile.get("avatar_url") or "")[:500],
+        "updated_at": firestore.SERVER_TIMESTAMP,
+    }, merge=True)
+    installations_response = httpx.get("https://api.github.com/user/installations", headers=github_headers, timeout=30.0)
+    if installations_response.is_success:
+        for installation in installations_response.json().get("installations", []):
+            installation_id = installation.get("id")
+            account_id = (installation.get("account") or {}).get("id")
+            if isinstance(installation_id, int) and isinstance(account_id, int):
+                workspace_id = f"github-{account_id}"
+                membership_id = f"{workspace_id}:{github_user_id}"
+                db.collection("workspace_memberships").document(membership_id).set({
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                    "github_user_id": github_user_id,
+                    "role": "owner",
+                    "installation_id": installation_id,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }, merge=True)
+    session_id = secrets.token_urlsafe(32)
+    db.collection("sessions").document(session_id).create({
+        "user_id": user_id,
+        "created_at": firestore.SERVER_TIMESTAMP,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+    })
+    response = RedirectResponse(url="/#dashboard", status_code=303)
+    response.set_cookie(
+        "mitos_session", session_id, max_age=604800, httponly=True,
+        secure=request.url.scheme == "https", samesite="lax",
+    )
+    response.delete_cookie("mitos_github_oauth_state")
+    return response
+
+
+@app.get("/api/session")
+def session_status(request: Request) -> dict[str, Any]:
+    user = _session_user(request)
+    return {"authenticated": bool(user), "user": user}
+
+
+@app.post("/api/session/logout")
+def session_logout(request: Request) -> JSONResponse:
+    session_id = request.cookies.get("mitos_session")
+    if session_id:
+        try:
+            from google.cloud import firestore  # noqa: PLC0415
+
+            firestore.Client(project=PROJECT).collection("sessions").document(session_id).delete()
+        except Exception:  # noqa: BLE001 - cookie removal still logs the browser out
+            pass
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie("mitos_session")
+    return response
+
+
 @app.get("/github/app/status")
 def github_app_status() -> dict[str, Any]:
-    """Expose non-secret installation readiness for the product UI."""
-    slug = os.environ.get("MITOS_GITHUB_APP_SLUG", "").strip()
-    secret_configured = _webhook_secret() != NO_SECRET_CONFIGURED
+    """Expose readiness and installation metadata, never credentials."""
+    metadata = _github_app_metadata()
+    slug = str(metadata.get("slug") or os.environ.get("MITOS_GITHUB_APP_SLUG", "")).strip()
+    secret_configured = bool(metadata.get("credentials_stored")) or _webhook_secret() != NO_SECRET_CONFIGURED
     return {
         "configured": bool(slug and secret_configured),
         "app_slug": slug or None,
         "install_url": f"/github/app/install" if slug else None,
+        "create_url": "/github/app/new",
         "webhook_endpoint": "/webhook/github",
         "webhook_secret_configured": secret_configured,
-        "accepted_repositories": sorted(ALLOWED_REPOS),
-        "events": ["pull_request"],
+        "accepted_repositories": _connected_repositories(),
+        "events": ["installation", "installation_repositories", "pull_request", "ping"],
         "write_mode": "approval_required",
     }
 
 
+@app.get("/github/app/new")
+def github_app_new(request: Request) -> HTMLResponse:
+    """Create a new GitHub App through GitHub's official manifest flow."""
+    state = secrets.token_urlsafe(32)
+    base = _public_url(request)
+    manifest = {
+        "name": os.environ.get("MITOS_GITHUB_APP_NAME", "Mitos Change Intelligence"),
+        "url": base,
+        "hook_attributes": {"url": f"{base}/webhook/github", "active": True},
+        "redirect_url": f"{base}/github/app/manifest/callback?state={state}",
+        "setup_url": f"{base}/github/app/setup/callback",
+        "callback_urls": [f"{base}/github/auth/callback"],
+        "public": False,
+        "default_permissions": {
+            "checks": "write",
+            "contents": "write",
+            "metadata": "read",
+            "pull_requests": "write",
+        },
+        "default_events": ["installation", "installation_repositories", "pull_request", "ping"],
+    }
+    nonce = request.state.csp_nonce
+    body = html.escape(json.dumps(manifest), quote=True)
+    page = f'''<!doctype html><html><head><meta charset="utf-8"><title>Create Mitos GitHub App</title></head>
+<body><form id="manifest" method="post" action="https://github.com/settings/apps/new">
+<input type="hidden" name="manifest" value="{body}"></form>
+<p>Redirecting to GitHub to create the App…</p><script nonce="{nonce}">document.getElementById("manifest").submit()</script></body></html>'''
+    response = HTMLResponse(page)
+    response.set_cookie(
+        "mitos_github_manifest_state",
+        state,
+        max_age=600,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+    )
+    response.headers["Content-Security-Policy"] = (
+        f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'none'; "
+        "form-action https://github.com; base-uri 'none'; frame-ancestors 'none'"
+    )
+    return response
+
+
+@app.get("/github/app/manifest/callback")
+def github_app_manifest_callback(request: Request, code: str, state: str) -> RedirectResponse:
+    expected = request.cookies.get("mitos_github_manifest_state")
+    if not expected or not secrets.compare_digest(expected, state):
+        raise HTTPException(status_code=400, detail="Invalid or expired GitHub App setup state")
+    conversion = httpx.post(
+        f"https://api.github.com/app-manifests/{code}/conversions",
+        headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+        timeout=30.0,
+    )
+    if conversion.status_code != 201:
+        raise HTTPException(status_code=502, detail="GitHub App creation could not be completed")
+    created = conversion.json()
+    secret_prefix = f"mitos-{os.environ.get('MITOS_STAGE', 'prod')}-github-app"
+    credentials = {
+        f"{secret_prefix}-private-key": created["pem"],
+        f"{secret_prefix}-client-secret": created["client_secret"],
+        f"{secret_prefix}-webhook-secret": created["webhook_secret"],
+    }
+    try:
+        for secret_id, value in credentials.items():
+            _store_github_app_secret(secret_id, value)
+        from google.cloud import firestore  # noqa: PLC0415
+
+        firestore.Client(project=PROJECT).collection("system").document("github_app").set({
+            "app_id": int(created["id"]),
+            "client_id": created["client_id"],
+            "slug": created["slug"],
+            "owner_login": created.get("owner", {}).get("login"),
+            "credentials_stored": True,
+            "secret_prefix": secret_prefix,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as exc:  # noqa: BLE001 - never leak credential values
+        print(json.dumps({"event": "github_app.storage_failed", "error": type(exc).__name__}), flush=True)
+        raise HTTPException(status_code=503, detail="GitHub App was created but secure credential storage failed") from exc
+    response = RedirectResponse(url="/#repositories?github_app=created", status_code=303)
+    response.delete_cookie("mitos_github_manifest_state")
+    return response
+
+
 @app.get("/github/app/install")
 def github_app_install() -> RedirectResponse:
-    """Start the real GitHub App installation flow.
-
-    The application slug is deployment configuration rather than browser data.
-    Refuse clearly when it is absent instead of sending a user to a mock setup.
-    GitHub returns the installation to the callback configured on the App.
-    """
-    slug = os.environ.get("MITOS_GITHUB_APP_SLUG", "").strip()
+    metadata = _github_app_metadata()
+    slug = str(metadata.get("slug") or os.environ.get("MITOS_GITHUB_APP_SLUG", "")).strip()
     if not slug:
-        raise HTTPException(
-            status_code=503,
-            detail="GitHub App installation is not configured for this deployment",
-        )
+        return RedirectResponse(url="/github/app/new", status_code=302)
+    return RedirectResponse(url=f"https://github.com/apps/{slug}/installations/new", status_code=302)
+
+
+@app.get("/github/app/setup/callback")
+def github_app_setup_callback(installation_id: int, setup_action: str = "install") -> RedirectResponse:
+    """Return from GitHub installation; webhook data remains the source of truth."""
+    if installation_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid GitHub installation")
     return RedirectResponse(
-        url=f"https://github.com/apps/{slug}/installations/new",
-        status_code=302,
+        url=f"/#repositories?installation_id={installation_id}&setup_action={setup_action}",
+        status_code=303,
     )
 
 
@@ -642,13 +1004,15 @@ def _webhook_secret() -> str:
             from google.cloud import secretmanager  # noqa: PLC0415
 
             client = secretmanager.SecretManagerServiceClient()
-            name = (
-                f"projects/{PROJECT}/secrets/"
-                f"mitos-prod-settings-reader-github-webhook-secret/versions/latest"
+            metadata = _github_app_metadata()
+            generated_prefix = str(metadata.get("secret_prefix") or "").strip()
+            secret_id = (
+                f"{generated_prefix}-webhook-secret"
+                if generated_prefix
+                else f"mitos-{os.environ.get('MITOS_STAGE', 'prod')}-settings-reader-github-webhook-secret"
             )
-            _WEBHOOK_SECRET = client.access_secret_version(
-                name=name
-            ).payload.data.decode("utf-8").strip()
+            name = f"projects/{PROJECT}/secrets/{secret_id}/versions/latest"
+            _WEBHOOK_SECRET = client.access_secret_version(name=name).payload.data.decode("utf-8").strip()
         except Exception:
             # Empty means every delivery is refused with 503, which is the only
             # safe behaviour: an endpoint that accepts everything when
@@ -686,13 +1050,38 @@ async def github_webhook(request: Request) -> JSONResponse:
     guarantee the trigger stops firing.
     """
     body = await request.body()
+    headers = {key.lower(): value for key, value in request.headers.items()}
+    event = headers.get("x-github-event", "")
+    delivery_id = headers.get("x-github-delivery", "unknown")
     try:
+        if len(body) > wh.MAX_BODY_BYTES:
+            raise wh.Rejected(f"body of {len(body)} bytes exceeds the cap", 413)
+        wh.verify_signature(body, headers.get("x-hub-signature-256"), _webhook_secret())
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise wh.Rejected("body is not a JSON object", 400)
+        if event == "ping":
+            return JSONResponse({"accepted": True, "event": "ping", "delivery": delivery_id})
+        if event in {"installation", "installation_repositories"}:
+            try:
+                claims().claim(delivery_id, note=event)
+            except AlreadySeen:
+                return JSONResponse({"accepted": True, "duplicate": True, "delivery": delivery_id})
+            persisted = _persist_installation_event(payload, delivery_id)
+            claims().complete(delivery_id, outcome=f"{event} persisted")
+            return JSONResponse(
+                {"accepted": True, "event": event, "delivery": delivery_id, **persisted},
+                status_code=202,
+            )
+        allowed = frozenset(_connected_repositories()) | ALLOWED_REPOS
         delivery = wh.parse(
             body,
             dict(request.headers),
             secret=_webhook_secret(),
-            allowed_repositories=ALLOWED_REPOS,
+            allowed_repositories=allowed,
         )
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JSONResponse({"accepted": False, "reason": f"body is not JSON: {exc}"}, status_code=400)
     except wh.Rejected as rej:
         # 202 for "understood, not acting" so GitHub does not disable the hook
         # over deliveries we simply do not care about.
@@ -953,7 +1342,7 @@ def config() -> dict[str, Any]:
     """
     return {
         "read_scope": list(READ_SCOPE),
-        "webhook_repositories": sorted(ALLOWED_REPOS),
+        "webhook_repositories": _connected_repositories(),
         "max_reads_per_run": MAX_READS_PER_RUN,
         "max_bytes_per_read": MAX_BYTES_PER_READ,
     }

@@ -25,10 +25,23 @@ export interface Config {
   max_bytes_per_read: number;
 }
 
+export interface SessionUser {
+  github_user_id: number;
+  login: string;
+  name: string;
+  avatar_url: string;
+}
+
+export interface SessionStatus {
+  authenticated: boolean;
+  user: SessionUser | null;
+}
+
 export interface GitHubAppStatus {
   configured: boolean;
   app_slug: string | null;
   install_url: string | null;
+  create_url: string;
   webhook_endpoint: string;
   webhook_secret_configured: boolean;
   accepted_repositories: string[];

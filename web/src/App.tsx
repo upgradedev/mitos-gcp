@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getConfig, getGitHubAppStatus, getIdentity, getThread, load } from "./api/client";
-import type { Config, GitHubAppStatus, Identity, Loaded, Thread } from "./api/types";
+import { getConfig, getGitHubAppStatus, getIdentity, getSession, getThread, load } from "./api/client";
+import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread } from "./api/types";
 import Header from "./shell/Header";
 import Sidebar from "./shell/Sidebar";
 import { useRoute } from "./ui/router";
@@ -20,16 +20,18 @@ export default function App() {
   const [identity, setIdentity] = useState<Loaded<Identity>>({ status: "loading" });
   const [config, setConfig] = useState<Loaded<Config>>({ status: "loading" });
   const [githubApp, setGitHubApp] = useState<Loaded<GitHubAppStatus>>({ status: "loading" });
+  const [session, setSession] = useState<Loaded<SessionStatus>>({ status: "loading" });
   const [thread, setThread] = useState<Loaded<Thread>>({ status: "loading" });
 
   useEffect(() => {
     load(getIdentity).then(setIdentity);
     load(getConfig).then(setConfig);
     load(getGitHubAppStatus).then(setGitHubApp);
+    load(getSession).then(setSession);
     load(() => getThread(500)).then(setThread);
   }, []);
 
-  const data = { identity, config, githubApp, thread, onNavigate: go };
+  const data = { identity, config, githubApp, session, thread, onNavigate: go };
 
   return (
     <div className="flex min-h-screen bg-ink-950 text-ink-100">
