@@ -2,6 +2,14 @@ fastapi==0.141.1
 google-adk==2.7.1
 google-auth==2.56.3
 google-cloud-firestore==2.21.0
+# Pinned because the client's own dependencies moved and took the
+# deployed fleet down: google-api-core 2.34.0 to 2.35.0 and
+# google-cloud-core 2.6.1 to 2.7.0 started sending the database name
+# URL-encoded, and every page that reads the ledger returned 500. The
+# CI pin did not cover this file, so the image kept building against
+# whatever was newest.
+google-api-core==2.34.0
+google-cloud-core==2.6.1
 google-cloud-secret-manager==2.24.0
 httpx==0.28.1
 pydantic==2.13.4
