@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.check_manifest import SUBSCRIBABLE, check, parse
+from service.manifest import SUBSCRIBABLE, check, parse
 
 
 @pytest.fixture()
@@ -74,7 +74,7 @@ def test_a_url_with_a_scheme_but_no_host_is_still_refused():
     The empty-variable bug produced exactly this shape: a base of `""` joined
     to a path.
     """
-    from scripts.check_manifest import _absolute_https
+    from service.manifest import _absolute_https
 
     assert _absolute_https("https:///github/auth/callback") == (
         "no host, so it is a path rather than a URL"
@@ -149,3 +149,55 @@ def test_the_manifest_is_correct_behind_a_proxy_with_no_configured_url(monkeypat
     assert check(page.text) == []
     _, manifest = parse(page.text)
     assert manifest["url"] == "https://mitos.example.test"
+
+
+def test_a_manifest_we_know_is_wrong_is_never_sent(monkeypatch):
+    """The rules run at request time, not only in CI.
+
+    GitHub's refusal named `redirect_url` for a fault that was in four fields,
+    gave no cause, and showed the reader nothing about what had been sent. When
+    our own rules can already see the problem, the page says so instead, and
+    there is no form to submit.
+    """
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MITOS_PUBLIC_URL", "https://mitos.example.test")
+    monkeypatch.setenv("MITOS_LEDGER", "memory")
+
+    import service.main as main
+
+    monkeypatch.setattr(
+        main, "manifest_problems", lambda action, manifest: ["url: scheme is http, not https"]
+    )
+
+    response = TestClient(main.app).get("/github/app/new")
+
+    assert response.status_code == 503
+    assert "scheme is http, not https" in response.text
+    assert "github.com/settings/apps/new" not in response.text
+    assert "<form" not in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_the_page_shows_the_addresses_and_waits(page):
+    """It used to post to GitHub on load, so nobody ever saw what was sent.
+
+    Two failures are invisible behind an automatic redirect: a cached copy
+    carrying `http://`, and a state the cookie no longer matches. Both are
+    readable on the page now.
+    """
+    _, manifest = parse(page.text)
+
+    for url in (
+        manifest["url"],
+        manifest["hook_attributes"]["url"],
+        manifest["redirect_url"],
+        manifest["setup_url"],
+        manifest["callback_urls"][0],
+    ):
+        assert url in page.text, f"{url} is not shown to the reader"
+
+    assert "Continue to GitHub" in page.text
+    assert "<script" not in page.text, "nothing on this page should execute"
+    assert "script-src 'none'" in page.headers["content-security-policy"]
+    assert "form-action https://github.com" in page.headers["content-security-policy"]

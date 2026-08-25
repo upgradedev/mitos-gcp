@@ -379,7 +379,7 @@ paths:
       summary: Github App Manifest Callback
   /github/app/new:
     get:
-      description: Create a new GitHub App through GitHub's official manifest flow.
+      description: Show the GitHub App manifest for review, then post it to GitHub.
       operationId: github_app_new_github_app_new_get
       responses:
         '200':

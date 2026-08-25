@@ -82,6 +82,7 @@ from mitos.tools import build_corpus  # noqa: E402
 from .budget import RateLimiter, client_of  # noqa: E402
 from .metrics import summarise  # noqa: E402
 
+from .manifest import problems as manifest_problems  # noqa: E402
 from .dashboard import (  # noqa: E402
     audit_form,
     public_base,
@@ -946,9 +947,29 @@ async def _no_public_url(request, exc: NoPublicUrl):
     )
 
 
+# This page used to post to GitHub the moment it loaded. When GitHub refused the
+# manifest the owner saw "Invalid GitHub App configuration / redirect_url must be
+# a valid URL", which names the wrong field, gives no cause, and shows nothing of
+# what was actually sent. It happened twice.
+#
+# So the page now does two things it did not do.
+#
+# It checks its own manifest against `service/manifest.py` before rendering, the
+# same rules the integration suite and `deployed.yml` apply. A manifest we
+# already know is wrong is never sent, and the reason appears here, in our words,
+# next to the value that caused it.
+#
+# And it shows the URLs GitHub is about to store, then waits. One extra click, in
+# exchange for the reader being able to see that the addresses are right —
+# including the two failures an automatic redirect cannot show anyone, where a
+# cached copy of this page carries `http://`, or a state the cookie no longer
+# matches.
+#
+# The docstring stays one line on purpose: FastAPI publishes it as the
+# description of this operation in `openapi.yaml`, which a stranger reads.
 @app.get("/github/app/new")
 def github_app_new(request: Request) -> HTMLResponse:
-    """Create a new GitHub App through GitHub's official manifest flow."""
+    """Show the GitHub App manifest for review, then post it to GitHub."""
     state = secrets.token_urlsafe(32)
     base = _public_url(request)
     manifest = {
@@ -967,13 +988,86 @@ def github_app_new(request: Request) -> HTMLResponse:
         },
         "default_events": ["pull_request"],
     }
+
+    action = f"https://github.com/settings/apps/new?state={state}"
+    faults = manifest_problems(action, manifest)
+
     nonce = request.state.csp_nonce
-    body = html.escape(json.dumps(manifest), quote=True)
-    page = f'''<!doctype html><html><head><meta charset="utf-8"><title>Create Mitos GitHub App</title></head>
-<body><form id="manifest" method="post" action="https://github.com/settings/apps/new?state={html.escape(state, quote=True)}">
-<input type="hidden" name="manifest" value="{body}"></form>
-<p>Redirecting to GitHub to create the App…</p><script nonce="{nonce}">document.getElementById("manifest").submit()</script></body></html>'''
-    response = HTMLResponse(page)
+    esc = lambda value: html.escape(str(value), quote=True)  # noqa: E731
+
+    rows = "".join(
+        f"<tr><th>{esc(label)}</th><td>{esc(value)}</td></tr>"
+        for label, value in (
+            ("Homepage", manifest["url"]),
+            ("Webhook", manifest["hook_attributes"]["url"]),
+            ("Redirect after creation", manifest["redirect_url"]),
+            ("Setup after install", manifest["setup_url"]),
+            ("OAuth callback", manifest["callback_urls"][0]),
+        )
+    )
+
+    if faults:
+        listed = "".join(f"<li>{esc(problem)}</li>" for problem in faults)
+        main = (
+            "<h1>This deployment cannot create the App</h1>"
+            "<p>The manifest it would send is one GitHub would refuse, so it was "
+            "not sent. Each line below names the field and the reason.</p>"
+            f"<ul class=bad>{listed}</ul>"
+            f"<table>{rows}</table>"
+            "<p>Every URL comes from this service's own public address. Set "
+            "<code>MITOS_PUBLIC_URL</code> to the https address of this "
+            "deployment and reload.</p>"
+        )
+        form = ""
+        status = 503
+    else:
+        main = (
+            "<h1>Create the Mitos GitHub App</h1>"
+            "<p>GitHub will register an App you own, in your account or "
+            "organisation, and store the addresses below. Check them before "
+            "continuing: they are what GitHub calls back later, and a wrong one "
+            "fails days from now rather than here.</p>"
+            f"<table>{rows}</table>"
+            "<p>It asks for <b>read and write on checks, contents and pull "
+            "requests</b>, <b>read on metadata</b>, and one event, "
+            "<code>pull_request</code>. Nothing is installed on a repository "
+            "until you choose one on the next screen.</p>"
+        )
+        form = (
+            f'<form id="manifest" method="post" action="{esc(action)}">'
+            f'<input type="hidden" name="manifest" value="{esc(json.dumps(manifest))}">'
+            '<button type="submit">Continue to GitHub</button></form>'
+        )
+        status = 200
+
+    style = (
+        "body{font:16px/1.6 ui-sans-serif,system-ui,sans-serif;max-width:46rem;"
+        "margin:3rem auto;padding:0 1.25rem;color:#111}"
+        "h1{font-size:1.5rem;margin:0 0 1rem}"
+        "table{border-collapse:collapse;width:100%;margin:1.5rem 0;font-size:.9rem}"
+        "th{text-align:left;font-weight:600;padding:.5rem .75rem .5rem 0;"
+        "white-space:nowrap;vertical-align:top;color:#444}"
+        "td{padding:.5rem 0;font-family:ui-monospace,monospace;word-break:break-all}"
+        "tr+tr th,tr+tr td{border-top:1px solid #e5e5e5}"
+        "button{font:inherit;background:#111;color:#fff;border:0;border-radius:.4rem;"
+        "padding:.7rem 1.25rem;cursor:pointer}"
+        "ul.bad{background:#fff4f4;border-left:3px solid #c00;padding:.75rem 1rem "
+        ".75rem 2rem;margin:1.5rem 0}"
+        "code{background:#f3f3f3;padding:.1rem .3rem;border-radius:.2rem}"
+    )
+
+    page = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<title>Create Mitos GitHub App</title>"
+        f'<style nonce="{nonce}">{style}</style></head><body>'
+        f"{main}{form}</body></html>"
+    )
+
+    response = HTMLResponse(page, status_code=status)
+    # A single-use token paired with a ten minute cookie. A cached copy carries
+    # a state the cookie no longer matches, and that failure surfaces at GitHub,
+    # one step after the thing that caused it.
     response.headers["Cache-Control"] = "no-store"
     response.set_cookie(
         "mitos_github_manifest_state",
@@ -984,7 +1078,7 @@ def github_app_new(request: Request) -> HTMLResponse:
         samesite="lax",
     )
     response.headers["Content-Security-Policy"] = (
-        f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'none'; "
+        f"default-src 'none'; script-src 'none'; style-src 'nonce-{nonce}'; "
         "form-action https://github.com; base-uri 'none'; frame-ancestors 'none'"
     )
     return response

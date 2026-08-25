@@ -19,7 +19,7 @@ conclusions was wrong. Anything this script prints is a hint to investigate by
 hand, never evidence on its own, and never a reason to change the manifest
 without reproducing the result while logged in.
 
-`scripts/check_manifest.py` is the gate. It checks the properties GitHub
+`service/manifest.py` holds the rules and `scripts/check_manifest.py` runs them. It checks the properties GitHub
 documents, deterministically, with no third party involved, and it runs both in
 the integration suite and against the deployed URL.
 
@@ -34,9 +34,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from check_manifest import parse  # noqa: E402
+from service.manifest import parse  # noqa: E402
 
 REFUSAL = "must be a valid URL"
 
