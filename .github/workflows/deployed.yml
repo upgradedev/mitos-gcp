@@ -274,6 +274,10 @@ jobs:
           # not write its report, which the assertion below correctly treated as
           # having proved nothing.
           mkdir -p zap-out && chmod 777 zap-out
+          # The rules file lives at the repository root and the mount is
+          # `zap-out`, so ZAP looked for it inside the output directory and
+          # died before scanning anything.
+          cp .zap-baseline.conf zap-out/
           docker run --rm -v "$PWD/zap-out:/zap/wrk/:rw" --network host ghcr.io/zaproxy/zaproxy:2.16.1 zap-baseline.py -t "$READER" -z "-config spider.excludedUrls=.*repository=.*" -c .zap-baseline.conf -J zap.json -r zap.html -I || true
           # `-I` and `|| true` so the scan's own exit code does not decide the
           # build. What decides it is the assertion below, over the findings we
