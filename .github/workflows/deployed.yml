@@ -116,7 +116,13 @@ jobs:
           paths = set(spec.get("paths", {}))
           # Not every path, because the document is generated and would drift
           # for harmless reasons. These are the ones a judge is pointed at.
-          for p in ("/", "/fleet", "/runs", "/standards", "/config", "/thread"):
+          # Rewritten when the interface became a built application. The old
+          # list named /fleet and /runs, which are now redirects into it: they
+          # are still in the spec, so the assertion would still pass while
+          # testing something it no longer means. These are the endpoints the
+          # application and a judge with curl actually depend on.
+          for p in ("/", "/identity", "/config", "/thread", "/run/stream",
+                    "/standards.json"):
               assert p in paths, f"{p} is served but not in the published spec"
           print(f"spec describes {len(paths)} paths")
           PY
@@ -188,17 +194,141 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Every page renders and says something only that page says
+      # Three of the six pages this job used to grep no longer exist. The
+      # interface is a built application now: every screen is the same document
+      # with a different fragment, so "fetch this path and grep for a phrase
+      # only that page says" cannot be written any more. Fetching four paths
+      # that all return the same 400-byte shell and grepping it for a word that
+      # is in every one of them is a check that passes forever.
+      #
+      # What is left that can genuinely be checked is below, and it is the
+      # failure this change actually risks: an image built without the
+      # interface in it. The service would answer 200 on every JSON endpoint
+      # and serve a document pointing at a bundle that is not there.
+      - name: The interface is served, and the bundle it names is really there
+        run: |
+          set -o pipefail
+          code=$(curl -s -o /tmp/index.html -w '%{http_code}' --max-time 90 "$READER/")
+          if [ "$code" != "200" ]; then
+            echo "::error::/ answered $code. 503 means the image has no web/dist in it."
+            cat /tmp/index.html; exit 1
+          fi
+          # Read out of the document, never pinned here. The file names carry a
+          # content hash that changes on every build, so a hardcoded name would
+          # go red on the first rebuild for a reason that is not a fault.
+          js=$(grep -oE '/assets/[^"]+[.]js' /tmp/index.html | head -1)
+          css=$(grep -oE '/assets/[^"]+[.]css' /tmp/index.html | head -1)
+          if [ -z "$js" ] || [ -z "$css" ]; then
+            echo "::error::the document at / names no script or no stylesheet"
+            cat /tmp/index.html; exit 1
+          fi
+          fail=0
+          for pair in "$js:application/javascript" "$css:text/css"; do
+            path=${pair%%:*}; want=${pair##*:}
+            # Fields separated by a character curl cannot produce inside one of
+            # them. `read code type size` was wrong here: the content type is
+            # "text/css; charset=utf-8", which is two words, so the size landed
+            # in the wrong variable and the comparison below became a shell
+            # error rather than a verdict.
+            info=$(curl -s -o /tmp/asset -w '%{http_code}|%{content_type}|%{size_download}' --max-time 90 "$READER$path")
+            code=${info%%|*}
+            size=${info##*|}
+            type=$(printf '%s' "$info" | cut -d'|' -f2)
+            echo "$path -> $code $type $size bytes"
+            [ "$code" = "200" ] || { echo "::error::$path answered $code"; fail=1; continue; }
+            case "$type" in *"$want"*) ;; *) echo "::error::$path served as $type"; fail=1 ;; esac
+            # A zero-length or truncated asset is served with a 200 and breaks
+            # the whole interface, so size is asserted rather than assumed.
+            [ "$size" -gt 10000 ] || { echo "::error::$path is $size bytes, which is not a build"; fail=1; }
+          done
+          exit $fail
+
+      # Not "every screen renders": nothing here drives a browser, and a check
+      # should be named for what it proves. This proves the deployed bundle is
+      # the one carrying each screen's copy, which catches a deploy that shipped
+      # a stale or partial build.
+      - name: The served bundle carries the copy for each of the four screens
+        run: |
+          set -o pipefail
+          # Fetched again rather than reusing the previous step's file. Sharing
+          # it looked tidy and meant that when the document changed shape this
+          # step silently greppped the home page instead of the bundle, and
+          # reported four missing phrases with no hint of the real cause.
+          curl -sf --max-time 90 "$READER/" -o /tmp/index.html
+          js=$(grep -oE '/assets/[^"]+[.]js' /tmp/index.html | head -1)
+          test -n "$js" || { echo "::error::the document at / names no script"; exit 1; }
+          curl -sf --max-time 90 "$READER$js" -o /tmp/bundle.js
+          fail=0
+          while IFS='|' read -r screen phrase; do
+            if grep -qF "$phrase" /tmp/bundle.js; then
+              echo "ok   $screen"
+            else
+              echo "::error::the bundle does not contain the $screen copy: $phrase"; fail=1
+            fi
+          done <<'SCREENS'
+          overview|Mitos stops an AI-written change
+          run|Run a governed change
+          boundary|What the reader may reach
+          thread|This walk leaves the run it started in
+          SCREENS
+          exit $fail
+
+      # The policy had to be widened for the bundle, and a widening nobody
+      # checks is a widening that keeps going. This asserts the three directives
+      # that were added and the four that must not have been dropped.
+      - name: The content policy allows the bundle and the fetches, and nothing else
+        run: |
+          set -o pipefail
+          csp=$(curl -s -D - -o /dev/null --max-time 90 "$READER/" \
+                | tr -d '\r' | grep -i '^content-security-policy:')
+          echo "$csp"
+          test -n "$csp" || { echo "::error::/ carries no content policy at all"; exit 1; }
+          fail=0
+          for directive in "script-src 'self'" "style-src 'self'" "connect-src 'self'" \
+                           "default-src 'none'" "base-uri 'none'" "frame-ancestors 'none'" \
+                           "form-action 'self'"; do
+            printf '%s' "$csp" | grep -qF "$directive" \
+              || { echo "::error::the policy no longer says: $directive"; fail=1; }
+          done
+          # The value that turns the policy back into what the first dynamic
+          # scan reported at MEDIUM.
+          if printf '%s' "$csp" | grep -qF "unsafe-inline"; then
+            echo "::error::unsafe-inline is back in the policy"; fail=1
+          fi
+          exit $fail
+
+      # These three URLs are in the README, in the recorded demo and in merged
+      # pull request comments. They render nothing now, and a redirect that
+      # quietly stopped being served would 404 every one of those links.
+      #
+      # Asserted on the Location header rather than by following the redirect:
+      # `curl -L` would fetch the application shell and any grep for a word in
+      # it would pass no matter where the redirect pointed.
+      - name: The three retired pages redirect into the application
+        run: |
+          set -o pipefail
+          fail=0
+          while IFS='|' read -r path target; do
+            info=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 90 "$READER$path")
+            code=${info%% *}
+            location=${info#* }
+            echo "$path -> $code $location"
+            case "$code" in 301|302|307|308) ;; *) echo "::error::$path answered $code, not a redirect"; fail=1; continue ;; esac
+            case "$location" in *"$target") ;; *) echo "::error::$path redirects to $location, not $target"; fail=1 ;; esac
+          done <<'MOVED'
+          /thread/view|#/thread
+          /runs|#/thread
+          /fleet|#/boundary
+          MOVED
+          exit $fail
+
+      # The two pages the application does not implement, so nothing replaced
+      # them and they are still rendered by the service.
+      - name: The audit and the connect page still render
         run: |
           set -o pipefail
           fail=0
           while IFS='|' read -r path phrase; do
-            # Status and body separately, and a timeout long enough for the
-            # heaviest page. /thread/view renders every entry in the window and
-            # comes back a quarter of a megabyte; at 30 seconds it timed out on
-            # a cold instance, curl returned nothing, and the check reported
-            # "did not contain" for a page that was fine. A check that blames
-            # the wrong thing costs more than no check.
             code=$(curl -s -o /tmp/page.html -w '%{http_code}' --max-time 90 "$READER$path")
             if [ "$code" != "200" ]; then
               echo "::error::$path answered $code"; fail=1; continue
@@ -209,12 +339,8 @@ jobs:
               echo "::error::$path returned 200 but did not contain: $phrase"; fail=1
             fi
           done <<'PAGES'
-          /|the privilege boundary
-          /fleet|catalogued companions
-          /runs|this window, counted
           /standards|the audit
           /connect|three steps
-          /thread/view|Mitos
           PAGES
           exit $fail
 

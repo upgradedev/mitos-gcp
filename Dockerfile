@@ -6,6 +6,31 @@
 #
 # One image, three deployments. What differs is the service account Cloud Run
 # starts it with and MITOS_ROLE, neither of which the process can change.
+#
+# Two stages. The first builds the interface, the second runs the service, and
+# nothing from the first survives except the files it emitted. Node, npm and
+# the 135 packages it installs are build-time only: they are not in the image
+# that holds a write credential, and they are not in the attack surface a
+# scanner reads.
+
+FROM node:20-slim AS interface
+
+WORKDIR /web
+
+# The manifest before the source, so editing a component does not reinstall
+# every package. `npm ci` and not `npm install`: it installs the lockfile as
+# written and fails if the two disagree, which is the difference between a
+# build that is reproducible and one that happens to work today.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY web/ ./
+
+# Emits real files and inlines nothing, which is what `assetsInlineLimit: 0`
+# in vite.config.ts is for. An inlined asset becomes a `data:` URI or an inline
+# <style>, and the content policy this service serves refuses both.
+RUN npm run build
+
 
 FROM python:3.13-slim
 
@@ -20,6 +45,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY service/ ./service/
+
+# Only the emitted files. `web/node_modules` never enters this stage, and
+# `.dockerignore` keeps the one on the build machine out of the first stage
+# too: it is a Windows tree here and the image is Linux, and rollup and esbuild
+# ship platform-specific binaries, so copying it in would break the build
+# rather than merely slow it.
+#
+# Copied before the user is created, so `chown -R` below covers it. Assets
+# owned by root and read by uid 10001 works until the day something wants to
+# write next to them.
+COPY --from=interface /web/dist ./web/dist
 
 # The commit this image was built from, baked in at build time. A running
 # service that cannot say which source it is has to be identified by its

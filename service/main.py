@@ -30,12 +30,16 @@ from dataclasses import dataclass  # noqa: E402
 
 import threading  # noqa: E402
 
-from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from fastapi import FastAPI, HTTPException, Request, Response  # noqa: E402
 from fastapi.responses import (  # noqa: E402
+    FileResponse,
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
     StreamingResponse,
 )
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from mitos.approval import (  # noqa: E402
@@ -74,14 +78,10 @@ from .metrics import summarise  # noqa: E402
 
 from .dashboard import (  # noqa: E402
     audit_form,
-    render_fleet,
-    render_overview,
-    render_runs,
     public_base,
     render_connect,
     render_standards,
 )
-from .thread_view import render as render_thread  # noqa: E402
 
 ROLE = os.environ.get("MITOS_ROLE", ROLE_READER)
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "upgradegr-mitos")
@@ -118,11 +118,32 @@ app = FastAPI(title=f"Mitos · {ROLE}")
 # match the tag it authorises is worse than none, because the browser blocks the
 # script and the page silently stops working, which is how a policy gets
 # loosened again.
+#
+# Three directives were added when the interface became a built application
+# served from this origin, and each one names a thing that is now refused
+# without it:
+#
+#   script-src 'self'    the bundle in /assets. A file, not an inline tag, so
+#                        the nonce does not cover it.
+#   style-src 'self'     the stylesheet in /assets, same reason.
+#   connect-src 'self'   every fetch the app makes. There was no connect-src,
+#                        so it fell back to `default-src 'none'`, and 'none'
+#                        means no sources at all rather than no foreign ones:
+#                        the browser refuses a same-origin /identity before it
+#                        is sent. The app cannot read its own service without
+#                        this and would show only failure panels.
+#
+# What is deliberately still absent: img-src, font-src, media-src and
+# frame-src. The build loads no image, no font, no media and no frame, so
+# they stay at `default-src 'none'` and anything that tries becomes visible
+# rather than silently allowed. The nonce stays for /standards and /connect,
+# which are still rendered here with inline style.
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; "
-        "script-src 'nonce-{nonce}'; "
-        "style-src 'nonce-{nonce}'; "
+        "script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'nonce-{nonce}'; "
+        "connect-src 'self'; "
         "form-action 'self'; "
         "base-uri 'none'; "
         "frame-ancestors 'none'"
@@ -1037,57 +1058,107 @@ def standards_page(request: Request, repository: Optional[str] = None) -> str:
     )
 
 
-@app.get("/fleet", response_class=HTMLResponse)
-def fleet_page(request: Request, limit: int = 300) -> str:
-    """Which companions exist, and which of them ever did anything.
+# The interface, which is now a built application rather than pages rendered
+# here. This service rendered six pages. Four of them are replaced by the
+# application, which says the same things better: the overview at /, the fleet
+# table, the run list and the thread view. The two the application does not
+# implement, /standards and /connect, stay exactly where they were. Deleting a
+# working tool because a different tool shipped would be removing function and
+# calling it a refactor.
+#
+# Built to real files, and served as real files. Nothing is inlined, which is
+# what lets `script-src 'self'` and `style-src 'self'` be the whole of the
+# widening.
+WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 
-    The catalog on its own is a table that could be aspirational. Joined to the
-    thread it becomes a record: this one was dispatched nine times, this one
-    refused twice, this one has never run.
-    """
-    entries, total = _page_data(limit)
-    return render_fleet(
-        catalog()["companions"], entries, ROLE, total=total, nonce=_nonce(request)
-    )
+# Mounted at /assets and nowhere else. A catch-all that answered index.html for
+# any unmatched path is the usual way to serve a single-page app, and it would
+# make this service answer 200 for URLs it does not have. The application
+# routes on the fragment, which the server never sees, so it needs no such
+# fallback.
+#
+# `check_dir=False` because a source checkout has no `web/dist`: the build
+# happens in the image. StaticFiles raises at construction otherwise, and that
+# raise would take down every JSON endpoint in this module and the OpenAPI
+# generator that imports it.
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(WEB_DIST / "assets"), check_dir=False),
+    name="assets",
+)
 
+NOT_BUILT = """The interface is not in this image.
 
-@app.get("/runs", response_class=HTMLResponse)
-def runs_page(request: Request, limit: int = 300) -> str:
-    """What ran, and where each run stopped."""
-    entries, total = _page_data(limit)
-    return render_runs(entries, ROLE, total=total, nonce=_nonce(request))
+web/dist is missing, so there is nothing to serve at this path. Everything else
+still answers, and the whole system is readable without it:
 
+  /identity       who this service is, and what it cannot reach
+  /config         the read scope and the budgets
+  /catalog        the companions
+  /thread         the provenance entries
+  /metrics.json   the headline figures
+  /standards      the audit
 
-@app.get("/thread/view", response_class=HTMLResponse)
-def thread_view(request: Request, limit: int = 300) -> str:
-    """The thread as the graph it is.
-
-    The product is named for a thread you can follow back, and rendering it as
-    a list asks the reader to do the walking in their head. Here a click lights
-    the whole path from an outcome to the pull request that caused it.
-    """
-    entries = [e.to_doc() for e in ledger().all()[-limit:]]
-    wakeups = len(_WATCHER.wakeups) if _WATCHER is not None else 0
-    return render_thread(entries, ROLE, wakeups, nonce=_nonce(request))
+To build it:  cd web && npm ci && npm run build
+"""
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, limit: int = 300) -> str:
-    """The overview: is the boundary holding, and is the fleet awake.
+def index() -> Response:
+    """The application, or a plain account of why it is not here.
 
-    This used to be a three-row identity card. It was true and it answered a
-    question nobody had, because the interesting thing about a privilege
-    boundary is not that it is configured, it is that it held while work was
-    happening. So the same three rows are still here, now next to the thread
-    that shows what they refused.
+    Registered whether or not the build exists, rather than only when it does.
+    `openapi.yaml` is generated from these routes and CI fails on drift, and CI
+    checks out a tree with no `web/dist` in it, so a route that appeared only
+    when the directory did would make the committed document depend on which
+    machine generated it.
+
+    503 rather than a 200 carrying an apology. A service whose interface is
+    missing is not serving that interface, and the deployed check that fetches
+    this path should go red rather than pass on a page of text.
     """
-    entries, total = _page_data(limit)
-    return render_overview(
-        identity(),
-        watch(),
-        entries,
-        total=total,
-        config=config(),
-        metrics=summarise(entries),
-        nonce=_nonce(request),
+    document = WEB_DIST / "index.html"
+    if not document.is_file():
+        return PlainTextResponse(NOT_BUILT, status_code=503)
+    # no-cache means revalidate, not "do not store". The document names asset
+    # files by content hash, so a stale copy of it points a browser at bundles
+    # the new deployment no longer has.
+    return FileResponse(
+        document, media_type="text/html", headers={"Cache-Control": "no-cache"}
     )
+
+
+# The three URLs that used to render a page here. A redirect rather than a
+# deletion: they are in the README, in the recorded demo, and in the comments
+# of merged pull requests, and a 404 tells somebody following one of those that
+# the thing is gone rather than that it moved.
+#
+# 302 rather than 301. A browser caches a permanent redirect until its cache is
+# cleared, and this interface is a day old; pinning a URL that hard is not a
+# claim this build has earned.
+_MOVED = 302
+
+
+@app.get("/thread/view", response_class=RedirectResponse, status_code=_MOVED)
+def thread_view_moved() -> RedirectResponse:
+    """The thread, now drawn by the application.
+
+    This is the URL the README leads with and the one the recorded demo opens,
+    so it keeps working. What it opens is the same graph over the same entries,
+    fetched from /thread rather than rendered here.
+    """
+    return RedirectResponse("/#/thread", status_code=_MOVED)
+
+
+@app.get("/runs", response_class=RedirectResponse, status_code=_MOVED)
+def runs_moved() -> RedirectResponse:
+    """What ran and where each run stopped, which the thread screen groups by
+    run and shows in the same place."""
+    return RedirectResponse("/#/thread", status_code=_MOVED)
+
+
+@app.get("/fleet", response_class=RedirectResponse, status_code=_MOVED)
+def fleet_moved() -> RedirectResponse:
+    """The companions and the boundary they sit behind, which the application
+    draws as one picture instead of two tables."""
+    return RedirectResponse("/#/boundary", status_code=_MOVED)

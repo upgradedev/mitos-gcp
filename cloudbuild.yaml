@@ -47,6 +47,27 @@ steps:
         test "$got" = "${_SHA}" || { echo "expected ${_SHA}"; exit 1; }
         test "$got" != "unknown" || { echo "no sha was passed to the build"; exit 1; }
 
+  # The interface is built inside the image now. An image whose first stage
+  # built it and whose second stage failed to copy it deploys perfectly, answers
+  # every JSON endpoint, and serves 503 at /. Asserted here, where the fix is a
+  # rebuild, rather than after a deployment, where it is a rollback.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -o pipefail
+        docker run --rm --entrypoint sh ${_REPO}:${_SHA} -c 'test -f /app/web/dist/index.html' \
+          || { echo "the image has no interface in it"; exit 1; }
+        docker run --rm --entrypoint sh ${_REPO}:${_SHA} -c 'ls /app/web/dist/assets/*.js' \
+          || { echo "the image has no bundle in it"; exit 1; }
+        # The build stage installs 135 packages. None of them belong in the
+        # image that, deployed as the writer, holds the only credential in the
+        # fleet that can change anything.
+        docker run --rm --entrypoint sh ${_REPO}:${_SHA} -c 'test ! -e /app/web/node_modules' \
+          || { echo "node_modules reached the runtime image"; exit 1; }
+        echo "the interface is in the image, and the packages that built it are not"
+
 images:
   - ${_REPO}:${_SHA}
   - ${_REPO}:latest

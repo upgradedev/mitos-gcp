@@ -1,0 +1,396 @@
+/* The boundary.
+ *
+ * Same eight tones as the thread, same source: service/thread_view.py
+ * KIND_STYLE. Red is a refusal, green is the one path that can write, grey is
+ * a thing this page could not check.
+ *
+ * The picture is built from real boxes and rules rather than an SVG, because
+ * it has to stay legible at 375 wide, where a scaled drawing puts the labels
+ * below reading size. No style attributes: the policy refuses them.
+ */
+
+.mitos-boundary {
+  --bg: #fbfbfd;
+  --fg: #1b1b1f;
+  --dim: #5f5d66;
+  --line: #dcdce4;
+  --card: #ffffff;
+  --raised: #f2f2f6;
+
+  --tone-refusal: #c62f2f;
+  --tone-write: #1f7a2e;
+  --tone-quiet: #6f6c76;
+  --tone-route: #3f66c4;
+  --tone-parked: #8a6a00;
+
+  --tint-refusal: rgba(255, 107, 107, 0.18);
+  --tint-write: rgba(95, 215, 95, 0.22);
+  --tint-quiet: rgba(138, 135, 144, 0.14);
+  --tint-route: rgba(122, 162, 247, 0.18);
+  --tint-parked: rgba(255, 215, 95, 0.28);
+
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  min-height: 100%;
+}
+
+html.dark .mitos-boundary {
+  --bg: #0f0f12;
+  --fg: #e8e6ea;
+  --dim: #98959e;
+  --line: #2a2a31;
+  --card: #17171c;
+  --raised: #1f1f26;
+
+  --tone-refusal: #ff6b6b;
+  --tone-write: #5fd75f;
+  --tone-quiet: #8a8790;
+  --tone-route: #7aa2f7;
+  --tone-parked: #ffd75f;
+}
+
+.mitos-boundary *,
+.mitos-boundary *::before,
+.mitos-boundary *::after {
+  box-sizing: border-box;
+}
+
+.mitos-boundary__head {
+  padding: 1.25rem 1rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.mitos-boundary__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.mitos-boundary__lede {
+  margin: 0.4rem 0 0;
+  max-width: 62ch;
+  color: var(--dim);
+  font-size: 0.92rem;
+}
+
+.mitos-boundary__body {
+  padding: 1.25rem 1rem 3rem;
+  max-width: 68rem;
+}
+
+.mitos-boundary__section {
+  margin-top: 2rem;
+}
+
+.mitos-boundary__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin-bottom: 0.6rem;
+}
+
+.mitos-boundary__note {
+  color: var(--dim);
+  font-size: 0.88rem;
+  max-width: 62ch;
+  margin: 0 0 1rem;
+}
+
+/* ---- the picture: one lane per service --------------------------------- */
+
+.mitos-lane {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.85rem;
+  margin-bottom: 0.85rem;
+}
+
+.mitos-lane.is-measured {
+  border-color: var(--tone-refusal);
+}
+
+/* An identity this page could not read is drawn as an outline, so the
+ * asymmetry between measured and unverified is visible before it is read. */
+.mitos-lane.is-unverified {
+  border-style: dashed;
+  background: none;
+}
+
+.mitos-lane__who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.mitos-lane__name {
+  font-weight: 650;
+  font-size: 0.98rem;
+}
+
+.mitos-lane__as {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.mitos-lane__road {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  align-items: stretch;
+}
+
+@media (min-width: 760px) {
+  .mitos-lane__road {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.mitos-gate {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  background: var(--raised);
+  position: relative;
+}
+
+.mitos-gate.tone-refusal {
+  background: var(--tint-refusal);
+  border-color: var(--tone-refusal);
+}
+
+.mitos-gate.tone-quiet {
+  background: var(--tint-quiet);
+}
+
+.mitos-gate.tone-write {
+  background: var(--tint-write);
+  border-color: var(--tone-write);
+}
+
+.mitos-gate__where {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+
+.mitos-gate__what {
+  font-size: 0.86rem;
+  margin-top: 0.15rem;
+}
+
+.mitos-gate__verdict {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.mitos-gate__verdict.tone-refusal {
+  color: var(--tone-refusal);
+}
+
+.mitos-gate__verdict.tone-quiet {
+  color: var(--tone-quiet);
+}
+
+.mitos-gate__span {
+  grid-column: 1 / -1;
+}
+
+.mitos-lane__end {
+  margin-top: 0.6rem;
+  font-size: 0.86rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--line);
+}
+
+.mitos-lane__end b {
+  font-weight: 650;
+}
+
+/* ---- the two locks, told as a claim ------------------------------------ */
+
+.mitos-locks {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 760px) {
+  .mitos-locks {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.mitos-lock {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: var(--card);
+}
+
+.mitos-lock__rank {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+
+.mitos-lock__name {
+  font-weight: 650;
+  margin-top: 0.15rem;
+}
+
+.mitos-lock__body {
+  font-size: 0.86rem;
+  color: var(--dim);
+  margin-top: 0.35rem;
+}
+
+.mitos-lock.is-loadbearing {
+  border-color: var(--tone-refusal);
+  border-width: 2px;
+}
+
+/* ---- evidence ---------------------------------------------------------- */
+
+.mitos-evidence {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mitos-evidence__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.mitos-evidence__row:last-child {
+  border-bottom: 0;
+}
+
+.mitos-evidence__key {
+  color: var(--dim);
+}
+
+.mitos-evidence__val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+  flex: 1 1 12rem;
+}
+
+.mitos-quote {
+  border-left: 3px solid var(--tone-refusal);
+  background: var(--tint-refusal);
+  border-radius: 0 6px 6px 0;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-quote__source {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.mitos-refusal-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mitos-badge {
+  display: inline-block;
+  padding: 0.02rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.71rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mitos-badge.tone-refusal {
+  background: var(--tint-refusal);
+  color: var(--tone-refusal);
+}
+
+.mitos-badge.tone-write {
+  background: var(--tint-write);
+  color: var(--tone-write);
+}
+
+.mitos-badge.tone-quiet {
+  background: var(--tint-quiet);
+  color: var(--tone-quiet);
+}
+
+.mitos-unchecked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.86rem;
+  color: var(--dim);
+}
+
+.mitos-unchecked li {
+  padding: 0.35rem 0 0.35rem 1rem;
+  position: relative;
+  overflow-wrap: anywhere;
+}
+
+.mitos-unchecked li::before {
+  content: "?";
+  position: absolute;
+  left: 0;
+  color: var(--tone-quiet);
+  font-weight: 650;
+}
+
+.mitos-boundary__state {
+  padding: 2rem 1rem;
+  max-width: 62ch;
+}
+
+.mitos-boundary__state-title {
+  font-weight: 650;
+  margin-bottom: 0.4rem;
+}
+
+.mitos-boundary__state-body {
+  color: var(--dim);
+  font-size: 0.88rem;
+}
+
+.mitos-boundary__state-detail {
+  margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

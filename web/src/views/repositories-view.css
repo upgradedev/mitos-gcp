@@ -1,0 +1,806 @@
+/* The repositories view.
+ *
+ * Same eight tones as the thread and the boundary, same source:
+ * service/thread_view.py KIND_STYLE. Nothing new is invented here, because a
+ * second palette for the same run kinds would drift from the first. Red is a
+ * refusal or a failure, green is a pass, yellow is undecided, orange is a
+ * raised hand, grey is a thing nobody measured.
+ *
+ * No style attributes anywhere: the deployed policy is script-src and
+ * style-src by nonce with no unsafe-inline, so every value lives in a class.
+ *
+ * The shell sets darkMode: "class" and index.html ships class="dark", so the
+ * light values are the base and html.dark overrides them.
+ *
+ * There is no animation in this file at all. That is the cheapest way to
+ * respect prefers-reduced-motion, and index.css already neutralises motion
+ * globally for anyone who asks for it.
+ */
+
+.mitos-repos {
+  --bg: #fbfbfd;
+  --fg: #1b1b1f;
+  --dim: #5f5d66;
+  --line: #dcdce4;
+  --card: #ffffff;
+  --raised: #f2f2f6;
+
+  --tone-trigger: #2f9a9a;
+  --tone-route: #3f66c4;
+  --tone-quiet: #6f6c76;
+  --tone-refusal: #c62f2f;
+  --tone-parked: #8a6a00;
+  --tone-plan: #3a3a42;
+  --tone-write: #1f7a2e;
+  --tone-finding: #b25a17;
+
+  --tint-trigger: rgba(95, 215, 215, 0.18);
+  --tint-route: rgba(122, 162, 247, 0.18);
+  --tint-quiet: rgba(138, 135, 144, 0.14);
+  --tint-refusal: rgba(255, 107, 107, 0.18);
+  --tint-parked: rgba(255, 215, 95, 0.28);
+  --tint-plan: rgba(58, 58, 66, 0.1);
+  --tint-write: rgba(95, 215, 95, 0.22);
+  --tint-finding: rgba(255, 158, 100, 0.22);
+
+  /* The dot keeps the exact hex from the server vocabulary in both themes.
+   * The text tones above are the same hues taken darker, because #ffd75f on a
+   * white page is not readable and an unreadable label carries no meaning. */
+  --dot-trigger: #5fd7d7;
+  --dot-route: #7aa2f7;
+  --dot-quiet: #8a8790;
+  --dot-refusal: #ff6b6b;
+  --dot-parked: #ffd75f;
+  --dot-plan: #3a3a42;
+  --dot-write: #5fd75f;
+  --dot-finding: #ff9e64;
+
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  min-height: 100%;
+}
+
+html.dark .mitos-repos {
+  --bg: #0f0f12;
+  --fg: #e8e6ea;
+  --dim: #98959e;
+  --line: #2a2a31;
+  --card: #17171c;
+  --raised: #1f1f26;
+
+  --tone-trigger: #5fd7d7;
+  --tone-route: #7aa2f7;
+  --tone-quiet: #8a8790;
+  --tone-refusal: #ff6b6b;
+  --tone-parked: #ffd75f;
+  --tone-plan: #ffffff;
+  --tone-write: #5fd75f;
+  --tone-finding: #ff9e64;
+
+  --dot-plan: #ffffff;
+}
+
+.mitos-repos *,
+.mitos-repos *::before,
+.mitos-repos *::after {
+  box-sizing: border-box;
+}
+
+.mitos-repos :focus-visible {
+  outline: 2px solid var(--tone-route);
+  outline-offset: -2px;
+}
+
+/* ---- header ------------------------------------------------------------ */
+
+.mitos-repos__head {
+  padding: 1.25rem 1rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.mitos-repos__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.mitos-repos__lede {
+  margin: 0.4rem 0 0;
+  max-width: 62ch;
+  color: var(--dim);
+  font-size: 0.92rem;
+}
+
+.mitos-repos__questions {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  max-width: 62ch;
+}
+
+.mitos-repos__questions li {
+  font-size: 0.78rem;
+  color: var(--dim);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+}
+
+.mitos-repos__body {
+  padding: 1.25rem 1rem 3rem;
+  max-width: 76rem;
+}
+
+.mitos-repos__section {
+  margin-top: 2.25rem;
+}
+
+.mitos-repos__section:first-child {
+  margin-top: 0;
+}
+
+.mitos-repos__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin: 0 0 0.6rem;
+}
+
+.mitos-repos__note {
+  color: var(--dim);
+  font-size: 0.88rem;
+  max-width: 66ch;
+  margin: 0 0 1rem;
+}
+
+.mitos-repos__note a,
+.mitos-repos__lede a {
+  color: var(--tone-route);
+}
+
+.mitos-repos__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  font-size: 0.82rem;
+  color: var(--dim);
+  margin-bottom: 0.75rem;
+}
+
+.mitos-repos__facts b {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.mitos-repos__caveat {
+  font-size: 0.82rem;
+  color: var(--dim);
+  border-left: 3px solid var(--tone-parked);
+  background: var(--tint-parked);
+  border-radius: 0 6px 6px 0;
+  padding: 0.55rem 0.7rem;
+  margin: 0 0 1rem;
+  max-width: 66ch;
+}
+
+/* ---- the two panes ----------------------------------------------------- */
+
+.mitos-repos__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .mitos-repos__layout {
+    grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
+  }
+}
+
+.mitos-repos__pane {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.mitos-repos__pane-head {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+}
+
+/* ---- the list of repositories ------------------------------------------ */
+
+.mitos-subjects {
+  padding: 0.4rem;
+}
+
+.mitos-subjects__group {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  padding: 0.7rem 0.35rem 0.3rem;
+}
+
+.mitos-subject {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0.5rem 0.55rem;
+  cursor: pointer;
+}
+
+.mitos-subject:hover {
+  background: var(--raised);
+}
+
+.mitos-subject.is-open {
+  background: var(--tint-route);
+  border-color: var(--tone-route);
+}
+
+.mitos-subject__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.6rem;
+}
+
+.mitos-subject__name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.mitos-subject__sub {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--dim);
+  margin-top: 0.15rem;
+}
+
+.mitos-subject__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 0.35rem;
+}
+
+.mitos-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+
+.mitos-dot.tone-trigger { background: var(--dot-trigger); }
+.mitos-dot.tone-route { background: var(--dot-route); }
+.mitos-dot.tone-quiet { background: var(--dot-quiet); }
+.mitos-dot.tone-refusal { background: var(--dot-refusal); }
+.mitos-dot.tone-parked { background: var(--dot-parked); }
+.mitos-dot.tone-plan { background: var(--dot-plan); }
+.mitos-dot.tone-write { background: var(--dot-write); }
+.mitos-dot.tone-finding { background: var(--dot-finding); }
+
+/* ---- the history of one repository ------------------------------------- */
+
+.mitos-history {
+  padding: 0.75rem;
+}
+
+.mitos-history__intro {
+  font-size: 0.86rem;
+  color: var(--dim);
+  margin: 0 0 0.85rem;
+  max-width: 66ch;
+}
+
+.mitos-history__intro b {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.mitos-run {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+.mitos-run__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+}
+
+.mitos-run__name {
+  font-weight: 650;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.mitos-run__when {
+  font-size: 0.74rem;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.mitos-run__title {
+  font-size: 0.84rem;
+  color: var(--dim);
+  margin-top: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-run__outcome {
+  font-size: 0.86rem;
+  margin-top: 0.35rem;
+}
+
+.mitos-run__outcome b {
+  font-weight: 650;
+}
+
+.mitos-run__meta {
+  font-size: 0.75rem;
+  color: var(--dim);
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-run__meta code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-run__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 0.4rem;
+}
+
+.mitos-empty {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.9rem;
+  font-size: 0.88rem;
+  color: var(--dim);
+  background: none;
+  max-width: 66ch;
+}
+
+.mitos-empty b {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+/* ---- the audit form ---------------------------------------------------- */
+
+.mitos-form {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.9rem;
+  max-width: 46rem;
+}
+
+.mitos-form__field {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.mitos-form__label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 650;
+  margin-bottom: 0.25rem;
+}
+
+.mitos-form__hint {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--dim);
+  margin-bottom: 0.35rem;
+}
+
+.mitos-form__input {
+  width: 100%;
+  max-width: 26rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.mitos-form__input[aria-invalid="true"] {
+  border-color: var(--tone-refusal);
+  border-width: 2px;
+}
+
+.mitos-form__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.mitos-button {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--tone-route);
+  background: var(--tint-route);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.mitos-button:hover {
+  background: var(--raised);
+}
+
+.mitos-button.is-secondary {
+  border-color: var(--line);
+  background: var(--raised);
+  font-weight: 500;
+}
+
+.mitos-form__error {
+  margin-top: 0.6rem;
+  border-left: 3px solid var(--tone-refusal);
+  background: var(--tint-refusal);
+  border-radius: 0 6px 6px 0;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+  max-width: 60ch;
+}
+
+.mitos-form__error-detail {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mitos-form__limit {
+  margin-top: 0.7rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--dim);
+  max-width: 66ch;
+}
+
+.mitos-form__limit b {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+/* ---- the audit result -------------------------------------------------- */
+
+.mitos-audit {
+  margin-top: 1.25rem;
+}
+
+.mitos-audit__what {
+  font-size: 0.88rem;
+  margin-bottom: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.mitos-audit__what code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.mitos-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.mitos-tile {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.5rem 0.6rem;
+  min-width: 0;
+}
+
+.mitos-tile__n {
+  font-size: 1.35rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.mitos-tile__k {
+  font-size: 0.74rem;
+  color: var(--dim);
+  margin-top: 0.1rem;
+}
+
+.mitos-tile.tone-refusal { border-color: var(--tone-refusal); }
+.mitos-tile.tone-refusal .mitos-tile__n { color: var(--tone-refusal); }
+.mitos-tile.tone-write { border-color: var(--tone-write); }
+.mitos-tile.tone-write .mitos-tile__n { color: var(--tone-write); }
+.mitos-tile.tone-parked { border-color: var(--tone-parked); border-style: dashed; }
+.mitos-tile.tone-parked .mitos-tile__n { color: var(--tone-parked); }
+
+.mitos-finding {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Undecided is drawn as an outline rather than a filled card, so it cannot be
+ * mistaken for a settled answer even before the label is read. */
+.mitos-finding.is-undecided {
+  border-style: dashed;
+  border-width: 2px;
+  background: none;
+}
+
+.mitos-finding.tone-refusal { border-color: var(--tone-refusal); }
+.mitos-finding.tone-finding { border-color: var(--tone-finding); }
+.mitos-finding.tone-parked { border-color: var(--tone-parked); }
+.mitos-finding.tone-write { border-color: var(--tone-write); }
+.mitos-finding.tone-quiet { border-color: var(--line); }
+
+.mitos-finding__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.5rem;
+}
+
+.mitos-finding__rule {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.mitos-finding__meaning {
+  font-size: 0.8rem;
+  color: var(--dim);
+  margin-top: 0.2rem;
+}
+
+.mitos-finding__rows {
+  margin-top: 0.45rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.4rem;
+}
+
+.mitos-finding__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.05rem;
+  font-size: 0.82rem;
+  padding: 0.2rem 0;
+}
+
+@media (min-width: 700px) {
+  .mitos-finding__row {
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+}
+
+.mitos-finding__key {
+  color: var(--dim);
+  font-size: 0.76rem;
+}
+
+.mitos-finding__val {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.mitos-finding__val code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---- connecting one ---------------------------------------------------- */
+
+.mitos-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 900px) {
+  .mitos-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.mitos-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.85rem;
+  min-width: 0;
+}
+
+.mitos-step.is-limited {
+  border-color: var(--tone-parked);
+  border-width: 2px;
+}
+
+.mitos-step__rank {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+
+.mitos-step__name {
+  font-weight: 650;
+  margin-top: 0.15rem;
+}
+
+.mitos-step__body {
+  font-size: 0.86rem;
+  color: var(--dim);
+  margin-top: 0.35rem;
+}
+
+.mitos-step__limit {
+  font-size: 0.86rem;
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.45rem;
+}
+
+.mitos-step__limit b {
+  font-weight: 650;
+}
+
+/* ---- shared bits ------------------------------------------------------- */
+
+.mitos-evidence {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mitos-evidence__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+  background: var(--card);
+}
+
+.mitos-evidence__row:last-child {
+  border-bottom: 0;
+}
+
+.mitos-evidence__key {
+  color: var(--dim);
+  min-width: 0;
+}
+
+.mitos-evidence__val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.mitos-quote {
+  border-left: 3px solid var(--tone-quiet);
+  background: var(--tint-quiet);
+  border-radius: 0 6px 6px 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+  margin-top: 0.75rem;
+  max-width: 66ch;
+}
+
+.mitos-quote__source {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.74rem;
+  color: var(--dim);
+}
+
+.mitos-badge {
+  display: inline-block;
+  padding: 0.02rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.71rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mitos-badge.tone-trigger { background: var(--tint-trigger); color: var(--tone-trigger); }
+.mitos-badge.tone-route { background: var(--tint-route); color: var(--tone-route); }
+.mitos-badge.tone-quiet { background: var(--tint-quiet); color: var(--tone-quiet); }
+.mitos-badge.tone-refusal { background: var(--tint-refusal); color: var(--tone-refusal); }
+.mitos-badge.tone-parked { background: var(--tint-parked); color: var(--tone-parked); }
+.mitos-badge.tone-plan { background: var(--tint-plan); color: var(--tone-plan); }
+.mitos-badge.tone-write { background: var(--tint-write); color: var(--tone-write); }
+.mitos-badge.tone-finding { background: var(--tint-finding); color: var(--tone-finding); }
+
+.mitos-state {
+  padding: 1.5rem 0;
+  max-width: 62ch;
+}
+
+.mitos-state__title {
+  font-weight: 650;
+  margin-bottom: 0.4rem;
+}
+
+.mitos-state__body {
+  color: var(--dim);
+  font-size: 0.88rem;
+}
+
+.mitos-state__detail {
+  margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

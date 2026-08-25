@@ -1,0 +1,25 @@
+# What must never reach the build context.
+#
+# web/node_modules is the load-bearing line. rollup and esbuild ship
+# platform-specific native binaries, this tree is built on Windows and the
+# image is Linux, so a copied node_modules does not slow the build down, it
+# breaks it. It is also 116 MB of upload on every build.
+#
+# web/dist is excluded for a different reason: the image builds it. A stale
+# dist copied in from a developer's machine would be served as if it were the
+# thing the Dockerfile built, and the served interface would not match the
+# commit the image reports.
+web/node_modules
+web/dist
+web/*.tsbuildinfo
+
+.git
+.github
+tests
+video
+infra
+__pycache__
+*.pyc
+.venv
+.coverage
+htmlcov
