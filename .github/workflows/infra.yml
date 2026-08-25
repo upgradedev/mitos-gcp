@@ -275,6 +275,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # To start the deployed pyramid at the end of this job. See that step.
+      actions: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
@@ -296,3 +298,17 @@ jobs:
             -var="image=${{ inputs.image }}"
           terraform -chdir=infra output -json > /tmp/outputs.json
           cat /tmp/outputs.json
+
+      # ADR-010 says the pyramid runs "on a schedule, on demand, and after every
+      # apply". The first two were true and the third was not: `deployed.yml`
+      # had only `schedule` and `workflow_dispatch`, so every apply relied on a
+      # person remembering. That is precisely the gap the ADR was written about,
+      # left open in the workflow that closes it.
+      #
+      # Not `if: success()` by accident — a failed apply can still have changed
+      # half the project, and that is the state most worth measuring.
+      - name: Run the deployed pyramid against what was just applied
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deployed.yml --ref ${{ github.ref_name }}
