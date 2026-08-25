@@ -180,7 +180,12 @@ jobs:
       # repository changed; every build went red while it sat still.
       #
       # Pinned to the versions of the last green run, 32770320303.
-      - run: pip install -r requirements/spike.txt google-cloud-firestore==2.21.0 google-api-core==2.34.0 google-cloud-core==2.6.1
+      # `requirements.txt` as well as the spike extras. Without it this job
+      # could not import `service/main.py` at all, so no integration test
+      # had ever covered the service module: the first one to try failed
+      # on `ModuleNotFoundError: No module named 'jwt'`, which the
+      # deployed image has and this job did not.
+      - run: pip install -r requirements.txt -r requirements/spike.txt google-cloud-firestore==2.21.0 google-api-core==2.34.0 google-cloud-core==2.6.1
 
       # The runner disables the gcloud component manager and the emulator is
       # not in the default apt repos, so it comes from Google's own image.
