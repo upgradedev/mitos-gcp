@@ -103,9 +103,9 @@ flowchart TB
 
 **What the last box is, exactly.** The writer pushes a branch to the specification repository and returns a compare URL and a receipt naming the approval that authorised it. It does **not** open a pull request on the code repository and it does **not** post a status check, and `open_pull_request` and `set_commit_status` remain names in the guard's deny list that nothing may call.
 
-This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`) — five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.
+This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`). Five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.
 
-None of it has executed against a real repository yet, because no GitHub App is installed. Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested" — which is why the false version survived for weeks, and why it is worth naming rather than quietly editing.
+None of it has executed against a real repository yet, because no GitHub App is installed. Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested". That is why the false version survived for weeks, and why it is worth naming rather than quietly editing.
 
 The two dotted red-herring arrows into Secret Manager are the point of the whole design. The reader
 and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code
@@ -173,8 +173,8 @@ curl -s https://mitos-reader-437828525303.europe-west1.run.app/identity
 
 That is one command rather than two on purpose. This used to print a second curl
 against the writer, and anyone who ran it got a Google 403 HTML page, because the
-writer and the evaluator refuse anonymous callers — only the reader's service
-account may invoke them. That refusal is the architecture working, and
+writer and the evaluator refuse anonymous callers, because only the reader's
+service account may invoke them. That refusal is the architecture working, and
 `deployed.yml` fails the build if either of them ever answers a stranger, so the
 instruction was wrong rather than the deployment.
 
