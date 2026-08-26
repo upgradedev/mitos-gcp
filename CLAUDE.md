@@ -9,11 +9,13 @@ new contributor, which is the bar that section sets.
 # ORG_STANDARDS §1, session rescan. Run before changing anything.
 git log --oneline -10
 git status
-find tests -name "test_*.py" | wc -l          # baseline 15 files, 180 passing
+find tests -name "test_*.py" | wc -l          # 41 files, 675 passing, 2026-08-26
 python scripts/generate_openapi.py --check     # the spec must match the app
 ```
 
-Stop and investigate if the test count drops.
+Stop and investigate if the test count drops. The number above is a reading,
+not a target: it was `baseline 15 files, 180 passing` for long enough that a
+drop of two hundred would have looked like growth. Re-date it when you change it.
 
 The offline path is standard library only. `pip install -r requirements/spike.txt`
 is needed only for the ADK and Firestore suites.
@@ -52,8 +54,10 @@ itself. A gate a model can argue its way out of is not a gate.
 **Consequence:** a wrong or compromised model can make the fleet do more work or
 be more cautious, never less. Degradation is safe by construction: an unreachable
 classifier contributes nothing. `evaluator._with_critic` and
-`fleet.route_with_model` both carry structural tests asserting no subtracting
-branch exists.
+`fleet.route_with_model` are both union-only by construction, but only the
+former carries a structural test asserting that no subtracting branch exists.
+The router's guarantee rests on the code and on behavioural tests over the
+backlog, which is weaker, and this paragraph claimed otherwise for weeks.
 
 ### ADR-003 — The gate is deterministic; the model is a second opinion
 **Date:** 2026-08-19 | **Status:** Implemented
