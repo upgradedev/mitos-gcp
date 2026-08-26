@@ -406,14 +406,28 @@ def _public_url(request: Request) -> str:
     return configured
 
 
-def _github_app_metadata() -> dict[str, Any]:
+def _read_github_app_metadata() -> tuple[dict[str, Any], str]:
+    """The App record, and why it could not be read when it could not.
+
+    `{}` means one of two very different things, and the callers below that only
+    need to mint a token are right not to care: no credentials either way. The
+    status endpoint is not one of those callers. Answering `configured: false`
+    when the truth is "cannot tell" invites somebody to create a second GitHub
+    App while the first one exists, and cleaning that up is manual work on
+    github.com.
+    """
     try:
         from google.cloud import firestore  # noqa: PLC0415
 
         snapshot = firestore.Client(project=PROJECT).collection("system").document("github_app").get()
-        return snapshot.to_dict() if snapshot.exists else {}
-    except Exception:  # noqa: BLE001 - status must remain useful before Firestore setup
-        return {}
+        return (snapshot.to_dict() if snapshot.exists else {}), ""
+    except Exception as exc:  # noqa: BLE001 - status must remain useful before Firestore setup
+        return {}, f"{type(exc).__name__}: {exc}"
+
+
+def _github_app_metadata() -> dict[str, Any]:
+    """For callers that cannot act without credentials either way."""
+    return _read_github_app_metadata()[0]
 
 
 def _connected_repositories() -> list[str]:
@@ -938,11 +952,15 @@ def session_logout(request: Request) -> RedirectResponse:
 @app.get("/github/app/status")
 def github_app_status() -> dict[str, Any]:
     """Expose readiness and installation metadata, never credentials."""
-    metadata = _github_app_metadata()
+    metadata, unavailable = _read_github_app_metadata()
     slug = str(metadata.get("slug") or os.environ.get("MITOS_GITHUB_APP_SLUG", "")).strip()
     secret_configured = bool(metadata.get("credentials_stored")) or _webhook_secret() != NO_SECRET_CONFIGURED
     return {
-        "configured": bool(slug and secret_configured),
+        # `null`, not `false`, when the record could not be read. False here
+        # means "there is no App", and saying that when the truth is "the store
+        # did not answer" is an invitation to create a second one.
+        "configured": None if unavailable else bool(slug and secret_configured),
+        "status_unavailable": unavailable or None,
         "app_slug": slug or None,
         "install_url": f"/github/app/install" if slug else None,
         "create_url": "/github/app/new",
