@@ -2004,6 +2004,30 @@ def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
     return [e.to_doc() for e in everything[-limit:]], len(everything)
 
 
+# One audit of this repository costs 31 requests to api.github.com, measured by
+# counting them, and unauthenticated GitHub allows 60 an hour PER ADDRESS. Cloud
+# Run egresses from a shared Google address, so the quota is not even ours
+# alone: two audits an hour exhausts it, and the endpoint then answers 502 for
+# everybody until the window resets.
+#
+# That is not a hypothetical. `/standards.json?repository=` returned an empty
+# result for every repository for at least an hour, which is how the silent
+# failure above was found in the first place, and it came back on its own when
+# the window rolled over. Nothing was fixed; the clock moved.
+#
+# So a result is kept for ten minutes. A judge clicking the same repository
+# twice pays once, and the second answer is instant rather than a 502. Ten
+# minutes because the honest tension is between a stale verdict and no verdict
+# at all, and a repository does not usually change inside ten minutes while a
+# rate limit certainly does not clear inside them.
+#
+# In memory and per process, deliberately. Firestore would make this durable and
+# also make a read of somebody else's audit a read of somebody else's
+# repository listing, which is a sharing decision this has no reason to take.
+_AUDIT_TTL = float(os.environ.get("MITOS_AUDIT_TTL", "600"))
+_AUDIT_CACHE: dict[str, tuple[float, list[dict[str, Any]], dict[str, Any]]] = {}
+
+
 class CorpusUnreadable(Exception):
     """The repository could not be listed, so there is nothing to report on.
 
@@ -2030,6 +2054,22 @@ def _audit(
     between them, and a judge clicking a link should not be holding a socket
     open while that happens. It has a live test instead.
     """
+    if repository:
+        cached = _AUDIT_CACHE.get(repository)
+        if cached and time.time() - cached[0] < _AUDIT_TTL:
+            age = int(time.time() - cached[0])
+            return (
+                cached[1],
+                cached[2],
+                (
+                    f"Audited {age}s ago and kept, because one audit costs 31 "
+                    f"requests to the public GitHub API and an unauthenticated "
+                    f"caller gets 60 an hour. Without this, looking twice fails "
+                    f"the second time."
+                ),
+                "",
+            )
+
     try:
         corpus = build_corpus(repository, ref="HEAD", scope=AUDIT_SCOPE)
     except ValueError as exc:
@@ -2051,6 +2091,8 @@ def _audit(
             return [], {}, "", f"{repository} is not a repository this can read"
         raise CorpusUnreadable(repository or "", status, unreadable)
     result = check_repository(corpus)
+    findings = [f.as_dict() for f in result.results]
+    summary = result.summary.as_dict() if result.summary else {}
     # What was audited, always. Without a repository this reads the demo corpus,
     # and the payload said `"repository": null` and nothing else, while the
     # findings are phrased as flat statements: "there is no CLAUDE.md at the
@@ -2071,15 +2113,13 @@ def _audit(
         # they could not be determined.
         note = (
             "Read over the public GitHub API with no credential, which allows 60 "
-            "requests an hour. A repository large enough to exhaust that will "
-            "have rules reported as could not be determined rather than passed."
+            "requests an hour per address. One audit costs about 31 of them, "
+            "measured, so two an hour exhausts the quota and the next answer is "
+            "a 502 saying so rather than an empty result. Kept for ten minutes "
+            "so that looking twice costs once."
         )
-    return (
-        [f.as_dict() for f in result.results],
-        result.summary.as_dict() if result.summary else {},
-        note,
-        "",
-    )
+        _AUDIT_CACHE[repository] = (time.time(), findings, summary)
+    return findings, summary, note, ""
 
 
 @app.get("/metrics.json")
