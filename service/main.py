@@ -648,13 +648,41 @@ def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: in
     )
     if create_ref.status_code not in (201, 422):
         create_ref.raise_for_status()
+    # GitHub's contents API requires the blob sha of the file being replaced:
+    # "Required if you are updating a file." Without it, a PUT over a file that
+    # already exists is refused with 422.
+    #
+    # That is not the edge case here, it is the main one. What this publishes is
+    # a repaired document, so the path almost always exists already, and the
+    # only reason nobody hit it is that no GitHub App has ever been installed.
+    # Creating a new file still works without a sha, which is why the omission
+    # looked correct.
+    quoted = urllib.parse.quote(path, safe="/")
+    existing = httpx.get(
+        f"{api}/contents/{quoted}", headers=headers,
+        params={"ref": branch}, timeout=30.0,
+    )
+    payload: dict[str, Any] = {
+        "message": f"docs: apply Mitos suggestion for #{source_pr}",
+        "content": base64.b64encode(body.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if existing.status_code == 200:
+        document = existing.json()
+        # A directory answers with a list. Writing a file over a directory path
+        # cannot succeed, and failing here names the path rather than letting
+        # GitHub refuse a payload with a missing sha.
+        if not isinstance(document, dict):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{path} is a directory in this repository, not a file",
+            )
+        payload["sha"] = str(document.get("sha") or "")
+    elif existing.status_code != 404:
+        existing.raise_for_status()
+
     content = httpx.put(
-        f"{api}/contents/{urllib.parse.quote(path, safe='/')}", headers=headers,
-        json={
-            "message": f"docs: apply Mitos suggestion for #{source_pr}",
-            "content": base64.b64encode(body.encode("utf-8")).decode("ascii"),
-            "branch": branch,
-        }, timeout=30.0,
+        f"{api}/contents/{quoted}", headers=headers, json=payload, timeout=30.0,
     )
     content.raise_for_status()
     pull = httpx.post(
