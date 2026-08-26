@@ -99,11 +99,32 @@ def test_reading_something_outside_the_scope_raises_key_error():
         corpus(scope=("docs/",)).read("secrets.env")
 
 
-def test_an_unreachable_repository_is_empty_rather_than_an_exception():
-    """The agent finds nothing, says so, and the run is visibly thin instead of
-    silently wrong."""
+def test_an_unreachable_repository_is_empty_but_says_why():
+    """It is still empty for the agent, and it is no longer silent about it.
+
+    This used to assert only that `paths()` returns `[]`, with a docstring
+    saying the run would be "visibly thin instead of silently wrong". It was
+    silently wrong. `/standards.json?repository=owner/name` answered 200 with
+    zero findings and an empty summary for every repository anyone named,
+    including one that audits correctly from a laptop in twelve seconds, and
+    nothing in the logs said otherwise.
+
+    Returning `[]` is still right: an agent must not crash halfway through a run
+    because one listing failed. Discarding the reason was not.
+    """
     c = corpus(fail=True)
+
     assert c.paths() == []
+    assert c.failure, "the corpus cannot say why it is empty"
+
+
+def test_a_repository_that_is_simply_empty_reports_no_failure():
+    """The distinction the caller needs. Empty and unreadable look identical in
+    the return value and must not look identical to the caller."""
+    c = corpus(tree={"tree": []})
+
+    assert c.paths() == []
+    assert c.failure is None
 
 
 def test_the_tools_refuse_a_path_outside_the_scope_they_were_given():
