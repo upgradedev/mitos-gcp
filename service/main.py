@@ -2004,6 +2004,20 @@ def _page_data(limit: int) -> tuple[list[dict[str, Any]], int]:
     return [e.to_doc() for e in everything[-limit:]], len(everything)
 
 
+class CorpusUnreadable(Exception):
+    """The repository could not be listed, so there is nothing to report on.
+
+    Raised rather than returning an empty result, because an empty result is
+    indistinguishable from a clean audit and that is exactly how this failed.
+    """
+
+    def __init__(self, repository: str, status: Optional[int], detail: str) -> None:
+        super().__init__(detail)
+        self.repository = repository
+        self.status = status
+        self.detail = detail
+
+
 def _audit(
     repository: Optional[str] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, str]:
@@ -2020,8 +2034,35 @@ def _audit(
         corpus = build_corpus(repository, ref="HEAD", scope=AUDIT_SCOPE)
     except ValueError as exc:
         return [], {}, "", str(exc) or "that is not a repository name"
+
+    # An unreachable repository is not an empty one, and this endpoint used to
+    # report it as one: 200, zero findings, empty summary, for every repository
+    # anyone named. A caller cannot tell that from a clean audit of a repository
+    # with nothing in scope, and neither could the deployed check, which only
+    # ever asked for the demo corpus.
+    #
+    # Listing first, so the refusal happens before the rule engine runs over a
+    # file set that is empty for a reason nobody recorded.
+    corpus.paths()
+    unreadable = getattr(corpus, "failure", None)
+    if unreadable:
+        status = getattr(corpus, "status", None)
+        if status == 404:
+            return [], {}, "", f"{repository} is not a repository this can read"
+        raise CorpusUnreadable(repository or "", status, unreadable)
     result = check_repository(corpus)
-    note = ""
+    # What was audited, always. Without a repository this reads the demo corpus,
+    # and the payload said `"repository": null` and nothing else, while the
+    # findings are phrased as flat statements: "there is no CLAUDE.md at the
+    # repository root", severity critical. Read by somebody who has just opened
+    # /standards.json, that is a claim about their code, or about ours, and it
+    # is neither. It is true of a synthetic fixture.
+    note = (
+        "Audited the built-in demo corpus, the synthetic repository in "
+        "`src/mitos/fixtures.py` that the recorded demo and every offline test "
+        "use. Its failures are true of that fixture and of nothing else. Add "
+        "`?repository=owner/name` to audit real code."
+    )
     if repository:
         # Said on the page, not discovered by the reader when rules start coming
         # back undetermined. Unauthenticated GitHub allows 60 requests an hour
@@ -2053,6 +2094,27 @@ def metrics_json(limit: int = 300) -> dict[str, Any]:
     """
     entries, total = _page_data(limit)
     return {"window": {"shown": len(entries), "total": total}, **summarise(entries)}
+
+
+# 502 rather than 500: nothing here is broken, an upstream read failed, and the
+# caller needs to know which repository and why rather than being told nothing.
+@app.exception_handler(CorpusUnreadable)
+async def _corpus_unreadable(request, exc: CorpusUnreadable):
+    return JSONResponse(
+        status_code=502,
+        content={
+            "error": "this repository could not be read, so no audit was run",
+            "repository": exc.repository,
+            "upstream_status": exc.status,
+            "detail": exc.detail,
+            "fix": (
+                "the audit reads the public GitHub API with no credential, which "
+                "allows 60 requests an hour per address. A shared egress address "
+                "can be exhausted by other callers, and a private repository "
+                "cannot be read at all."
+            ),
+        },
+    )
 
 
 @app.get("/standards.json")

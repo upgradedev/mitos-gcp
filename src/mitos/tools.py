@@ -350,6 +350,12 @@ class GitHubCorpus:
         self.scope = tuple(scope) if scope else DEFAULT_PREFIXES
         self.timeout = timeout
         self._paths: Optional[list[str]] = None
+        # Why the listing came back empty, when it came back empty because
+        # something went wrong. `None` means nothing went wrong, which is not
+        # the same as the repository having no files in scope, and telling
+        # those two apart is the whole point of this attribute.
+        self.failure: Optional[str] = None
+        self.status: Optional[int] = None
         # Read once per run. An agent that opens the same specification twice is
         # normal, and paying for it twice is not.
         self._cache: dict[str, str] = {}
@@ -372,10 +378,42 @@ class GitHubCorpus:
             tree = _json.loads(
                 self._get(self.TREE.format(repo=self.repository, ref=self.ref))
             )
-        except Exception:
-            # An unreachable repository is an empty one as far as the agent is
-            # concerned. It will find nothing, say so, and the run is visibly
-            # thin rather than silently wrong.
+        except Exception as exc:  # noqa: BLE001 - every transport failure, recorded
+            # Still empty for the agent, which must not crash halfway through a
+            # run because one listing failed. But the reason is kept now.
+            #
+            # It used to be discarded, with a comment claiming the run would be
+            # "visibly thin rather than silently wrong". It was silently wrong.
+            # `/standards.json?repository=owner/name` answered 200 with zero
+            # findings and an empty summary for EVERY repository, including one
+            # that audits correctly from a laptop in twelve seconds, and nothing
+            # in the logs said otherwise because this line ate the exception
+            # without a word.
+            self.status = getattr(exc, "code", None)
+            self.failure = f"{type(exc).__name__}: {exc}"
+            import sys as _sys  # noqa: PLC0415
+
+            print(
+                _json.dumps({
+                    "event": "corpus.listing_failed",
+                    "repository": self.repository,
+                    "ref": self.ref,
+                    "status": self.status,
+                    "error": type(exc).__name__,
+                }),
+                file=_sys.stderr,
+                flush=True,
+            )
+            self._paths = []
+            return self._paths
+
+        # A 200 carrying something that is not a tree document is a failure
+        # like any other, and belongs in `failure` rather than raising out of
+        # here. Before this it left the try block as an AttributeError, so the
+        # one kind of bad answer that reaches this line uncaught was the one
+        # kind nothing recorded.
+        if not isinstance(tree, dict):
+            self.failure = f"the listing was {type(tree).__name__}, not a tree document"
             self._paths = []
             return self._paths
 

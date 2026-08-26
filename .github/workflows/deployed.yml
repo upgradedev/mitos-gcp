@@ -423,6 +423,53 @@ jobs:
                 f"{s['could_not_be_determined']} not")
           PY
 
+      - name: Naming a repository audits it, or says why it could not
+        run: |
+          set -o pipefail
+          # The parameter that was broken, and that nothing here ever used.
+          #
+          # `/standards.json?repository=owner/name` answered 200 with zero
+          # findings and an empty summary for EVERY repository. Not a rate
+          # limit and not one bad name: the same answer for a three-file public
+          # repository and for this one, which audits correctly from a laptop
+          # in twelve seconds. One `except Exception` turned any transport
+          # failure into an empty file list and discarded the reason, so the
+          # response was indistinguishable from a clean audit of a repository
+          # with nothing in scope.
+          #
+          # Every check in this file asked for the demo corpus, which needs no
+          # network, so the one gate watching production never touched the
+          # parameter that reaches out.
+          #
+          # Asserted as the invariant rather than as "GitHub is reachable from
+          # Cloud Run": this endpoint may return rules, or refuse and say why.
+          # It may not return nothing and call that success. Whether a shared
+          # egress address has GitHub quota left is a different question, and a
+          # gate that goes red on somebody else's rate limit is a gate people
+          # learn to ignore.
+          python - <<'PY'
+          import json, os, urllib.error, urllib.request
+
+          url = os.environ["READER"] + "/standards.json?repository=octocat/Hello-World"
+          try:
+              with urllib.request.urlopen(url, timeout=180) as response:
+                  body = json.loads(response.read())
+              rules = (body.get("summary") or {}).get("rules", 0)
+              assert rules > 0, (
+                  "200 with no rules is the silent failure this check exists for: "
+                  f"{json.dumps(body)[:400]}"
+              )
+              print(f"audited, {rules} rules")
+          except urllib.error.HTTPError as refused:
+              detail = json.loads(refused.read() or b"{}")
+              assert refused.code in (400, 502), f"unexpected {refused.code}: {detail}"
+              assert detail.get("detail") or detail.get("error"), (
+                  "it refused without saying why, which is the same silence in "
+                  "a different costume"
+              )
+              print(f"refused with {refused.code} and a reason: {detail.get('detail')}")
+          PY
+
       - name: A typo in the form is not a server error
         run: |
           set -o pipefail
