@@ -442,10 +442,13 @@ That cost an hour to find and `test_gemini_live.py` pins it.
 | `tests/integration` | the chore end to end, the ADK dispatcher, Firestore against the emulator, live Gemini |
 | `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
 
-**86% coverage against an 85% floor**, measured on `main` by
-[CI run 32738967814](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127):
-86.20%, 2725 statements, 376 missed. The command that produced it, and the whole
-of what it covers:
+**86% coverage against an 85% floor**, measured on `main` by the command below:
+86.03%, 2749 statements, 384 missed. This used to name one CI run in the prose
+and link a different one, which is the kind of error nobody catches by reading.
+The run the badge links,
+[32756367127](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127),
+reported 86.20% on 2725 statements when it ran, and more code has landed since.
+The command that produced the figures above, and the whole of what it covers:
 
 ```bash
 python -m pytest tests/unit tests/e2e tests/integration/test_chore.py \
@@ -457,7 +460,7 @@ Firestore adapter suite and the live Gemini suite run as separate CI jobs and si
 outside that number, so read it as coverage of the offline path rather than of
 everything that runs.
 
-**The margin is 1.20 points, and that is the honest number rather than a
+**The margin is 1.03 points, and that is the honest number rather than a
 comfortable one.** Coverage has sat near 86% on `main` since 2026-08-20
 ([run 32400213647](https://github.com/upgradedev/mitos-gcp/actions/runs/32400213647),
 86.06%) while the model, webhook and corpus layers landed. The floor stays at 85

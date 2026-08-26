@@ -110,3 +110,50 @@ def test_the_public_reader_is_still_the_one_that_answers():
         "the README no longer shows the one anonymous command that substantiates "
         "the boundary"
     )
+
+
+def test_every_run_the_readme_names_is_the_run_it_links():
+    """A number in the prose and a different number in the href.
+
+    The coverage passage read "CI run 32738967814" and pointed at run
+    32756367127. Nobody catches that by reading, because the rendered page shows
+    only one of the two, and anyone who follows the link lands on a real CI run
+    with real numbers on it. It stayed wrong through every review.
+    """
+    mismatched = [
+        f"prose says {named}, link goes to {linked}"
+        for named, linked in re.findall(
+            r"\[[^\]]*?(\d{9,})[^\]]*?\]\(https://github\.com/[^)]*?/runs/(\d+)", README
+        )
+        if named != linked
+    ]
+
+    assert not mismatched, "\n  ".join(["a run id in the text is not the one linked:"] + mismatched)
+
+
+def test_the_three_coverage_numbers_come_from_one_run():
+    """A weaker check than it first looks, and worth naming as such.
+
+    The percentage, the statement count and the miss count must agree with each
+    other. That catches someone updating one and not the others, which is the
+    likely edit.
+
+    It does NOT catch the figures being old, and the figures were old: the
+    previous set read 86.20%, 2725 statements, 376 missed, and 2349/2725 really
+    is 86.20%. They were internally consistent and 24 statements out of date.
+    Nothing here can tell that apart from correct without running coverage,
+    which the offline suite will not do. CI's `--cov-fail-under=85` catches the
+    percentage falling through the floor and nothing else about these numbers.
+    """
+    quoted = re.search(r"([0-9]+\.[0-9]+)%, ([0-9]+) statements, ([0-9]+) missed", README)
+    assert quoted, "the coverage passage no longer states a figure this test can check"
+
+    percent, statements, missed = (
+        float(quoted.group(1)), int(quoted.group(2)), int(quoted.group(3))
+    )
+    covered = statements - missed
+
+    assert abs(covered / statements * 100 - percent) < 0.05, (
+        f"{percent}% does not follow from {covered}/{statements}; the three "
+        f"numbers were copied from different runs"
+    )
