@@ -15,9 +15,10 @@ on:
   # SECOND run of this workflow for the same commit, and the two raced each
   # other for the Terraform state lock. One won and one died with
   # `Error 412: At least one of the pre-conditions you specified did not hold`,
-  # so every pull request touching infra got a red X on a coin toss, and the
-  # notes in the workspace called it a trap that had cost four commits in one
-  # day. It was not a trap. It was this trigger.
+  # so every pull request touching infra got a red X on a coin toss. It read as
+  # flakiness in a third party and it was neither flaky nor theirs: runs
+  # 32871342972 and 32871350549 on 652c375, and 32871106049 and 32871112624 on
+  # 4a20b0d, are two pairs of one push and one pull_request seconds apart.
   push:
     branches: [main]
     paths: [infra/**, .github/workflows/infra.yml]

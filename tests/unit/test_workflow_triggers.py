@@ -15,9 +15,16 @@ state file for the project, and the loser dies with
     Error acquiring the state lock
     googleapi: Error 412: At least one of the pre-conditions you specified did not hold
 
-so a pull request touching `infra/` got a red X on a coin toss. The workspace
-notes recorded it as "the trap that has cost four commits in one day". It was not
-a trap; it was this trigger, and it was reproducible every time.
+so a pull request touching `infra/` got a red X on a coin toss. It looked like
+flakiness in a third party and was neither flaky nor theirs; it was reproducible
+every time, in pairs of one push run and one pull_request run seconds apart.
+
+An earlier version of this paragraph attributed the phrase "the trap that has
+cost four commits in one day" from the workspace notes to this failure. That
+phrase is about something else — unit tests importing `service.main` and failing
+in the offline job — and the state lock race is recorded nowhere. Corrected
+rather than quietly deleted, because a comment that invents its own history is
+worse than one that has none.
 
 The `concurrency:` block did not save it. `infra.yml` grouped on `github.ref`,
 which is `refs/heads/<branch>` for a push and `refs/pull/<n>/merge` for a pull

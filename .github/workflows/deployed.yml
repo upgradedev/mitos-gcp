@@ -202,6 +202,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # This job was entirely curl until the manifest check arrived, and that
+      # check runs a script from the repository. Without this it failed with
+      # `python: can't open file .../scripts/check_manifest.py`, which is a
+      # missing checkout wearing the costume of a broken manifest.
+      # `tests/unit/test_workflow_steps.py` now refuses any step that reads a
+      # repository path from a job that has not checked the repository out.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # Three of the six pages this job used to grep no longer exist. The
       # interface is a built application now: every screen is the same document
       # with a different fragment, so "fetch this path and grep for a phrase
