@@ -146,6 +146,63 @@ resource "google_service_account" "ci" {
   depends_on = [google_project_service.enabled]
 }
 
+# The identity that builds the image, which this file did not describe at all.
+#
+# Builds ran as `437828525303-compute@developer.gserviceaccount.com`, the default
+# compute service account, which holds `roles/editor` on the project. On an entry
+# whose argument is that every capability gets its own scoped identity, the step
+# that produces the artifact everything else runs held the broadest role in the
+# project, and Terraform did not mention it. The infrastructure did not describe
+# how its own image is made.
+#
+# Three roles, each for one thing the build actually does:
+#   logWriter          `cloudbuild.yaml` sets `logging: CLOUD_LOGGING_ONLY`
+#   artifactregistry   push the image it just built
+#   objectViewer       read the source `gcloud builds submit` uploaded
+#
+# Not `roles/cloudbuild.builds.builder`, which bundles these and more. The
+# bundle would work and would be the same shortcut `roles/editor` already is.
+resource "google_service_account" "build" {
+  account_id   = "mitos-build"
+  display_name = "Mitos build (via Workload Identity Federation)"
+  description  = "May run a build, push the image, and write its logs. Nothing else"
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_project_iam_member" "build_logs" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+resource "google_project_iam_member" "build_pushes_the_image" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+resource "google_project_iam_member" "build_reads_its_own_source" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+# A build submitted with `--service-account` runs AS this identity, and the
+# caller has to be allowed to act as it. The caller is this identity, arriving
+# from GitHub through Workload Identity Federation, so it acts as itself.
+resource "google_service_account_iam_member" "build_acts_as_itself" {
+  service_account_id = google_service_account.build.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.build.email}"
+}
+
+resource "google_service_account_iam_member" "build_from_github" {
+  service_account_id = google_service_account.build.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_owner}/${var.github_repo}"
+}
+
 # All three append to the thread and all three may call the model. None of this
 # is what separates them.
 resource "google_project_iam_member" "fleet_ledger" {
