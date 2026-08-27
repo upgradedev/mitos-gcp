@@ -121,8 +121,9 @@ asserting no `write.executed` or `plan.proposed` entry can result from a wake.
 
 ### ADR-008 — Deployment is an explicit Dockerfile, not buildpacks
 **Date:** 2026-08-19 | **Status:** Implemented
-**Decision:** one image, three deployments, differing only by service account and
-`MITOS_ROLE`.
+**Decision:** one image, three deployments. What fixes each deployment's
+authority is its service account and its `MITOS_ROLE`; the two also carry a few
+role-scoped environment variables, so "differing only by" was too strong.
 **Reason:** the writer needs `git` and `ssh`, and relying on whatever a buildpack
 includes is how a deployment breaks quietly later. Buildpacks also stopped
 resolving Python 3.12 mid-build, which is the same class of surprise.
