@@ -85,14 +85,23 @@ def test_a_duplicate_is_answered_with_success_not_an_error():
     assert "status_code=4" not in after and "status_code=5" not in after
 
 
-def test_a_crash_before_completion_does_not_lose_the_delivery():
+def test_an_abandoned_claim_expires_so_the_delivery_can_be_handled_again():
     """The regression this file was written to prevent, and then caused.
 
     The first version marked the delivery permanently on receipt, before the
     work started. An instance that died in between left a claim with nothing
-    behind it, so GitHub's retry was answered "duplicate" and the chore never
-    ran: duplicate work traded for lost work, which is strictly worse here,
-    because a duplicate is visible in the thread and a silent loss is not.
+    behind it, so the same delivery arriving again was answered "duplicate" and
+    the chore never ran: duplicate work traded for lost work, which is strictly
+    worse here, because a duplicate is visible in the thread and a silent loss
+    is not.
+
+    The name used to say the crash "does not lose the delivery". It does. What
+    a lease buys is that a LATER arrival of the same delivery id can proceed
+    instead of being refused by a claim nobody is behind. Nothing produces that
+    later arrival on its own: GitHub does not automatically redeliver, and this
+    handler answers 202 before the work starts, so GitHub records a success.
+    Somebody clicking Redeliver produces it. The distinction is the whole
+    difference between a recoverable loss and a recovered one.
     """
     from mitos.once import _expired
 
