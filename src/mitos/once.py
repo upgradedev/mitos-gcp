@@ -1,8 +1,14 @@
 """Claim an identifier exactly once, across instances.
 
-GitHub retries a delivery it did not get a timely answer for, and Cloud Run runs
-up to four readers, so the same pull request can arrive twice within seconds on
-two different instances. Nothing keyed on the delivery id, so both would run the
+Cloud Run runs up to four readers, so one delivery can be handed to two
+instances, and a person clicking Redeliver sends the same delivery id again.
+
+Not because GitHub retries on its own. It does not: "GitHub does not
+automatically redeliver failed deliveries", and this handler answers 202 in
+milliseconds before the work starts, so GitHub records a success and there is
+nothing for a retry policy to act on even if one existed. These comments said
+the opposite for a long time, and the mechanism below is right for the reasons
+that are actually true rather than the one that was assumed. Nothing keyed on the delivery id, so both would run the
 whole chore: four model calls each, two sets of specialist responses in the
 provenance thread, and two of everything a reader afterwards has to reconcile.
 
@@ -68,9 +74,10 @@ def _expired(held: dict[str, Any], lease: int = LEASE_SECONDS) -> bool:
 class AlreadySeen(Exception):
     """This identifier has been claimed before.
 
-    Not an error in the sense that anything is wrong. A retried delivery is
-    GitHub behaving correctly, and the right answer is to acknowledge it and do
-    nothing, which is what the caller does.
+    Not an error in the sense that anything is wrong. A repeated delivery id is
+    normal, whether it came from two instances racing or from somebody clicking
+    Redeliver, and the right answer is to acknowledge it and do nothing, which is
+    what the caller does.
     """
 
 
