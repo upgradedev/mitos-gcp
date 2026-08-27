@@ -82,7 +82,7 @@ account, and the deployment should be a swap rather than a rewrite.
 the adapter is exercised against the emulator in CI and a separate step fails the
 build if that suite ever skips.
 
-### ADR-005 — The write credential is a repository-scoped deploy key
+### ADR-005 — The spec repository write credential is a repository-scoped deploy key
 **Date:** 2026-08-19 | **Status:** Implemented
 **Decision:** the writer publishes over SSH with a deploy key scoped to
 `upgradedev/mitos-spec`, held in Secret Manager, readable by one service account.
@@ -93,6 +93,11 @@ demonstration rather than an architecture.
 an authenticated call, because IAM will not give it the key. The image needs
 `git` and `ssh`, which is why deployment is an explicit Dockerfile rather than
 buildpacks.
+**Amended 2026-08-27:** this said "THE write credential", singular, and there are
+two. The second is a GitHub App installation token, minted per request in the
+reader, which is what creates check runs and opens suggested pull requests. The
+two have different blast radii and different homes, and conflating them made the
+boundary sound simpler than it is. ADR-013 covers the second.
 
 ### ADR-006 — A specialist may refuse
 **Date:** 2026-08-19 | **Status:** Implemented
@@ -168,6 +173,88 @@ test read the identity endpoints anonymously and expected them to answer.
 somebody opening the page. The suite runs with no credential by default, so it
 is the same thing a judge can run, and the checks that need one announce
 themselves as not checked rather than passing quietly.
+
+### ADR-011 — Sign-in is GitHub OAuth, and no session ever holds a GitHub token
+**Date:** 2026-08-27 | **Status:** Implemented
+**Decision:** a person signs in through the GitHub App's OAuth flow. The user
+access token is used once, inside the callback, to read the profile and the
+installation list, and is then discarded. What persists is a random session id
+in an `HttpOnly` cookie and a Firestore `sessions` document; the browser never
+receives a GitHub token and neither does any later request.
+**Reason:** the product's own standard requires the ADR set to decide
+"authentication and token storage", and `standards.py` scores that rule `high`.
+Running Mitos against Mitos, the absence of this decision is a finding. More
+importantly a stored user token is a credential with the user's whole account
+behind it, sitting in a datastore this fleet reads on every request, and the
+entry's argument is that the reading identity holds nothing that can change
+anything.
+**Consequence:** an expired or unreachable session store means signed out rather
+than an error, which is fail-closed and is what `_session_user` does. There is
+no refresh: a session outlives the token it was created from, and any GitHub
+call made later is made with an **installation** token minted fresh, never with
+the person's. The cost is that Mitos cannot act as the signed-in user, which is
+deliberate.
+**Documented late, which is the point of writing it down.** This shipped in #68
+and the ADR set did not mention it for nine days.
+
+### ADR-012 — A workspace is a GitHub account, and the first member owns it
+**Date:** 2026-08-27 | **Status:** Implemented
+**Decision:** tenancy is derived, never chosen. `workspace_id` is
+`github-{account_id}` taken from the App installation, and membership is written
+at sign-in from the installations GitHub reports for that user. The first member
+of a workspace becomes `owner` and everyone after is `reviewer`; an existing
+membership keeps whatever role it already had.
+**Reason:** any workspace a user could name is a workspace a user could claim.
+Deriving it from the installation means the boundary is GitHub's answer to "what
+may this person see", not ours, and it cannot be forged by a request body.
+**Consequence:** `_require_role` is the single gate, and approving a write needs
+`owner`. A person who signs in with no installation gets no workspace and sees
+nothing, which reads as an empty product and is correct. Two people installing
+on the same account race for `owner`, and the loser is a `reviewer` until
+somebody changes it by hand; there is no invitation flow and that is a gap
+rather than a decision.
+
+### ADR-013 — Writing back to GitHub uses a per-request installation token
+**Date:** 2026-08-27 | **Status:** Implemented
+**Decision:** check runs, and the branch-file-pull-request sequence behind an
+approval, are made with a GitHub App installation token minted per request from
+the App private key. Nothing is stored: the token is created, used and dropped
+inside the handler.
+**Reason:** ADR-005 covers a deploy key scoped to one repository we own. This is
+the opposite direction, into a repository somebody else owns, and a deploy key
+cannot express it. An installation token can, is scoped to the repositories that
+person chose when installing, expires in an hour, and is revoked by uninstalling
+the App, which is an action the owner can take without us.
+**Consequence:** there are now two write credentials with different blast radii,
+which ADR-005 hid by saying "the". The private key that mints these tokens lives
+in Secret Manager and the reader holds `secretVersionAdder` and `secretAccessor`
+on it, so the reader is not credential-free in the absolute sense the README
+once claimed; it is unable to reach the **specification repository** credential,
+which is what `/identity` proves live. A failure to mint a token is a failure to
+report, never a failure to analyse: `_safe_github_check` swallows it and returns
+the existing check run id, because a GitHub outage must not stop a run.
+
+### ADR-014 — The standards auditor reports what it could not decide
+**Date:** 2026-08-27 | **Status:** Implemented
+**Decision:** `check_repository` returns a verdict per rule across five states,
+and the two that matter are `needs_judgement`, for a rule no pattern can settle,
+and `could_not_be_determined`, for a rule whose evidence was not readable. A
+rule is never counted as passed because nothing was found.
+**Reason:** the failure mode of every compliance tool is silence read as
+compliance. A rule that could not be evaluated and a rule that passed look
+identical in a count, and the count is what anybody actually reads.
+**Consequence:** the summary always carries a non-zero
+`could_not_be_determined` on a real repository, and `deployed.yml` asserts that
+rather than a pass rate. It also means the auditor cannot be scored as a
+percentage without lying, which is a feature and reads as a weakness.
+
+The reading is bounded by the same rate limit as everything else here: one audit
+costs about 31 requests to the public GitHub API, unauthenticated callers get 60
+an hour per address, and Cloud Run egresses from a shared one. Results are held
+for ten minutes so that looking twice costs once. That is mitigation, not a fix;
+the fix is reading under the installation token from ADR-013, which is not
+built.
+
 
 ## Standards compliance
 

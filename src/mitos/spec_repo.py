@@ -9,7 +9,8 @@ access to `mitos-spec` and nothing else, which is the difference between saying
 least privilege and doing it. It lives in Secret Manager and exactly one service
 account can read it:
 
-    gcloud secrets get-iam-policy spec-repo-write-token --project upgradegr-mitos
+    gcloud secrets get-iam-policy mitos-prod-settings-writer-spec-repo-deploy-key \
+      --project upgradegr-mitos
     -> serviceAccount:mitos-writer@upgradegr-mitos.iam.gserviceaccount.com
 
 The reader and the evaluator can ask for it and receive PermissionDenied from
