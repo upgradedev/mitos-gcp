@@ -37,8 +37,10 @@ provider "google" {
 }
 
 locals {
-  # One image, three deployments. What differs is the identity Cloud Run starts
-  # it with and MITOS_ROLE, and the process can change neither.
+  # One image, three deployments. What fixes each one's authority is the
+  # identity Cloud Run starts it with and MITOS_ROLE, and the process can change
+  # neither. Role-scoped environment variables differ as well, set further down
+  # this file, so this deliberately no longer reads as an exhaustive list.
   roles = ["reader", "evaluator", "writer"]
 
   # A Cloud Run URL is deterministic: service, project number, region. It is
@@ -273,8 +275,19 @@ resource "google_secret_manager_secret" "spec_repo_key" {
   depends_on = [google_project_service.enabled]
 }
 
-# This binding is the entry's central claim, expressed as one resource: exactly
-# one identity can read it.
+# This binding is the entry's central claim, expressed as one resource: of the
+# three services in the fleet, exactly one can read it. That is the property
+# `/identity` verifies live, by having the other two ask and be refused.
+#
+# Of the three SERVICES, and not of the project. `mitos-tf@` holds
+# `roles/secretmanager.admin` at the project level and `tf@upgrade.net.gr` holds
+# `roles/owner`, so both can read this too. That is not a hole to close: an
+# identity that can apply Terraform can grant itself anything in one command, and
+# `secrets.create` has no secret-level scope, so the grant cannot be narrowed
+# without breaking the apply that creates the secret. They are control-plane
+# principals, trusted by construction, and the boundary is drawn between the
+# workloads. Saying "exactly one identity" without that qualifier was a claim one
+# `get-iam-policy` refutes.
 resource "google_secret_manager_secret_iam_member" "only_the_writer" {
   secret_id = google_secret_manager_secret.spec_repo_key.id
   role      = "roles/secretmanager.secretAccessor"

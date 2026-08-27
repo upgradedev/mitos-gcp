@@ -9,7 +9,7 @@ output "identities" {
 }
 
 output "write_credential_readable_by" {
-  description = "The entry's central claim as a single value: exactly one identity."
+  description = "The entry's central claim as a single value: the one SERVICE that can read it. Terraform and the project owner can too, and are control-plane principals rather than workloads."
   # try() because Terraform evaluates every output after every single import,
   # and during a partial import this map has one key in it. Indexing a
   # half-populated for_each is an error, and the error names the output rather

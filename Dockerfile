@@ -4,8 +4,11 @@
 # whatever a buildpack happens to include is how a deployment breaks quietly
 # months later. And a judge reading this should be able to see exactly what runs.
 #
-# One image, three deployments. What differs is the service account Cloud Run
-# starts it with and MITOS_ROLE, neither of which the process can change.
+# One image, three deployments. What fixes each one's authority is the service
+# account Cloud Run starts it with and MITOS_ROLE, neither of which the process
+# can change. A few role-scoped environment variables differ too, which is why
+# this no longer says "what differs is": that read as an exhaustive list and
+# main.tf sets six per-role differences.
 #
 # Two stages. The first builds the interface, the second runs the service, and
 # nothing from the first survives except the files it emitted. Node, npm and
