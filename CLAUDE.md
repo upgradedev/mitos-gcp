@@ -190,3 +190,15 @@ themselves as not checked rather than passing quietly.
   landed in the source as a literal backspace byte, so the destructive-migration
   rule could never match, and every test still passed because no test fed it a
   destructive migration. Use an editor, or build the escape explicitly.
+- Write a credential shape as a literal, including inside a comment explaining
+  the shape. `tests/synthetic_secrets.py` assembles every one at import time,
+  and the reason is that gitleaks is the first stage of CI with no ignore file.
+  This was learned twice in one day, in a fixture and then in the comment
+  written to explain widening the detector, which is the easiest place to
+  forget it. Repairing the working tree does not repair the history: CI checks
+  out with `fetch-depth: 0` and scans commits, so a later fix leaves the scan
+  red and the branch has to be rebuilt. Run it before pushing:
+
+  ```bash
+  gitleaks detect --source . --log-opts="origin/main..HEAD"
+  ```
