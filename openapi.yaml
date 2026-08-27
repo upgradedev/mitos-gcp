@@ -664,6 +664,40 @@ paths:
       summary: Standards Json
   /thread:
     get:
+      description: 'The demo corpus thread, and only ever that.
+
+
+        This returned `ledger().all()` unfiltered, and the webhook handler appends
+
+        the analysis of every real pull request to that same ledger. Nothing leaked
+
+        while no real analysis had run, which is exactly why it was invisible: the
+
+        endpoint would have started publishing repository names, findings and
+
+        provenance for private repositories the moment the product was used for the
+
+        first time, anonymously, to anyone.
+
+
+        So it filters. An entry that names a repository belongs to somebody''s
+
+        workspace and is served by `/api/workspace/thread`, which requires a session
+
+        and scopes by membership. What is left here is the synthetic corpus the
+
+        recorded demo and every offline test use, which is what this endpoint is
+
+        for.
+
+
+        Filtered rather than closed, because a judge with no account should still
+        be
+
+        able to follow a thread end to end, and that was the reason it was opened
+        in
+
+        the first place.'
       operationId: thread_thread_get
       parameters:
       - in: query

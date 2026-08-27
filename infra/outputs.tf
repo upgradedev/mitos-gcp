@@ -17,6 +17,12 @@ output "write_credential_readable_by" {
   value = try(google_service_account.fleet["writer"].email, "not yet created")
 }
 
+output "setup_token" {
+  description = "The secret that lets one caller bind a GitHub App to this deployment. Read with `terraform output -raw setup_token`."
+  value       = random_password.setup_token.result
+  sensitive   = true
+}
+
 output "workload_identity_provider" {
   description = "Paste into the CI workflows. No key is created, so none can leak."
   value       = google_iam_workload_identity_pool_provider.github.name

@@ -24,6 +24,13 @@ import os
 
 import pytest
 
+# `/github/app/new` now requires a setup token. It used to answer 200 to
+# anyone, and the manifest callback checked only a state cookie the same
+# response had just set, so any visitor could bind their own GitHub App to
+# this deployment. These tests asked for the page without proving anything,
+# which is how they kept passing over the hole.
+SETUP_TOKEN = "test-setup-token"
+
 from service.main import NoPublicUrl, _public_url
 
 BEHIND_A_PROXY = "http://mitos-reader-437828525303.europe-west1.run.app/"
@@ -121,10 +128,11 @@ def test_every_manifest_url_is_an_absolute_https_url(monkeypatch):
 
     monkeypatch.setenv("MITOS_PUBLIC_URL", "https://mitos.example.test")
     monkeypatch.setenv("MITOS_LEDGER", "memory")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     from service.main import app
 
-    page = TestClient(app).get("/github/app/new").text
+    page = TestClient(app).get(f"/github/app/new?setup_token={SETUP_TOKEN}").text
     field = re.search(r'name=["\']manifest["\']\s+value=["\'](.*?)["\']', page, re.S)
     assert field, "the manifest field is no longer where this test looks"
     manifest = json.loads(html.unescape(field.group(1)))
@@ -149,10 +157,13 @@ def test_a_deployment_that_cannot_say_its_address_answers_503_not_500(monkeypatc
 
     monkeypatch.delenv("MITOS_PUBLIC_URL", raising=False)
     monkeypatch.setenv("MITOS_LEDGER", "memory")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     from service.main import app
 
-    response = TestClient(app, raise_server_exceptions=False).get("/github/app/new")
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/github/app/new?setup_token={SETUP_TOKEN}"
+    )
 
     assert response.status_code == 503
     body = response.json()

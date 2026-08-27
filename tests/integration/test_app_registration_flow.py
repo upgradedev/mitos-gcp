@@ -34,6 +34,13 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# `/github/app/new` now requires a setup token. It used to answer 200 to
+# anyone, and the manifest callback checked only a state cookie the same
+# response had just set, so any visitor could bind their own GitHub App to
+# this deployment. These tests asked for the page without proving anything,
+# which is how they kept passing over the hole.
+SETUP_TOKEN = "test-setup-token"
+
 # Not shaped like a real key on purpose. A PEM header in a fixture is a PEM
 # header in the repository, and gitleaks is the first stage of CI with no
 # ignore file by standing rule, so it found this and was right to. What these
@@ -97,6 +104,7 @@ def flow(monkeypatch):
     monkeypatch.setenv("MITOS_PUBLIC_URL", "https://mitos.example.test")
     monkeypatch.setenv("MITOS_LEDGER", "memory")
     monkeypatch.setenv("MITOS_STAGE", "prod")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     import service.main as main
 
@@ -133,7 +141,7 @@ def _begin(client, main):
     """`/github/app/new`, returning the state it issued and the cookie jar."""
     from service.manifest import parse
 
-    page = client.get("/github/app/new")
+    page = client.get(f"/github/app/new?setup_token={SETUP_TOKEN}")
     assert page.status_code == 200, page.text
     action, manifest = parse(page.text)
     from urllib.parse import parse_qs, urlparse
