@@ -1728,15 +1728,15 @@ async def github_webhook(request: Request) -> JSONResponse:
 
     led = ledger()
 
-    # Claimed before anything is appended or started. GitHub retries a delivery
-    # it did not get a timely answer for, and Cloud Run runs up to four readers,
-    # so the same pull request can arrive twice within seconds on two different
+    # Claimed before anything is appended or started. Cloud Run runs up to four
+    # readers and somebody can click Redeliver, so the same delivery id can
+    # arrive twice within seconds on two different
     # instances. Nothing keyed on the delivery id, so both ran the whole chore:
     # four model calls each, and two accounts of one event in the thread that is
     # supposed to BE the account.
     #
-    # 200 rather than an error. A retried delivery is GitHub behaving correctly,
-    # and answering it with a failure is how a webhook gets disabled.
+    # 200 rather than an error. A repeated delivery id is normal, and answering
+    # it with a failure is how a webhook gets disabled.
     try:
         claims().claim(delivery.delivery_id, note=f"{delivery.repository}#{delivery.number}")
     except AlreadySeen:

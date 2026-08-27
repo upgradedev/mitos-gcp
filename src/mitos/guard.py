@@ -13,7 +13,7 @@ The claim is checkable, not asserted. ADK dispatches a tool in
 collected `function_response is None`. Returning a non-empty dict here therefore
 means the tool is never invoked, and the dict becomes its result.
 
-`tests/spike/test_adk_interceptor.py` proves it against the real dispatcher, with
+`tests/integration/test_adk_interceptor.py` proves it against the real dispatcher, with
 a stub model that demands the write on every turn.
 """
 

@@ -69,14 +69,15 @@ flowchart TB
         R --> S1["db-architect-leader"]
         R --> S2["documentation-companion"]
         R --> S3["compliance-companion<br/><i>skipped when no personal data</i>"]
+        G["deterministic gate<br/>secrets · injection · bypass · hallucinated paths"]
+        C["Gemini critic<br/><i>advisory only, cannot change the verdict</i>"]
+        G --> C
     end
 
     S1 & S2 & S3 --> D["draft"]
 
     subgraph EVAL["mitos-evaluator &nbsp;·&nbsp; Cloud Run"]
-        G["deterministic gate<br/>secrets · injection · bypass · hallucinated paths"]
-        C["Gemini critic<br/><i>may only ADD findings</i>"]
-        G --> C
+        E["third identity, refused the write credential<br/><i>and refuses anonymous callers</i>"]
     end
 
     D --> G
@@ -92,7 +93,6 @@ flowchart TB
     H --> W --> OUT["branch pushed to the spec repo<br/>+ compare URL and approval receipt"]
 
     READER -.->|append only| L[("Firestore<br/>provenance thread")]
-    EVAL -.->|append only| L
     WRITER -.->|append only| L
 
     SEC[["Secret Manager<br/>spec-repo write token"]]
@@ -156,8 +156,13 @@ only runs while someone happens to be calling you is a poller with extra steps.
 
 > Mitos runs its reader, its evaluator and its writer as three Cloud Run services under three
 > separate service accounts, and enforces every gate decision inside ADK's tool-call interceptor
-> rather than in a prompt, so the identity that reads production data holds no credential that can
-> write it and no agent in the fleet can talk its way past the gate.
+> rather than in a prompt, so the identity that reads production data cannot reach the credential
+> that writes the specification repository, and no agent in the fleet can talk its way past the gate.
+
+That sentence used to end "holds no credential that can write", unqualified, and one command
+refuted it: the reader holds `secretVersionAdder` on the GitHub App private key, because the
+manifest flow has to store what GitHub returns exactly once. That is a write grant to Secret
+Manager. The boundary that holds is the specific one, and `/identity` proves it live.
 
 **Open the thread.** The product is named for a thread you can follow back, so it
 is drawn rather than listed. Click any outcome and the whole path to the pull
@@ -227,7 +232,7 @@ sequenceDiagram
     participant F as Firestore
     participant G as upgradedev/mitos-spec
 
-    Note over R: orchestrates the whole chore and holds no credential that can write
+    Note over R: orchestrates the whole chore and cannot reach the spec repo write credential
 
     G->>R: webhook delivery, a pull request touching a personal-data column
     R->>SM: read the webhook secret, the one secret only mitos-reader may read
@@ -320,11 +325,12 @@ asserts the rules miss it and needs no credential;
 [`test_gemini_live.py`](tests/integration/test_gemini_live.py) asserts the model
 catches it. If either stops being true, the build says so.
 
-### Bounded reads, which is why the guard is not decoration
+### Bounded reads, enforced in the tool rather than asked for in a prompt
 
 An agent that genuinely decides where to look can decide to look somewhere it
 should not. So the reads are bounded in [`src/mitos/tools.py`](src/mitos/tools.py)
-and enforced in the interceptor, not requested in a prompt:
+and enforced by `check_read`, which `read_file` calls before it returns any
+bytes:
 
 | Bound | What it refuses |
 |---|---|
@@ -333,6 +339,13 @@ and enforced in the interceptor, not requested in a prompt:
 | size | a single read is capped |
 | budget | a finite number of successful reads per run |
 
+This section used to credit these four to the ADK interceptor. It enforces
+none of them: `guard.py` decides which tools may be called at all, and the read
+bounds are a separate layer inside the tool. Deliberately so, and not a
+correction to make in the other direction: a callback that denied the read would
+mean `read_file` never runs, so `log.record` never fires and a refused read
+would vanish from the ReadLog this README prints.
+
 A refused read does not consume the budget, so an agent that guesses a path
 badly is not locked out of files it is entitled to open. That distinction was a
 real bug: counting refusals inflated the number past the cap, so the limit never
@@ -340,10 +353,15 @@ stopped anything.
 
 ### Why a model is allowed near the gate
 
-The evaluator is deterministic. A Gemini critic sits behind it and **can only add findings**.
-`_with_critic` in [`src/mitos/evaluator.py`](src/mitos/evaluator.py) computes
-`passed = deterministic_passed AND the critic found nothing`; there is no branch that removes a
-finding or flips a verdict. [`tests/unit/test_critic_invariant.py`](tests/unit/test_critic_invariant.py)
+The evaluator is deterministic, and **the critic cannot change its verdict**. `_with_critic` in
+[`src/mitos/evaluator.py`](src/mitos/evaluator.py) returns `passed=verdict.passed` unchanged on both
+of its branches; what the Gemini critic produces lands in `advisories`, which ride on the approval
+card a human reads and can never be removed. There is no branch that removes a finding or flips a
+verdict.
+
+This paragraph used to say the critic's silence was a term in `passed`. It never was, and the
+difference matters in the honest direction: the model cannot fail a clean change either, so a
+compromised critic cannot block a release any more than it can wave one through. [`tests/unit/test_critic_invariant.py`](tests/unit/test_critic_invariant.py)
 feeds it a critic that insists everything is approved and asserts the deterministic findings survive.
 
 A gate a model can argue its way out of is not a gate, and the model reviewing the draft is the same
@@ -443,7 +461,7 @@ That cost an hour to find and `test_gemini_live.py` pins it.
 | `tests/e2e` | the journey a judge watches, driven the way this README says to run it |
 
 **86% coverage against an 85% floor**, measured on `main` by the command below:
-86.03%, 2749 statements, 384 missed. This used to name one CI run in the prose
+85.97%, 2759 statements, 387 missed, on `7eb1947`. Figures like these go stale within an hour of the next commit to `src/mitos`, so the commit is named: re-run the command and compare rather than trusting the number. This used to name one CI run in the prose
 and link a different one, which is the kind of error nobody catches by reading.
 The run the badge links,
 [32756367127](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127),
@@ -460,7 +478,7 @@ Firestore adapter suite and the live Gemini suite run as separate CI jobs and si
 outside that number, so read it as coverage of the offline path rather than of
 everything that runs.
 
-**The margin is 1.03 points, and that is the honest number rather than a
+**The margin is 0.97 points, and that is the honest number rather than a
 comfortable one.** Coverage has sat near 86% on `main` since 2026-08-20
 ([run 32400213647](https://github.com/upgradedev/mitos-gcp/actions/runs/32400213647),
 86.06%) while the model, webhook and corpus layers landed. The floor stays at 85
