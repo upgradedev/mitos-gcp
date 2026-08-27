@@ -34,7 +34,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-PEM = "-----BEGIN RSA PRIVATE KEY-----\nnot-a-real-key\n-----END RSA PRIVATE KEY-----"
+# Not shaped like a real key on purpose. A PEM header in a fixture is a PEM
+# header in the repository, and gitleaks is the first stage of CI with no
+# ignore file by standing rule, so it found this and was right to. What these
+# tests need is a distinctive string that must never reach a log or a
+# document, and it does not have to look like a key to be that.
+PEM = "private-key-material-that-must-never-be-logged"
 CLIENT_SECRET = "cs-secret-value"
 WEBHOOK_SECRET = "wh-secret-value"
 
@@ -188,7 +193,7 @@ def test_the_record_written_carries_the_pointer_and_never_the_credential(flow):
     assert record["credentials_stored"] is True
 
     body = json.dumps(record, default=str)
-    for secret in (PEM, CLIENT_SECRET, WEBHOOK_SECRET, "BEGIN RSA PRIVATE KEY"):
+    for secret in (PEM, CLIENT_SECRET, WEBHOOK_SECRET):
         assert secret not in body, "a credential reached the Firestore document"
 
 
@@ -278,7 +283,7 @@ def test_a_storage_failure_says_the_app_exists_and_leaks_no_credential(flow, mon
     printed = capsys.readouterr()
     logged = printed.out + printed.err
     assert "github_app.storage_failed" in logged
-    for secret in (PEM, CLIENT_SECRET, WEBHOOK_SECRET, "BEGIN RSA PRIVATE KEY"):
+    for secret in (PEM, CLIENT_SECRET, WEBHOOK_SECRET):
         assert secret not in logged, "a credential was printed while reporting the failure"
 
 

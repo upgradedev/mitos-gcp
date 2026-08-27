@@ -81,12 +81,12 @@ def test_the_status_never_carries_a_credential(client, monkeypatch):
         main, "_read_github_app_metadata",
         lambda: ({
             "slug": "s", "credentials_stored": True, "app_id": 1,
-            "pem": "-----BEGIN RSA PRIVATE KEY-----",
+            "pem": "private-key-material",
             "client_secret": "shhh", "webhook_secret": "alsoshhh",
         }, ""),
     )
 
     text = api.get("/github/app/status").text
 
-    for secret in ("BEGIN RSA PRIVATE KEY", "shhh", "alsoshhh"):
+    for secret in ("private-key-material", "shhh", "alsoshhh"):
         assert secret not in text, f"{secret!r} reached the status payload"
