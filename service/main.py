@@ -103,7 +103,14 @@ SECRET = os.environ.get(
 )  # nosec B105 - the secret's NAME, not its value
 METADATA = "http://metadata.google.internal/computeMetadata/v1"
 
-app = FastAPI(title=f"Mitos · {ROLE}")
+# `docs_url=None, redoc_url=None`. FastAPI links Swagger UI and ReDoc from
+# jsdelivr, this service's own content policy blocks every external origin, and
+# both paths answered 200 with a blank page. On an entry whose case is
+# inspectability, an inspection surface that renders nothing reads as a broken
+# deployment at the exact moment somebody is trying to inspect. A 404 reads as a
+# decision. The specification is still served as data at `/openapi.json` and
+# committed at the repository root, which is the inspectable form that matters.
+app = FastAPI(title=f"Mitos · {ROLE}", docs_url=None, redoc_url=None)
 
 # ORG_STANDARDS #7, request lifecycle observability. Instrumented as middleware,
 # once, rather than per handler: a handler that has to remember to log is a
@@ -1728,15 +1735,15 @@ async def github_webhook(request: Request) -> JSONResponse:
 
     led = ledger()
 
-    # Claimed before anything is appended or started. GitHub retries a delivery
-    # it did not get a timely answer for, and Cloud Run runs up to four readers,
-    # so the same pull request can arrive twice within seconds on two different
+    # Claimed before anything is appended or started. Cloud Run runs up to four
+    # readers and somebody can click Redeliver, so the same delivery id can
+    # arrive twice within seconds on two different
     # instances. Nothing keyed on the delivery id, so both ran the whole chore:
     # four model calls each, and two accounts of one event in the thread that is
     # supposed to BE the account.
     #
-    # 200 rather than an error. A retried delivery is GitHub behaving correctly,
-    # and answering it with a failure is how a webhook gets disabled.
+    # 200 rather than an error. A repeated delivery id is normal, and answering
+    # it with a failure is how a webhook gets disabled.
     try:
         claims().claim(delivery.delivery_id, note=f"{delivery.repository}#{delivery.number}")
     except AlreadySeen:
@@ -1995,7 +2002,12 @@ def config() -> dict[str, Any]:
     _require_demo_mode()
     return {
         "read_scope": list(READ_SCOPE),
-        "webhook_repositories": _connected_repositories(),
+        # Both halves, because that is what the verifier consults and what
+        # `openapi.yaml` says this field means. Returning only the Firestore half
+        # published an empty allowlist while the webhook was accepting deliveries
+        # for a repository, which is the contract contradicting itself on the
+        # endpoint that documents it.
+        "webhook_repositories": sorted(frozenset(_connected_repositories()) | ALLOWED_REPOS),
         "max_reads_per_run": MAX_READS_PER_RUN,
         "max_bytes_per_read": MAX_BYTES_PER_READ,
     }

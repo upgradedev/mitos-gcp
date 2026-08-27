@@ -1,8 +1,14 @@
 """A delivery is handled once, even when two instances get it at the same time.
 
-GitHub retries a delivery it did not get a timely answer for, and Cloud Run runs
-up to four readers, so the same pull request can arrive twice within seconds on
-two different instances. Nothing keyed on the delivery id, so both ran the whole
+Cloud Run runs up to four readers, so one delivery can be handed to two
+instances, and a person clicking Redeliver sends the same delivery id again.
+
+Not because GitHub retries on its own. It does not: "GitHub does not
+automatically redeliver failed deliveries", and this handler answers 202 in
+milliseconds before the work starts, so GitHub records a success and there is
+nothing for a retry policy to act on even if one existed. These comments said
+the opposite for a long time, and the mechanism below is right for the reasons
+that are actually true rather than the one that was assumed. Nothing keyed on the delivery id, so both ran the whole
 chore: four model calls each, and two accounts of one event in the thread that
 is supposed to be the account.
 """
@@ -64,7 +70,7 @@ def test_the_claim_is_taken_before_anything_is_appended_or_started():
 
 
 def test_a_duplicate_is_answered_with_success_not_an_error():
-    """A retried delivery is GitHub behaving correctly.
+    """A repeated delivery id is normal, from a race or from Redeliver.
 
     Answering it with a failure is how a webhook gets disabled, and a disabled
     webhook is a fleet that stops hearing about pull requests.

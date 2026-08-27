@@ -20,8 +20,16 @@ sentence in a prompt:
     size        a single read is capped
     budget      a run gets a finite number of reads
 
-Every one of these is checked in `guard.py`, which ADK consults before the tool
-runs. An agent that decides to read the whole repository does not get to.
+Every one of these is checked in `check_read`, which `read_file` calls before
+it returns any content. An agent that decides to read the whole repository does
+not get to.
+
+Not in `guard.py`, which this said for a long time and which a `grep` refutes.
+That module decides which TOOLS may be called at all, which is a different
+question asked at a different moment. Keeping them separate is deliberate: a
+callback that denied a read would mean `read_file` never runs, so `log.record`
+never fires, and a refused read would be missing from the ReadLog that is the
+evidence any of this happened.
 """
 
 from __future__ import annotations

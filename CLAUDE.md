@@ -9,7 +9,7 @@ new contributor, which is the bar that section sets.
 # ORG_STANDARDS §1, session rescan. Run before changing anything.
 git log --oneline -10
 git status
-find tests -name "test_*.py" | wc -l          # 41 files, 675 passing, 2026-08-26
+find tests -name "test_*.py" | wc -l          # 44 files, 708 passing, 2026-08-27
 python scripts/generate_openapi.py --check     # the spec must match the app
 ```
 
@@ -155,7 +155,7 @@ most likely to be rebuilding.
 
 ### ADR-010 — The deployed system is tested as a pyramid, not smoke-tested
 **Date:** 2026-08-24 | **Status:** Implemented
-**Decision:** `deployed.yml` runs four layers against the live URLs: the
+**Decision:** `deployed.yml` runs five layers against the live URLs: the
 contract each service publishes about itself, the security boundary, the
 journeys a judge follows, and the full `judge_uat` suite. It runs on a schedule,
 on demand, and after every apply.
@@ -178,8 +178,8 @@ themselves as not checked rather than passing quietly.
 | §3 secret scan first stage | gitleaks v8.18.4 pinned, **no ignore file** |
 | §6 OpenAPI at repo root | `openapi.yaml`, generated, drift-checked in CI |
 | §7 request lifecycle middleware | `service/main.py`, structured JSON, once not per handler |
-| §8 connection reuse | one Firestore client per process, not per request |
-| §9 hierarchical secret naming | `/Mitos/Prod/settings/{Service}/{Key}` |
+| §8 connection reuse | **partly**. One client per process for the ledger, memoised in `ledger()`. The session and workspace handlers still build one per request, 16 sites in `service/main.py`. Stated rather than claimed, per the Never section below |
+| §9 hierarchical secret naming | **partly**. The two `settings-*` secrets follow `/Mitos/Prod/settings/{Service}/{Key}`; the three App registration credentials are created under a flat `mitos-{stage}-github-app-*` prefix built at runtime, which drops both segments |
 
 ## Never
 

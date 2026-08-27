@@ -73,4 +73,13 @@ ENV PYTHONPATH=/app/src \
 RUN useradd --create-home --uid 10001 mitos && chown -R mitos /app
 USER mitos
 
-CMD exec uvicorn service.main:app --host 0.0.0.0 --port ${PORT}
+# `--proxy-headers` so the application sees the scheme the CLIENT used rather
+# than the one this process was handed. Behind Cloud Run's proxy the connection
+# terminating here is http, and three `set_cookie` calls derive `secure` from
+# `request.url.scheme`, so every session and CSRF cookie went out without the
+# `Secure` flag. The docstring on `_public_url` diagnosed this exact premise for
+# a different consumer and fixed only that one.
+#
+# `--forwarded-allow-ips='*'` because the proxy's address is not knowable here
+# and Cloud Run is the only thing that can reach the container port.
+CMD exec uvicorn service.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'
