@@ -33,7 +33,19 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("shared-access-key", re.compile(r"SharedAccessKey\s*=\s*\S+", re.I)),
     ("account-key", re.compile(r"AccountKey\s*=\s*\S+", re.I)),
     ("aws-access-key-id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("private-key-block", re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----")),
+    # `[A-Z ]*` rather than `(?:RSA |EC )?`. The narrow spelling missed
+    # `-----BEGIN OPENSSH PRIVATE KEY-----`, which is what `ssh-keygen` writes by
+    # default since OpenSSH 7.8, and the one credential this architecture exists
+    # to protect is an SSH deploy key. `standards.py` already shipped the wide
+    # form, so the repository disagreed with itself about a shape it had already
+    # decided was safe to match.
+    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    # A separate entry rather than a widening of the one above: `gh[pousr]_`
+    # cannot match `github_pat_`, so a fine-grained token, which is the kind
+    # somebody pastes today, would have walked straight through.
+    ("github-fine-grained-pat", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{22,}\b")),
+    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
     ("bearer-token", re.compile(r"\bBearer\s+[A-Za-z0-9\-._~+/]{20,}")),
     (
         "password-in-url",
