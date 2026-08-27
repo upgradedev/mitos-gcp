@@ -12,6 +12,11 @@ import {
   RepositoriesProductView,
   SettingsView,
 } from "./views/ProductViews";
+// Both self-fetch and take no data from here. `ThreadView` is 807 lines that
+// were exported from `views/index.ts`, imported by nothing, and dropped from
+// the bundle by tree shaking.
+import { BoundaryView } from "./views/BoundaryView";
+import { ThreadView } from "./views/ThreadView";
 
 export default function App() {
   const [theme, toggleTheme] = useTheme();
@@ -43,8 +48,10 @@ export default function App() {
         <Header identity={identity} session={session} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={() => setSidebarOpen((value) => !value)} />
         <main id="main" className="min-w-0 flex-1">
           {route === "dashboard" && <DashboardView {...data} />}
+          {route === "thread" && <ThreadView />}
           {route === "pull-requests" && <PullRequestsView {...data} />}
           {route === "repositories" && <RepositoriesProductView {...data} />}
+          {route === "boundary" && <BoundaryView />}
           {route === "activity" && <ActivityView {...data} />}
           {route === "settings" && <SettingsView {...data} />}
         </main>

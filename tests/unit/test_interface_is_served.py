@@ -172,3 +172,110 @@ def test_nothing_is_inlined_into_the_document_the_policy_would_refuse():
     set."""
     vite = (ROOT / "web" / "vite.config.ts").read_text(encoding="utf-8")
     assert "assetsInlineLimit: 0" in vite
+
+
+# The check the two above could not be. Both assert that a redirect target
+# string appears in `service/main.py`, which is true of a target the interface
+# has never heard of.
+#
+# It was. `RouteId` and `ROUTES` in `web/src/ui/router.ts` listed dashboard,
+# pull-requests, repositories, activity and settings. Not `thread`, not
+# `boundary`. So `/thread/view`, the one URL the README bolds on its own line
+# and the thing the product is named for, redirected to `/#/thread`, the router
+# fell through to "dashboard", and a judge following the README read the
+# onboarding empty state. `ThreadView.tsx`, 807 lines, was exported from a
+# barrel nothing imported and dropped from the bundle by tree shaking.
+#
+# `judge_uat` reported 47 of 47 green over it, which is the fourth time in this
+# repository that a check has passed over the thing it was named after. Asserted
+# here rather than in the deployed suite because the deployed suite would have to
+# execute the bundle to see it, and this is decidable from two source files.
+ROUTER = (ROOT / "web" / "src" / "ui" / "router.ts").read_text(encoding="utf-8")
+
+
+def _routes_the_interface_knows() -> set[str]:
+    """The `ROUTES` array, read from the source of truth for it."""
+    body = ROUTER.split("export const ROUTES", 1)[1]
+    # After the `=`, not after the declaration. The first `[` in
+    # `export const ROUTES: RouteId[] = [` belongs to the TYPE, so slicing from
+    # it returns the empty pair in `RouteId[]` and this function quietly
+    # reported that the interface knows no routes at all. Which would have made
+    # the assertion below pass over everything, in a file whose whole subject is
+    # checks that pass over everything.
+    body = body.split("=", 1)[1]
+    body = body[body.index("[") + 1 : body.index("]")]
+    return {piece.strip().strip('"').strip("'") for piece in body.split(",") if piece.strip()}
+
+
+def _routes_the_service_redirects_to() -> set[str]:
+    """Every `/#/x` the service sends a browser to."""
+    found = set()
+    for chunk in MAIN.split('RedirectResponse("/#/')[1:]:
+        found.add(chunk.split('"')[0].split("?")[0].strip("/"))
+    for chunk in MAIN.split('RedirectResponse(url="/#')[1:]:
+        target = chunk.split('"')[0].lstrip("/")
+        found.add(target.split("?")[0].strip("/"))
+    return {route for route in found if route}
+
+
+def test_the_reader_finds_both_lists():
+    """A check on the checker. If either parse silently returns nothing, the
+    assertion below passes over everything, which is the exact failure this
+    file is about."""
+    known = _routes_the_interface_knows()
+    redirected = _routes_the_service_redirects_to()
+
+    assert "dashboard" in known, f"ROUTES did not parse: {known}"
+    assert len(known) >= 5, known
+    assert redirected, "no RedirectResponse into the application was found in service/main.py"
+
+
+def test_every_route_the_service_redirects_to_is_one_the_interface_knows():
+    known = _routes_the_interface_knows()
+    stranded = sorted(_routes_the_service_redirects_to() - known)
+
+    assert not stranded, (
+        f"service/main.py redirects a browser to {stranded}, which "
+        f"web/src/ui/router.ts does not list, so the router falls through to "
+        f"the dashboard and the page the redirect promised never renders. "
+        f"Known routes: {sorted(known)}"
+    )
+
+
+def test_the_thread_is_read_over_the_endpoint_a_stranger_can_read():
+    """`/api/workspace/thread` answers 401 to anybody without a session, which
+    is every judge following the README. The public `/thread` carries the same
+    provenance thread and is what the recorded demo and the deployed checks use.
+    """
+    client = (ROOT / "web" / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    getter = client.split("export const getThread", 1)[1].split(";", 1)[0]
+
+    assert "/api/workspace/thread" not in getter, (
+        "the interface reads the thread over the endpoint that requires a "
+        "session, so it renders empty for anybody who has not signed in"
+    )
+    assert "/thread?" in getter, getter
+
+
+def test_every_route_is_reachable_from_the_navigation():
+    """A route nothing links to is a route nobody finds.
+
+    `thread` and `boundary` were absent from `ROUTES` and also from the sidebar,
+    so even after the redirect was fixed there would have been no way to reach
+    either of them by looking at the product. Asserted over the source rather
+    than a screenshot: the sidebar opens only above 1024 pixels, so a headless
+    check of the rendered navigation proves nothing about whether the entry
+    exists.
+    """
+    sidebar = (ROOT / "web" / "src" / "shell" / "Sidebar.tsx").read_text(encoding="utf-8")
+    linked = {chunk.split('"')[0] for chunk in sidebar.split('{ id: "')[1:]}
+    # `settings` has its own pinned entry at the foot of the sidebar rather than
+    # a row in ITEMS, which is a layout decision and not an omission.
+    linked.add("settings")
+
+    missing = sorted(_routes_the_interface_knows() - linked)
+
+    assert not missing, (
+        f"{missing} are routes the interface knows and the navigation does not "
+        f"offer, so the only way to reach them is to type the URL"
+    )
