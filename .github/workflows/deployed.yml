@@ -13,7 +13,14 @@
 #   identity endpoints anonymously and expected them to answer.
 #
 # So this runs on a schedule as well as on demand, and it runs the same suite a
-# judge can run, with no credential, plus the layers that need one.
+# judge can run, with no credential.
+#
+# With no credential is the whole of it, and this used to end "plus the layers
+# that need one". There are none: no job here asks for `id-token: write` or uses
+# `google-github-actions/auth`, so the three writer-side checks that want a
+# token have never run credentialed, here or anywhere. They announce themselves
+# as NOT CHECKED, which is the honest state and is why the sentence had to go
+# rather than the checks.
 
 name: Deployed
 
@@ -79,12 +86,27 @@ jobs:
           status, cfg = get("/config")
           for key in ("read_scope", "webhook_repositories", "max_reads_per_run"):
               assert key in cfg, f"/config no longer publishes {key}"
-          # Every endpoint the interface fetches. Four of these were gated
-          # behind MITOS_DEMO_MODE, which was set nowhere, so they answered 404
-          # in production while the app that needs them was reported as checked.
-          # /catalog answered, so a narrower check passed over a dead portal.
+          # Present is not the same as populated. `webhook_repositories` was
+          # `[]` in production while the verifier was accepting deliveries for a
+          # repository, and this check passed on every run because it only ever
+          # asked whether the key existed.
+          assert cfg["webhook_repositories"], (
+              "/config publishes an empty allowlist, so the boundary page reads "
+              "'0 repositories' while the verifier accepts at least one"
+          )
+          # The JSON endpoints published for direct inspection, plus the two
+          # the shipped bundle really does fetch on load.
+          #
+          # This block used to be headed "every endpoint the interface fetches",
+          # which was false when it was written: the bundle fetches none of the
+          # first four. `/config` and `/thread` are gated behind
+          # MITOS_DEMO_MODE, which was set nowhere, so they answered 404 in
+          # production while the app that needs them was reported as checked;
+          # `/metrics.json` and `/standards.json` are not gated and never were.
+          # `/catalog` answered throughout, so a narrower check passed over a
+          # dead portal.
           for path in ("/config", "/thread?limit=5", "/metrics.json",
-                       "/standards.json"):
+                       "/standards.json", "/api/session", "/github/app/status"):
               code, _ = get(path)
               assert code == 200, f"{path} answered {code}; the interface needs it"
           status, cat = get("/catalog")
@@ -170,6 +192,38 @@ jobs:
             422) echo "::error::the writer parsed an anonymous request body"; exit 1 ;;
             *) echo "::error::unexpected $code from an anonymous write"; exit 1 ;;
           esac
+
+      - name: The trigger refuses an unsigned and a wrongly signed delivery
+        run: |
+          set -o pipefail
+          # Nothing at any layer had ever POSTed to this route. The signature
+          # check is unit tested thirty-four ways and the deployed handler's
+          # ordering was exercised by nothing, on the one endpoint the whole
+          # product is triggered by and the one a stranger can reach.
+          #
+          # Three shapes: no signature at all, a well formed sha256 that is
+          # wrong, and the retired sha1 algorithm. All three must be refused
+          # before the body is looked at.
+          fail=0
+          probe() {
+            code=$(curl -s -o /tmp/wh.json -w '%{http_code}' --max-time 30 \
+              -X POST "$READER/webhook/github" \
+              -H 'Content-Type: application/json' \
+              -H 'X-GitHub-Event: pull_request' \
+              -H 'X-GitHub-Delivery: deployed-suite-probe' \
+              $2 -d '{"action":"opened"}')
+            echo "$1 -> $code $(head -c 120 /tmp/wh.json)"
+            case "$code" in
+              401|403) ;;
+              503) echo "::warning::no webhook secret is configured, so this refusal is not the signature check" ;;
+              2*) echo "::error::$1 was ACCEPTED"; fail=1 ;;
+              *) echo "::error::$1 answered $code, which is neither a refusal nor a known state"; fail=1 ;;
+            esac
+          }
+          probe "no signature"      ""
+          probe "wrong sha256"      "-H 'X-Hub-Signature-256: sha256=0000000000000000000000000000000000000000000000000000000000000000'"
+          probe "retired sha1"      "-H 'X-Hub-Signature: sha1=deadbeef'"
+          exit $fail
 
       - name: The public reader is public, and says it cannot write
         run: |
