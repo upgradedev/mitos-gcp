@@ -209,12 +209,35 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         )
 
     # The central claim. Not a config flag: the service attempts the access.
-    for name in [n for n in ("reader", "evaluator") if n in seen]:
-        cred = seen[name].get("spec_repo_write_credential", {})
+    #
+    # `seen` is only ever keyed "reader" and "writer". This was written as
+    # `for name in [n for n in ("reader", "evaluator") if n in seen]`, which
+    # yields exactly ["reader"] and always did, so the evaluator half of the
+    # boundary was never checked and nothing said so. A dead branch four lines
+    # above a comment warning about dead branches, in the suite whose job is to
+    # prove the boundary.
+    #
+    # The evaluator refuses anonymous callers, which is correct and is why it
+    # cannot be read here. That makes it a NOT CHECKED, printed, rather than a
+    # silent omission dressed as a loop.
+    cred = seen["reader"].get("spec_repo_write_credential", {})
+    r.record(
+        cred.get("reachable") is False,
+        "reader cannot reach the write credential",
+        f"{cred.get('detail')}",
+    )
+    if "evaluator" in seen:
+        ecred = seen["evaluator"].get("spec_repo_write_credential", {})
         r.record(
-            cred.get("reachable") is False,
-            f"{name} cannot reach the write credential",
-            f"{cred.get('detail')}",
+            ecred.get("reachable") is False,
+            "evaluator cannot reach the write credential",
+            f"{ecred.get('detail')}",
+        )
+    else:
+        print(
+            "  NOT CHECKED  evaluator cannot reach the write credential\n"
+            "               needs a credential; the evaluator refuses strangers,\n"
+            "               which is the same refusal this suite is here to prove"
         )
     # Only asserted when the writer was actually read. Written as
     # `"writer" not in seen or ...` for one commit, which made it pass without

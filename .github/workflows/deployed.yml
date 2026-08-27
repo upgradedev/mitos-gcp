@@ -362,23 +362,66 @@ jobs:
       - name: The content policy allows the bundle and the fetches, and nothing else
         run: |
           set -o pipefail
-          csp=$(curl -s -D - -o /dev/null --max-time 90 "$READER/" \
-                | tr -d '\r' | grep -i '^content-security-policy:')
-          echo "$csp"
-          test -n "$csp" || { echo "::error::/ carries no content policy at all"; exit 1; }
-          fail=0
-          for directive in "script-src 'self'" "style-src 'self'" "connect-src 'self'" \
-                           "default-src 'none'" "base-uri 'none'" "frame-ancestors 'none'" \
-                           "form-action 'self'"; do
-            printf '%s' "$csp" | grep -qF "$directive" \
-              || { echo "::error::the policy no longer says: $directive"; fail=1; }
-          done
-          # The value that turns the policy back into what the first dynamic
-          # scan reported at MEDIUM.
-          if printf '%s' "$csp" | grep -qF "unsafe-inline"; then
-            echo "::error::unsafe-inline is back in the policy"; fail=1
-          fi
-          exit $fail
+          # "and nothing else" is the whole claim, and this used to be seven
+          # `grep -qF` presence checks, which cannot see an addition. A policy of
+          # `script-src 'self' https://evil.example` contains `script-src 'self'`
+          # and passed every one of them. On the fortification track, a content
+          # policy check that cannot notice a new origin is the wrong check to
+          # have got wrong.
+          #
+          # So each directive's source set is compared as a SET against what it
+          # is allowed to be. A per-request nonce is expected and stripped; an
+          # extra origin, an extra keyword, or a directive that disappeared all
+          # fail.
+          python - <<'PY'
+          import os, sys, urllib.request
+
+          request = urllib.request.Request(os.environ["READER"] + "/")
+          with urllib.request.urlopen(request, timeout=90) as response:
+              policy = response.headers.get("Content-Security-Policy", "")
+
+          print(policy or "<no policy>")
+          if not policy:
+              sys.exit("/ carries no content policy at all")
+
+          EXPECTED = {
+              "default-src": {"'none'"},
+              "script-src": {"'self'", "<nonce>"},
+              "style-src": {"'self'", "<nonce>"},
+              "connect-src": {"'self'"},
+              "form-action": {"'self'"},
+              "base-uri": {"'none'"},
+              "frame-ancestors": {"'none'"},
+          }
+
+          found = {}
+          for chunk in policy.split(";"):
+              parts = chunk.split()
+              if parts:
+                  found[parts[0].lower()] = {
+                      "<nonce>" if p.startswith("'nonce-") else p for p in parts[1:]
+                  }
+
+          problems = []
+          for directive, allowed in EXPECTED.items():
+              actual = found.get(directive)
+              if actual is None:
+                  problems.append(f"{directive} is gone from the policy")
+              elif actual != allowed:
+                  extra = sorted(actual - allowed)
+                  missing = sorted(allowed - actual)
+                  problems.append(
+                      f"{directive} is {sorted(actual)}, expected {sorted(allowed)}"
+                      + (f"; ADDED {extra}" if extra else "")
+                      + (f"; LOST {missing}" if missing else "")
+                  )
+          for directive in sorted(set(found) - set(EXPECTED)):
+              problems.append(f"{directive} was added to the policy and nothing decided it")
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
 
       # These three URLs are in the README, in the recorded demo and in merged
       # pull request comments. They render nothing now, and a redirect that
