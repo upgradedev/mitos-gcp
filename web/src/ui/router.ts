@@ -11,17 +11,29 @@ import { useEffect, useState } from "react";
 // and land the reader on the overview. Views jump between sections with
 // scrolling or with a real route, never with an anchor.
 
+// `thread` and `boundary` are not decoration. `service/main.py` redirects
+// /thread/view here and /boundary here, and the README bolds the first of those
+// on a line of its own as the thing to open. They were absent from this list,
+// so `parse()` fell through to "dashboard" and the product named for a thread
+// you can follow back showed a judge the onboarding empty state instead.
+//
+// `tests/unit/test_interface_is_served.py` now asserts that every route the
+// service redirects to appears here.
 export type RouteId =
   | "dashboard"
+  | "thread"
   | "pull-requests"
   | "repositories"
+  | "boundary"
   | "activity"
   | "settings";
 
 export const ROUTES: RouteId[] = [
   "dashboard",
+  "thread",
   "pull-requests",
   "repositories",
+  "boundary",
   "activity",
   "settings",
 ];

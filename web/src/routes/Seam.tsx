@@ -6,10 +6,12 @@ import { Construction } from "lucide-react";
 // specific failure this project has spent effort removing: a number nobody
 // measured is worse than an admission that the screen is not finished.
 //
-// Currently unreferenced. The boundary and thread routes are wired to
-// ./views/BoundaryView and ./views/ThreadView, which another agent owns and was
-// still editing when they were adopted. This is kept as the fallback: if that
-// work is not ready at deploy time, swap either route back to
+// Currently unreferenced, and this note was wrong for weeks. It said the
+// boundary and thread routes "are wired" to ./views/BoundaryView and
+// ./views/ThreadView. They were not: neither id was in `ROUTES`, so both
+// redirects fell through to the dashboard and both components were tree shaken
+// out. They are wired now. This is kept as the fallback: if that work is not
+// ready at deploy time, swap either route back to
 //
 //   <Seam title="The thread" purpose="..." sources={["GET /thread?limit="]} />
 //

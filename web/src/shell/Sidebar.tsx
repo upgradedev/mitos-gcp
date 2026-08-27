@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Settings,
   ShieldCheck,
+  Waypoints,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { RouteId } from "../ui/router";
@@ -15,8 +16,10 @@ interface Item { id: RouteId; label: string; icon: LucideIcon }
 
 const ITEMS: Item[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "thread", label: "Provenance thread", icon: Waypoints },
   { id: "pull-requests", label: "Pull requests", icon: GitPullRequest },
   { id: "repositories", label: "Repositories", icon: FolderGit2 },
+  { id: "boundary", label: "Write boundary", icon: ShieldCheck },
   { id: "activity", label: "Activity & audit", icon: Activity },
 ];
 

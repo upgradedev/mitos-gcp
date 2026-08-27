@@ -81,8 +81,12 @@ export const getGitHubAppStatus = () =>
 export const getSession = () => getJson<SessionStatus>("/api/session");
 export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
+// `/thread`, not `/api/workspace/thread`. The second requires a session and
+// answers 401 to anyone who has not signed in, which is every judge opening the
+// link in the README. The public one carries the same provenance thread and is
+// what the README, the recorded demo and the deployed checks all use.
 export const getThread = (limit = 80) =>
-  getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
+  getJson<Thread>(`/thread?limit=${limit}`);
 export const getWorkspaceAnalytics = () =>
   getJson<WorkspaceAnalytics>("/api/workspace/analytics");
 export const approveSuggestedChange = (runId: string) =>
