@@ -512,9 +512,37 @@ def escalate_on_wake(ledger: Ledger, expired: list[Entry]) -> list[Entry]:
     why it happened. It does not write to the specification repository, because
     an unattended wake must never reach the one credential that changes
     something outside the ledger.
+
+    A deferral is escalated once, and this used to escalate it once PER PROCESS.
+    `FirestoreWatcher._seen` is an instance attribute, Firestore hands a new
+    subscriber the whole matching set the moment it subscribes, and a new
+    container starts with that set empty. So every restart, and every one of the
+    four instances `maxScale` allows, re-escalated everything currently expired.
+    Measured on the live ledger: 1596 escalations over 73 distinct parents, up to
+    40 copies of one deferral, payloads byte-identical.
+
+    The guard is a read of the thread rather than a mark on the deferral.
+    Marking would be one update, and `FirestoreLedger` says of itself
+    "append-only by construction: there is no update or delete method here". A
+    provenance product that reaches around its own append-only ledger to fix a
+    duplication bug has traded the property it is selling for the bug it is
+    fixing.
+
+    Racy across instances, and that is stated rather than hidden: two containers
+    reading the same empty result can both append. It turns an unbounded
+    per-restart fanout into a bounded per-race one, and the honest fix for the
+    remainder is a transaction on a separate collection, which is not built.
     """
+    already = {
+        entry.parent_id
+        for entry in ledger.all()
+        if entry.kind == "finding.escalated" and entry.parent_id
+    }
     written: list[Entry] = []
     for deferral in expired:
+        if deferral.entry_id in already:
+            continue
+        already.add(deferral.entry_id)
         written.append(
             ledger.append(
                 Entry(

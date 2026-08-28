@@ -163,7 +163,12 @@ def test_success_closes_the_lease_and_failure_leaves_it_open():
     source = (Path(__file__).resolve().parents[2] / "service" / "main.py").read_text(
         encoding="utf-8"
     )
-    handler = source[source.index("def work() -> None:") :][:3000]
+    # To the end of the function, not a fixed slice. This read the first
+    # 3000 characters, and an added refusal branch pushed
+    # `claims().complete(` past that, so the test reported a completion
+    # that had not moved as missing.
+    start = source.index("def work() -> None:")
+    handler = source[start : source.index("threading.Thread(target=work", start)]
 
     assert "claims().complete(" in handler
     fail_at = handler.index('kind="trigger.failed"')

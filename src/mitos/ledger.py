@@ -130,9 +130,23 @@ class InMemoryLedger(_BaseLedger):
 
 
 class FirestoreLedger(_BaseLedger):
-    """Production backend. Append-only by construction: there is no update or
-    delete method here, and the reader and evaluator service accounts are granted
-    create permission on this collection and nothing else.
+    """Production backend. Append-only by INTERFACE: there is no update or
+    delete method here, so nothing in this codebase can rewrite or erase an
+    entry.
+
+    This docstring used to go on to claim a second lock in IAM, saying the
+    reader and evaluator held only a create grant on this collection. Not quoted
+    here on purpose: a check that reads source text cannot tell a claim from a
+    quotation of one, and this file is checked. It was false either way.
+    `infra/main.tf` grants all three fleet identities
+    `roles/datastore.user`, which includes `entities.update` and
+    `entities.delete`, project-wide. Firestore IAM has no per-collection or
+    per-operation scope in its predefined roles, so the second lock a reader
+    would infer from that sentence does not exist and could not be built the way
+    it implied.
+
+    One lock, in code, stated as one. A provenance ledger that claims two and
+    has one is worse than one that claims one, because the claim is the product.
 
     Imported lazily so that the offline suite never needs the Firestore client.
     """

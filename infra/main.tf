@@ -23,6 +23,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   backend "gcs" {
@@ -72,6 +76,7 @@ locals {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     MITOS_PUBLIC_URL          = local.reader_url
     MITOS_DEMO_MODE           = "true"
+    MITOS_SETUP_TOKEN         = random_password.setup_token.result
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
     GOOGLE_CLOUD_LOCATION     = "global"
@@ -162,6 +167,24 @@ resource "google_service_account" "ci" {
 #
 # Not `roles/cloudbuild.builds.builder`, which bundles these and more. The
 # bundle would work and would be the same shortcut `roles/editor` already is.
+# Who may bind a GitHub App to this deployment.
+#
+# Nobody had to prove anything. `/github/app/new` answered 200 to anyone and the
+# manifest callback checked only a state cookie the same response had just set,
+# which is CSRF protection doing duty as authorisation. Any visitor could create
+# an App under their own GitHub account and have this service store their
+# private key, client secret and webhook secret, after which the reader accepts
+# deliveries they sign and mints tokens with their key.
+#
+# A shared secret rather than a session, because before any App exists there are
+# no workspaces and no owners, so an owner check has nothing to check against.
+# `random_password` rather than a chosen value so it is never typed anywhere,
+# and `terraform output -raw setup_token` is how the owner reads it.
+resource "random_password" "setup_token" {
+  length  = 48
+  special = false
+}
+
 resource "google_service_account" "build" {
   account_id   = "mitos-build"
   display_name = "Mitos build (via Workload Identity Federation)"

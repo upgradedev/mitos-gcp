@@ -18,6 +18,13 @@ from __future__ import annotations
 
 import pytest
 
+# `/github/app/new` now requires a setup token. It used to answer 200 to
+# anyone, and the manifest callback checked only a state cookie the same
+# response had just set, so any visitor could bind their own GitHub App to
+# this deployment. These tests asked for the page without proving anything,
+# which is how they kept passing over the hole.
+SETUP_TOKEN = "test-setup-token"
+
 from service.manifest import SUBSCRIBABLE, check, parse
 
 
@@ -28,10 +35,11 @@ def page(monkeypatch):
 
     monkeypatch.setenv("MITOS_PUBLIC_URL", "https://mitos.example.test")
     monkeypatch.setenv("MITOS_LEDGER", "memory")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     from service.main import app
 
-    response = TestClient(app).get("/github/app/new")
+    response = TestClient(app).get(f"/github/app/new?setup_token={SETUP_TOKEN}")
     assert response.status_code == 200, response.text
     return response
 
@@ -137,11 +145,12 @@ def test_the_manifest_is_correct_behind_a_proxy_with_no_configured_url(monkeypat
 
     monkeypatch.delenv("MITOS_PUBLIC_URL", raising=False)
     monkeypatch.setenv("MITOS_LEDGER", "memory")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     from service.main import app
 
     page = TestClient(app).get(
-        "/github/app/new",
+        f"/github/app/new?setup_token={SETUP_TOKEN}",
         headers={"x-forwarded-proto": "https", "host": "mitos.example.test"},
     )
 
@@ -163,6 +172,7 @@ def test_a_manifest_we_know_is_wrong_is_never_sent(monkeypatch):
 
     monkeypatch.setenv("MITOS_PUBLIC_URL", "https://mitos.example.test")
     monkeypatch.setenv("MITOS_LEDGER", "memory")
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", SETUP_TOKEN)
 
     import service.main as main
 
@@ -170,7 +180,7 @@ def test_a_manifest_we_know_is_wrong_is_never_sent(monkeypatch):
         main, "manifest_problems", lambda action, manifest: ["url: scheme is http, not https"]
     )
 
-    response = TestClient(main.app).get("/github/app/new")
+    response = TestClient(main.app).get(f"/github/app/new?setup_token={SETUP_TOKEN}")
 
     assert response.status_code == 503
     assert "scheme is http, not https" in response.text
