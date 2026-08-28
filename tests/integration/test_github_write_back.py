@@ -97,13 +97,21 @@ def _suggest(main, github, **over):
     return main._github_suggested_pr(**kwargs)
 
 
-def _reads(*, contents: _Response) -> list[_Response]:
-    """The four GETs the helper makes: source PR, repository, base ref, contents."""
+def _reads(*, contents: _Response, existing_pull=None) -> list[_Response]:
+    """The five GETs the helper makes.
+
+    Source pull request, repository, base ref, the file being replaced, and the
+    adoption check that asks whether a pull request already exists for this
+    branch. The fifth was added when a crash between opening the pull request
+    and recording it was found to leave the change stuck: the retry POSTed for a
+    head that already had one, got 422, and raised.
+    """
     return [
         _Response(200, {"head": {"sha": "headsha"}}),
         _Response(200, {"default_branch": "main"}),
         _Response(200, {"object": {"sha": "basesha"}}),
         contents,
+        _Response(200, existing_pull if existing_pull is not None else []),
     ]
 
 
@@ -295,3 +303,53 @@ def test_the_body_is_sent_as_base64_because_the_contents_api_requires_it(main, m
 
     sent = github.sent("put", "/contents/")["content"]
     assert base64.b64decode(sent).decode("utf-8") == "# repaired\nwith a line\n"
+
+
+def test_a_retry_adopts_the_pull_request_that_already_exists(main, monkeypatch):
+    """Exactly once, across a crash.
+
+    `create_ref` already treated 422 as success because the branch may survive an
+    interrupted attempt. The pull request did not get the same treatment, so a
+    crash between opening it and recording it left the change stuck: a real pull
+    request open, and every retry a 422 raised as a 500.
+    """
+    github = _GitHub(
+        get=_reads(
+            contents=_Response(200, {"sha": "blobsha"}),
+            existing_pull=[{"html_url": "https://github.com/owner/repo/pull/9", "number": 9}],
+        ),
+        post=[_Response(201, {})],
+        put=[_Response(200, {"commit": {"sha": "c"}})],
+    )
+    monkeypatch.setattr(main, "httpx", github)
+
+    result = _suggest(main, github)
+
+    assert result["published"] is True
+    assert result["pull_number"] == 9
+    assert "already existed" in result["adopted"]
+    opened = [u for m, u, _ in github.calls if m == "post" and u.endswith("/pulls")]
+    assert not opened, "a second pull request was opened for a branch that had one"
+
+
+def test_the_installation_token_is_scoped_to_one_repository(monkeypatch):
+    # Not the `main` fixture: it replaces `_github_installation_token` with a
+    # stub, and this test is about the real one.
+    monkeypatch.setenv("MITOS_LEDGER", "memory")
+    import service.main as main
+
+    sent = {}
+
+    class _Post:
+        def post(self, url, **kwargs):
+            sent.update(kwargs)
+            return _Response(201, {"token": "tok"})
+
+    monkeypatch.setattr(main, "httpx", _Post())
+    monkeypatch.setattr(main, "_github_app_metadata", lambda: {"secret_prefix": "p", "app_id": 1})
+    monkeypatch.setattr(main, "_read_managed_secret", lambda name: "key")
+    monkeypatch.setattr(main.jwt, "encode", lambda *a, **k: "jwt")
+
+    main._github_installation_token(42, repository="owner/private-billing")
+
+    assert sent["json"] == {"repositories": ["private-billing"]}
