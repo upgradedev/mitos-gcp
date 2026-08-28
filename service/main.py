@@ -1798,23 +1798,133 @@ def _webhook_secret() -> str:
     return _WEBHOOK_SECRET
 
 
-def _fetch_diff(repository: str, number: int) -> list[dict]:
-    """The files in the pull request, from the public GitHub API.
+@dataclass(frozen=True)
+class Diff:
+    """The files in a pull request, and whether they are all of them.
 
-    No credential: the specification repository is public, and a read path that
-    needs a token is a read path that can be used to write.
+    `whole` is the load-bearing field. A verdict computed over part of a change
+    is not a weaker verdict, it is a different one about a different change, and
+    the caller has to be able to tell the two apart.
     """
-    r = httpx.get(
-        f"https://api.github.com/repos/{repository}/pulls/{number}/files",
-        headers={"Accept": "application/vnd.github+json"},
-        timeout=30.0,
-    )
-    r.raise_for_status()
-    return [
+
+    files: list[dict]
+    whole: bool
+    reason: str = ""
+    pinned_to: str = ""
+
+    def __iter__(self):
+        """So existing callers that treat this as the list keep working."""
+        return iter(self.files)
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+
+def _fetch_diff(
+    repository: str,
+    number: int,
+    head_sha: str = "",
+    installation_id: Optional[int] = None,
+) -> Diff:
+    """Every file in the pull request, or a refusal to claim it is every file.
+
+    Four things were wrong with the one call this replaces, and the fourth is
+    the one that mattered.
+
+    It read page one. GitHub returns thirty files by default and this took what
+    came, so a pull request of seventy was analysed as twenty-eight. Reproduced
+    against github/docs#45585: `changed_files=70`, page one `30`, twenty-eight
+    of them with a patch.
+
+    It dropped every file GitHub returned without a `patch` key, silently. On
+    that same pull request two of them are plain-text JSON, not binaries.
+
+    It sent no credential, so a private repository answered 404 and the run
+    ended as a transport error rather than as a refusal anyone could read.
+
+    And it was not pinned. `/pulls/{n}/files` reports the pull request as it is
+    NOW, and cannot be pinned: I tried `sha`, `ref`, `head_sha` and `commit_sha`
+    and all four returned a response identical to the unparameterised one. So a
+    push landing between the webhook and this call moved what was analysed, and
+    nothing recorded that it had.
+
+    `/compare/{base}...{head}` is pinned and is used when it can be: it is
+    documented to cap at three hundred files and its `files` array cannot be
+    paginated, which is why the count decides. Above that the paginated pull
+    request endpoint is exhausted instead, reaching three thousand, and the
+    result is marked unpinned rather than quietly served as if it were.
+
+    Whatever the route, disagreeing with `changed_files` or finding a file
+    without a patch sets `whole=False`. The caller decides what to do with that;
+    this function will not pretend.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if installation_id is not None:
+        # Only when there is one, so the public path stays tokenless. A read
+        # path that always needs a token is a read path that can be used to
+        # write, which is the argument this project makes about itself.
+        try:
+            headers["Authorization"] = f"Bearer {_github_installation_token(installation_id)}"
+        except Exception as exc:  # noqa: BLE001 - a read may proceed unauthenticated
+            print(
+                json.dumps({"event": "diff.token_unavailable", "error": type(exc).__name__}),
+                flush=True,
+            )
+
+    api = f"https://api.github.com/repos/{repository}"
+    summary = httpx.get(f"{api}/pulls/{number}", headers=headers, timeout=30.0)
+    summary.raise_for_status()
+    expected = int(summary.json().get("changed_files") or 0)
+    base_sha = str((summary.json().get("base") or {}).get("sha") or "")
+
+    raw: list[dict] = []
+    pinned = ""
+    if head_sha and base_sha and expected <= 300:
+        compare = httpx.get(
+            f"{api}/compare/{base_sha}...{head_sha}", headers=headers,
+            params={"per_page": 100}, timeout=30.0,
+        )
+        compare.raise_for_status()
+        raw = list(compare.json().get("files") or [])
+        pinned = head_sha
+    else:
+        page = 1
+        while True:
+            response = httpx.get(
+                f"{api}/pulls/{number}/files", headers=headers,
+                params={"per_page": 100, "page": page}, timeout=30.0,
+            )
+            response.raise_for_status()
+            batch = response.json()
+            raw.extend(batch)
+            if len(batch) < 100 or page >= 30:
+                break
+            page += 1
+
+    patchless = [f.get("filename") for f in raw if not f.get("patch")]
+    files = [
         {"path": f["filename"], "patch": f.get("patch", "")}
-        for f in r.json()
+        for f in raw
         if f.get("patch")
     ]
+
+    problems = []
+    if expected and len(raw) != expected:
+        problems.append(f"GitHub reports {expected} changed files and {len(raw)} were read")
+    if patchless:
+        problems.append(f"{len(patchless)} file(s) came back with no patch: {patchless[:5]}")
+    if not pinned:
+        problems.append(
+            f"read from the pull request as it is now rather than pinned to "
+            f"{head_sha or 'the delivered head'}"
+        )
+
+    return Diff(
+        files=files,
+        whole=not problems,
+        reason="; ".join(problems),
+        pinned_to=pinned,
+    )
 
 
 @app.post("/webhook/github")
@@ -1919,7 +2029,47 @@ async def github_webhook(request: Request) -> JSONResponse:
                     repository=delivery.repository, installation_id=installation_id,
                     head_sha=delivery.head_sha, status="in_progress", check_run_id=check_run_id,
                 )
-            files = _fetch_diff(delivery.repository, delivery.number)
+            files = _fetch_diff(
+                delivery.repository,
+                delivery.number,
+                head_sha=delivery.head_sha,
+                installation_id=installation_id if isinstance(installation_id, int) else None,
+            )
+            # The refusal has to land HERE, in the thread, not only on a GitHub
+            # check run. `run_chore` appends `evaluator.verdict` with
+            # `passed = not findings` and no installation guard, so a diff read
+            # at 28 of 70 files produces fewer findings, hence `passed=True`,
+            # recorded as a completed governance verdict for a change the fleet
+            # read forty per cent of. `/thread` and `metrics.py` read that
+            # entry; the check run is a no-op until an App exists.
+            #
+            # So an unprovable read is refused before the chore runs, rather
+            # than analysed and reported as clean.
+            if not files.whole:
+                led.append(
+                    Entry(
+                        kind="trigger.incomplete_diff", actor="github",
+                        subject=entry.subject, parent_id=entry.entry_id,
+                        payload={
+                            "reason": files.reason,
+                            "files_read": len(files.files),
+                            "pinned_to": files.pinned_to,
+                            "verdict": (
+                                "refused. A verdict over part of a change is a "
+                                "verdict about a different change."
+                            ),
+                        },
+                        run_id=delivery.delivery_id,
+                    )
+                )
+                if isinstance(installation_id, int) and check_run_id is not None:
+                    _safe_github_check(
+                        repository=delivery.repository, installation_id=installation_id,
+                        head_sha=delivery.head_sha, status="completed",
+                        check_run_id=check_run_id, conclusion="failure",
+                        summary=f"Mitos could not read the whole change: {files.reason}",
+                    )
+                return
             if not files:
                 led.append(
                     Entry(

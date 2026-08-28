@@ -39,6 +39,10 @@ KIND_STYLE = {
     # on the one page where colour is the whole point.
     "trigger.webhook": ("#5fd7d7", "trigger"),
     "trigger.ignored": ("#8a8790", "ignored"),
+    # Amber, not grey. An incomplete diff is not a delivery that needed no
+    # attention; it is a refusal to judge a change the fleet could not
+    # prove it had read whole, and it must not read as a quiet skip.
+    "trigger.incomplete_diff": ("#b8860b", "diff not whole, refused"),
     "trigger.failed": ("#ff6b6b", "failed"),
     # Refusal red. An instruction planted in a diff is the most
     # interesting thing on the page when it happens.
