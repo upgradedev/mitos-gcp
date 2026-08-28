@@ -95,6 +95,17 @@ PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "upgradegr-mitos")
 DEMO_MODE = os.environ.get("MITOS_DEMO_MODE", "").lower() in {"1", "true", "yes"}
 
 
+def _github_app_credential_present() -> bool:
+    """Whether an App private key exists for this deployment to write with.
+
+    False says the road is closed today because nothing has been installed.
+    It does not say the road does not exist, which is what the identity payload
+    implied by not mentioning it at all.
+    """
+    metadata, _ = _read_github_app_metadata()
+    return bool(metadata.get("credentials_stored"))
+
+
 def _require_demo_mode() -> None:
     if not DEMO_MODE:
         raise HTTPException(status_code=404, detail="Demo route is disabled")
@@ -352,11 +363,28 @@ def identity() -> dict[str, Any]:
         # Which source this process is. Reported rather than inferred from
         # the image tag, because a tag is a label and this is a fact.
         "build_sha": BUILD_SHA,
+        # The road this endpoint used to omit. `may_call_write_tools` reports
+        # the ADK tool path and nothing else, and this same process also calls
+        # GitHub directly over httpx, which `before_tool_callback` never sees.
+        # Reporting only the first, and closing with an unqualified sentence
+        # about writing, made a true statement about one path read as a
+        # statement about the whole service.
+        "github_app_write": {
+            "check_runs": True,
+            "suggested_pull_requests": "behind a human approval",
+            "installation_token": "minted per request, never stored",
+            "credential_present": _github_app_credential_present(),
+            "reaches": "repositories the App was installed on, chosen by their owner",
+        },
         "note": (
-            "may_call_write_tools is enforced in ADK's before_tool_callback. "
-            "spec_repo_write_credential is enforced by Google IAM, outside this "
-            "process. The second one is the load-bearing control: this service "
-            "cannot grant itself the credential no matter what it decides."
+            "may_call_write_tools covers the ADK tool path only. This service "
+            "also makes direct GitHub App calls, check runs and a "
+            "branch-file-pull-request sequence behind a human approval. Those "
+            "do not pass through that callback"
+            " and are reported under github_app_write. spec_repo_write_credential is enforced by Google "
+            "IAM, outside this process, and is the load-bearing control: this "
+            "service cannot grant itself the specification repository credential "
+            "no matter what it decides."
         ),
     }
 

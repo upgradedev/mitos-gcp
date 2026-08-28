@@ -157,3 +157,71 @@ def test_the_three_coverage_numbers_come_from_one_run():
         f"{percent}% does not follow from {covered}/{statements}; the three "
         f"numbers were copied from different runs"
     )
+
+
+# The check that would have caught the write-boundary claim, and did not.
+#
+# This file string-matched three README sentences. It never looked at the
+# `/identity` payload the deployed check reads, and never at the built interface,
+# which is where the flat falsehood lived: BoundaryView rendered "The reader
+# cannot write." while the same process opens pull requests and posts check runs
+# over plain httpx, which ADK's `before_tool_callback` never sees.
+BOUNDARY_VIEW = (REPO / "web" / "src" / "views" / "BoundaryView.tsx").read_text(encoding="utf-8")
+
+
+def test_no_judge_facing_file_says_the_reader_cannot_write_without_saying_where():
+    """"The reader cannot write" is false. "The reader cannot write to the
+    specification repository" is true, is what `/identity` proves live, and is
+    the claim the boundary table already made correctly."""
+    # Normalised, not line by line. The sentence wraps, so its qualifier can
+    # land on the following line, and a per-line check then reports the first
+    # first half as unqualified. The first draft of this test did exactly that.
+    offenders = []
+    for name, text in (
+        ("README.md", README),
+        ("BoundaryView.tsx", BOUNDARY_VIEW),
+        ("service/main.py", SERVICE),
+    ):
+        flat = " ".join(text.split()).lower()
+        for phrase in ("cannot write", "nothing to write with"):
+            start = 0
+            while True:
+                at = flat.find(phrase, start)
+                if at == -1:
+                    break
+                start = at + 1
+                # The rest of THIS sentence, not a fixed window. A 140 character
+                # window passed the mutation that put the bare sentence back,
+                # because the paragraph after it happened to mention GitHub. The
+                # qualifier has to be in the sentence making the claim.
+                rest = flat[at + len(phrase) :]
+                end = min(
+                    (i for i in (rest.find("."), rest.find("</b>")) if i != -1),
+                    default=len(rest),
+                )
+                sentence = rest[: end if end else 0]
+                if any(
+                    q in sentence
+                    for q in ("specification repository", "spec repo", "spec_repo")
+                ):
+                    continue
+                offenders.append(f"{name}: ...{flat[max(0, at - 40):at + 80]}...")
+
+    assert not offenders, (
+        "these say the reader cannot write, unqualified, while it opens pull "
+        "requests and posts check runs under an installation token:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_identity_payload_reports_the_github_app_road():
+    """`may_call_write_tools` covers the ADK tool path. Reporting only that, and
+    closing with a sentence about writing, made a true statement about one path
+    read as a statement about the service."""
+    assert '"github_app_write"' in SERVICE, (
+        "/identity reports only the ADK tool guard, so a reader concludes the "
+        "service makes no GitHub writes at all"
+    )
+    assert "do not pass through that callback" in " ".join(SERVICE.split()), (
+        "the note does not say that the direct GitHub calls bypass the callback"
+    )

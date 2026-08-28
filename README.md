@@ -202,7 +202,8 @@ A token would carry the whole account. This carries write access to `mitos-spec`
 which is the difference between saying least privilege and doing it.
 
 So the boundary has a consequence rather than being a demonstration. Ask the reader to write and it
-refuses, because it has nothing to write with:
+refuses, because it holds no credential that can write to the specification
+repository:
 
 ```bash
 curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute \

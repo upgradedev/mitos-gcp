@@ -1,6 +1,7 @@
 // The boundary, as a picture rather than a table.
 //
-// The thing to understand in sixty seconds: the reader cannot write, and the
+// The thing to understand in sixty seconds: the reader cannot write to the
+// specification repository, and the
 // refusal that matters comes from Google IAM, outside this process, rather
 // than from an if statement this service could change its mind about.
 //
@@ -177,8 +178,12 @@ function Boundary({
           </div>
 
           <div className="mitos-lane__end">
-            <b>The reader cannot write.</b> It stops at gate 1 by its own
-            decision and at gate 2 by someone else&rsquo;s.
+            <b>The reader cannot write to the specification repository.</b> It
+            stops at gate 1 by its own decision and at gate 2 by someone
+            else&rsquo;s. It can write to GitHub, behind a human approval, using
+            an installation token for repositories somebody chose to install the
+            App on: a third road, open by design and reported by{" "}
+            <code>/identity</code> as <code>github_app_write</code>.
           </div>
         </div>
 
