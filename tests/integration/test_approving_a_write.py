@@ -107,6 +107,22 @@ def world(monkeypatch):
     fake.FieldFilter = lambda *a, **k: None
     monkeypatch.setitem(sys.modules, "google.cloud.firestore", fake)
 
+    # And the attribute on the package, which is what actually decides.
+    #
+    # `from google.cloud import firestore` imports `google.cloud`, then takes
+    # the `firestore` ATTRIBUTE if the package already has one, and only falls
+    # back to importing the submodule if it does not. Patching `sys.modules`
+    # alone therefore works only when nothing has imported the real client yet.
+    #
+    # That is why this passed on a laptop and failed in CI: the integration job
+    # runs the Firestore emulator suite in the same process, so by the time
+    # these tests run the real module is already bound to the package and the
+    # fake in `sys.modules` is never consulted. The endpoint talked to the
+    # emulator, found no document, and answered 404.
+    import google.cloud  # noqa: PLC0415
+
+    monkeypatch.setattr(google.cloud, "firestore", fake, raising=False)
+
     # An in-memory claim store. `_CLAIMS` is a module singleton that would carry
     # one test's claim into the next, and the fake Firestore below does not
     # implement the create() precondition the real one relies on. What is under
