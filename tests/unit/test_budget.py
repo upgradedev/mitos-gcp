@@ -115,8 +115,10 @@ def test_only_the_endpoints_that_cost_money_are_bounded():
         "def _within_budget(request)"
     )
 
-    assert bounded == 4, (
-        f"{bounded} budget checks; expected four, one each for /run and "
+    assert bounded == 5, (
+        f"{bounded} budget checks; expected five, one for the suggested-change "
+        f"approval, which is the only endpoint that mints a write-capable "
+        f"token and had no limit at all, and one each for /run and "
         "/run/stream and one each for the two standards endpoints when they "
         "name a repository"
     )

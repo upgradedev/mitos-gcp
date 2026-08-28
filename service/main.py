@@ -599,7 +599,7 @@ def _read_managed_secret(secret_id: str) -> str:
     return client.access_secret_version(name=name).payload.data.decode("utf-8").strip()
 
 
-def _github_installation_token(installation_id: int) -> str:
+def _github_installation_token(installation_id: int, repository: str = "") -> str:
     metadata = _github_app_metadata()
     secret_prefix = str(metadata.get("secret_prefix") or "")
     app_id = metadata.get("app_id")
@@ -608,8 +608,18 @@ def _github_installation_token(installation_id: int) -> str:
     private_key = _read_managed_secret(f"{secret_prefix}-private-key")
     now = int(time.time())
     app_token = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": str(app_id)}, private_key, algorithm="RS256")
+    # Scoped when the caller says which repository it is for. An installation
+    # token with no body carries the App's full permissions across every
+    # repository the installation covers, which for a read-only check-run update
+    # is more authority than the operation needs and more than this project
+    # argues for anywhere else.
+    body: dict[str, Any] = {}
+    if repository:
+        body["repositories"] = [repository.split("/")[-1]]
+
     response = httpx.post(
         f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+        json=body or None,
         headers={
             "Authorization": f"Bearer {app_token}",
             "Accept": "application/vnd.github+json",
@@ -734,6 +744,28 @@ def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: in
         f"{api}/contents/{quoted}", headers=headers, json=payload, timeout=30.0,
     )
     content.raise_for_status()
+    # Adopt rather than duplicate. `create_ref` already treats 422 as success
+    # because the branch may exist from an interrupted attempt; the pull request
+    # needed the same treatment and did not have it, so a retry after a crash
+    # POSTed for a head that already had one, got 422, and raised. The change
+    # was then stuck: a real pull request open, and every retry a 500.
+    owner = repository.split("/")[0]
+    existing_pulls = httpx.get(
+        f"{api}/pulls", headers=headers,
+        params={"head": f"{owner}:{branch}", "state": "all", "per_page": 1},
+        timeout=30.0,
+    )
+    if existing_pulls.status_code == 200 and existing_pulls.json():
+        adopted = existing_pulls.json()[0]
+        return {
+            "published": True,
+            "branch": branch,
+            "url": adopted.get("html_url"),
+            "pull_number": adopted.get("number"),
+            "commit": "",
+            "adopted": "this pull request already existed for this branch",
+        }
+
     pull = httpx.post(
         f"{api}/pulls", headers=headers,
         json={
@@ -1399,9 +1431,18 @@ class SuggestedChangeApprovalRequest(BaseModel):
 
 @app.post("/api/workspace/suggested-changes/approve")
 def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Request) -> dict[str, Any]:
+    # Owner only, and it accepted any reviewer. Every member after the first is
+    # made a reviewer automatically at sign-in, so approving a write on somebody
+    # else's repository was open to anyone who could join the workspace. ADR-006
+    # and the interface both describe this as an owner decision; only the code
+    # disagreed.
+    #
+    # Rate limited, because this is the one endpoint that mints a write-capable
+    # token and it had no limit at all.
     user, membership = _workspace_context(request)
     workspace_id = str(membership["workspace_id"])
-    _require_role(request, workspace_id, frozenset({"owner", "reviewer"}))
+    _require_role(request, workspace_id, frozenset({"owner"}))
+    _within_budget(request)
     from google.cloud import firestore  # noqa: PLC0415
 
     db = firestore.Client(project=PROJECT)
@@ -1424,6 +1465,26 @@ def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Reque
         return {"status": "published", "receipt": change.get("receipt") or {}}
     if change.get("status") != "awaiting_approval":
         raise HTTPException(status_code=409, detail="Suggested change is not awaiting approval")
+
+    # Exactly once, and it was exactly-if-nobody-clicks-twice. `status` was
+    # read and then GitHub was called, so two approvals arriving together both
+    # saw `awaiting_approval` and both opened a pull request. A crash between
+    # the call and the status update left a real pull request open, the change
+    # still `awaiting_approval`, and the next attempt opened a second one.
+    #
+    # The claim is the same Firestore `create()` precondition the webhook uses
+    # for delivery ids: atomic, already built, already tested. It is a lease, so
+    # a crash releases it after fifteen minutes rather than wedging the change
+    # forever, and the publish below is idempotent so the retry adopts the pull
+    # request that already exists instead of making another.
+    if not claims().claim(f"suggest:{req.run_id}"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "this suggested change is already being published. If it failed, "
+                "the claim expires and it can be approved again."
+            ),
+        )
 
     actor = str(user["login"])
     approval = approvals().grant(Approval(
