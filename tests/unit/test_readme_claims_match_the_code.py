@@ -225,3 +225,40 @@ def test_the_identity_payload_reports_the_github_app_road():
     assert "do not pass through that callback" in " ".join(SERVICE.split()), (
         "the note does not say that the direct GitHub calls bypass the callback"
     )
+
+
+def test_append_only_is_never_claimed_as_an_iam_property():
+    """`roles/datastore.user` includes `entities.update` and `entities.delete`,
+    and Firestore's predefined roles have no per-collection or per-operation
+    scope. So append-only here is one lock, in code, and a document that implies
+    a second one from IAM is describing something that does not exist.
+
+    `FirestoreLedger` said the reader and evaluator "are granted create
+    permission on this collection and nothing else". Nothing grants that.
+    """
+    ledger = (REPO / "src" / "mitos" / "ledger.py").read_text(encoding="utf-8")
+
+    assert "create permission on this collection and nothing else" not in ledger
+    assert "by INTERFACE" in ledger or "by interface" in ledger, (
+        "the ledger no longer says which kind of append-only it has"
+    )
+
+    # Every occurrence, not the first. There were two, the first was qualified
+    # and the second was not, and a check on the first would have reported the
+    # file as clean.
+    flat = " ".join(README.split()).lower()
+    unqualified = []
+    start = 0
+    while True:
+        at = flat.find("append-only", start)
+        if at == -1:
+            break
+        start = at + 1
+        if "by interface" not in flat[at : at + 40]:
+            unqualified.append(flat[max(0, at - 50) : at + 60])
+
+    assert start > 1, "the README no longer mentions append-only at all"
+    assert not unqualified, (
+        "these append-only claims are unqualified, and IAM does not enforce "
+        "them: " + " | ".join(unqualified)
+    )

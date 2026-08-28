@@ -278,6 +278,13 @@ built.
   landed in the source as a literal backspace byte, so the destructive-migration
   rule could never match, and every test still passed because no test fed it a
   destructive migration. Use an editor, or build the escape explicitly.
+- Quote a false claim verbatim while correcting it, in a file a check reads.
+  A check over source text cannot tell a claim from a quotation of one, so the
+  correction trips the check written to catch the original. This happened three
+  times in one day: a PEM header inside the comment explaining why the secret
+  detector was widened, the sentence "the reader cannot write" inside the
+  comment explaining why it was wrong, and an IAM claim inside the docstring
+  correcting it. Describe the old wording, do not reproduce it.
 - Write a credential shape as a literal, including inside a comment explaining
   the shape. `tests/synthetic_secrets.py` assembles every one at import time,
   and the reason is that gitleaks is the first stage of CI with no ignore file.

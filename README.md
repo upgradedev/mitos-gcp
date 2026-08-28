@@ -379,7 +379,7 @@ class of thing that wrote it.
 |---|---|
 | "cataloged for cross-department use" | the catalogue is a queried structure, not a table in a document. The router reads it to decide who wakes, so adding a companion changes behaviour. `GET /catalog` |
 | "safely maintain context across weeks of asynchronous operations" | **the query subscription is the mechanism, not the storage.** Writing or changing any deferral hands the fleet the whole open set and it escalates the expired ones with nobody scheduling anything. The calendar alone delivers no snapshot. `GET /watch` counts the wakes. The demo also runs the chore twice and the second run recalls what the first wrote, live |
-| "without violating enterprise compliance, data sovereignty, or security policies" | three identities, one write credential, an append-only ledger with no mutation method, and a write addressed by sha256 |
+| "without violating enterprise compliance, data sovereignty, or security policies" | three identities, one write credential, an append-only by interface ledger with no mutation method, and a write addressed by sha256 |
 
 ## Run it
 
@@ -551,7 +551,7 @@ Sources: [Cloud Run](https://cloud.google.com/run/pricing),
 |---|---|
 | the gate is a control, not a prompt | **proven in CI, both directions**, and against live Gemini 3.7 |
 | three Cloud Run services, three service accounts | **deployed**, verifiable with the two `curl`s above |
-| Firestore provenance thread | **deployed**, append-only |
+| Firestore provenance thread | **deployed**, append-only by interface: no update or delete method exists in the code. IAM does not enforce it |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
 | the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by the writer's own service account, which is the claim: no human and no other service can make them. The commit on record, [`e065d3b`](https://github.com/upgradedev/mitos-spec/commit/e065d3b3a739ffb15dca1195e3df6944fe1e4a21), is authored by `mitos-writer@mitos-fleet.iam.gserviceaccount.com`, because it was written before the fleet moved to `upgradegr-mitos`. The identity that would author the next one is `mitos-writer@upgradegr-mitos.iam.gserviceaccount.com`, which `/identity` on the writer reports. Said this way rather than printing the current address over an older commit, because the address is checkable in one click |
 | the webhook | **real.** A GitHub webhook on [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) posts to `/webhook/github`. Signature verified with HMAC-SHA256 over the raw body, repository allowlisted, and the fleet wakes with nobody calling anything |
