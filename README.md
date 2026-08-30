@@ -554,30 +554,37 @@ Sources: [Cloud Run](https://cloud.google.com/run/pricing),
 | Firestore provenance thread | **deployed**, append-only by interface: no update or delete method exists in the code. IAM does not enforce it |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
 | the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by the writer's own service account, which is the claim: no human and no other service can make them. The commit on record, [`e065d3b`](https://github.com/upgradedev/mitos-spec/commit/e065d3b3a739ffb15dca1195e3df6944fe1e4a21), is authored by `mitos-writer@mitos-fleet.iam.gserviceaccount.com`, because it was written before the fleet moved to `upgradegr-mitos`. The identity that would author the next one is `mitos-writer@upgradegr-mitos.iam.gserviceaccount.com`, which `/identity` on the writer reports. Said this way rather than printing the current address over an older commit, because the address is checkable in one click |
-| the webhook | **real.** A GitHub webhook on [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) posts to `/webhook/github`. Signature verified with HMAC-SHA256 over the raw body, repository allowlisted, and the fleet wakes with nobody calling anything. The hook is registered and active; its delivery log is empty, and the paragraph under this table says why and what that costs the claim |
+| the webhook | **real.** A GitHub webhook on [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) posts to `/webhook/github`. Signature verified with HMAC-SHA256 over the raw body, repository allowlisted, and the fleet wakes with nobody calling anything. The hook is registered and active; its delivery log is empty and is not readable without repository admin, and the paragraph under this table says what that costs the claim |
 
 The trigger closed on 2026-08-21: a real pull request on the specification
 repository woke the fleet, which read the diff from the public GitHub API,
 dispatched, exercised the interceptor and produced a plan.
 
-This paragraph used to end by pointing at GitHub's own delivery log as the
-evidence, and that evidence is not there to be read. The hook on that repository
-was replaced on 2026-08-22, after the event, so it carries no record of it:
+**Where the evidence for that is, and where it is not.** This paragraph used to
+point at GitHub's own delivery log. Nobody reading this can open that log. The
+hook listing needs admin on the repository and answers a stranger `401`, and the
+hook itself was replaced on 2026-08-22, after the event, so it carries no record
+of it either. The run is in the fleet's thread, and the anonymous view of that
+thread deliberately excludes it: any run that names a repository belongs to a
+workspace and is served only to a session (ADR-012). That is the tenancy boundary
+working, not a gap, and it means this particular run is not checkable by a judge.
+No command in this file will make it so, and the first correction here replaced
+one unreadable pointer with another that returns `401`, which is the same mistake
+one level down.
+
+What is checkable anonymously is the mechanism the claim was standing in for:
 
 ```bash
-gh api repos/upgradedev/mitos-spec/hooks --jq '.[].last_response.status'
-# unused
+curl -s https://mitos-reader-idlonbaoaq-ew.a.run.app/thread
 ```
 
-A pointer to somebody else's log that resolves to nothing is worse than no
-pointer, because a reader who checks finds an empty log and reasonably stops
-believing the rest of the page. The evidence that survives is this repository's
-own thread, which is the whole argument for having one.
+That answers with the demo corpus, which says so in its own `scope` field, and
+carries `trigger.pull_request`, `fleet.dispatch`, `guard.exercised`,
+`injection.detected`, `evaluator.verdict` and `plan.proposed` entries.
 
 The paragraph also used to open by claiming nothing here is simulated any more,
-and that was too strong in the other direction. The demo corpus is synthetic and
-says so in its own payload. What is not simulated is the mechanism: the
-identities, the gate, and the write.
+and that was too strong in the other direction. That corpus is synthetic. What is
+not simulated is the mechanism: the identities, the gate, and the write.
 
 A webhook never approves a write. It produces a plan and stops at the approval,
 because the one thing a human is there for is the thing an automatic trigger must
