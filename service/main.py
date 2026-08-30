@@ -1153,6 +1153,20 @@ def _require_setup_authority(request: Request) -> None:
 async def _not_authorised_to_set_up(request, exc: NotAuthorisedToSetUp):
     return JSONResponse(
         status_code=403,
+        # `no-store` on the refusal, not only on the page it refuses.
+        #
+        # The header was added because the page mints a single-use state paired
+        # with a ten minute cookie, and a cached copy carries a state the cookie
+        # no longer matches. That reasoning does not cover a 403, so the 403 went
+        # out cacheable, and the deployed suite caught it the moment this route
+        # stopped being public.
+        #
+        # A cached refusal is worse than a cached page here. It outlives the
+        # reason for it: the owner reads the message, sets MITOS_SETUP_TOKEN,
+        # retries, and is answered from a cache that never saw their token. The
+        # product then looks broken in exactly the place it just told them how
+        # to proceed, and nothing in the logs shows a second request.
+        headers={"Cache-Control": "no-store"},
         content={
             "error": "not authorised to configure this deployment's GitHub App",
             "detail": str(exc),

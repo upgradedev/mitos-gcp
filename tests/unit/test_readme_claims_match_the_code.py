@@ -292,8 +292,13 @@ def test_no_judge_facing_claim_rests_on_a_delivery_log_that_is_empty():
 
     # A response code presented as evidence, anywhere near the delivery log.
     for hit in re.finditer(r"deliver(?:y|ies|ed)", flat, re.IGNORECASE):
-        window = flat[hit.start() - 120 : hit.end() + 160]
-        code = re.search(r"\b(20[0-9]|2xx)\b|\bOK\b", window)
+        window = flat[max(0, hit.start() - 120) : hit.end() + 160]
+        code = re.search(
+            r"\b(2\d\d|2xx)\b[^.]{0,40}\b(ok|response|status|code|log)\b"
+            r"|\b(ok|response|status|code|log)\b[^.]{0,40}\b(2\d\d|2xx)\b",
+            window,
+            re.IGNORECASE,
+        )
         assert not code, (
             "the README presents a GitHub delivery response as evidence, and "
             "the hook's delivery log is empty (last_response.status is "
@@ -328,4 +333,48 @@ def test_the_readme_does_not_reduce_two_write_credentials_to_one():
         "the README says 'one write credential' and CLAUDE.md documents two: a "
         "repository-scoped deploy key (ADR-005) and a per-request GitHub App "
         "installation token (ADR-013)"
+    )
+
+
+# GitHub endpoints that answer a reader with no admin on the repository. `/hooks`
+# is 401 to an anonymous caller and 404 to a signed-in non-admin, and 404 is the
+# worse of the two: it reads as "this does not exist" rather than "you may not
+# see this", so a judge concludes the repository is fictional.
+ADMIN_ONLY_GITHUB = ("/hooks", "/keys", "/actions/secrets", "/collaborators")
+
+
+def test_the_readme_never_prints_a_command_a_stranger_cannot_run():
+    """The generalisation of the private-service check above, learned the hard way.
+
+    That check matches on `curl` and on the two private Cloud Run hostnames. The
+    correction that removed the delivery-log claim printed a `gh api` call
+    against this repository's hook listing as the reader's own evidence. It is
+    not `curl` and it is not a Cloud Run host, so the existing check did not see
+    it, and it answers anyone without admin on that repository:
+
+        curl -s -o /dev/null -w '%{http_code}' \\
+          https://api.github.com/repos/upgradedev/mitos-spec/hooks
+        401
+
+    So a paragraph written to stop a reader finding an empty log handed them a
+    command that errors instead. Same failure one level down, and the reason it
+    got through is that the guard was written around the wording of the first
+    mistake rather than around its shape.
+
+    A line is allowed to name one of these endpoints while saying it cannot be
+    read; what is forbidden is offering it as something to run.
+    """
+    offenders = [
+        line.strip()
+        for line in README.splitlines()
+        if ("gh api" in line or "api.github.com" in line)
+        and any(path in line for path in ADMIN_ONLY_GITHUB)
+        and "401" not in line
+        and "404" not in line
+        and "admin" not in line.lower()
+    ]
+
+    assert not offenders, (
+        "these are printed as evidence for a reader with no admin on the "
+        "repository, and answer 401 or 404:\n  " + "\n  ".join(offenders)
     )
