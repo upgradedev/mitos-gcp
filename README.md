@@ -105,12 +105,45 @@ flowchart TB
 
 This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`). Five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.
 
-None of it has executed against a real repository yet. The reason given here used to be that no GitHub App was installed, and that stopped being true on 2026-08-30. An App is installed, GitHub delivers to `/webhook/github`, and those deliveries now verify: requests from GitHub's own address range are answered `202` or `403`, not the `401` they were getting while the webhook secret was cached from before the App existed. What has not happened is the step after that. The `installation` delivery arrived during the window when that cache was still stale, so it was refused and never recorded, and the fleet's `repositories` collection is empty. Until that delivery is replayed, the only repository the webhook will act on is the one in the static allowlist, which anyone can read:
+None of it has executed against a real repository yet, and the reason has
+changed twice in two days. Both versions are left visible, because the pattern is
+the point: a reason is a claim, and it goes stale faster than the sentence it
+supports.
+
+The first reason was that no GitHub App was installed. One was, and GitHub was
+already delivering to `/webhook/github`. Those deliveries verify: requests from
+GitHub's published hook range are answered `202`, while the `401`s in the same
+logs come from addresses outside it, which is internet noise being refused
+correctly. Checked rather than assumed, by resolving the delivering addresses
+against GitHub's own `api.github.com/meta`.
+
+The second reason was that the `installation` delivery had arrived while the
+webhook secret was still cached from before the App existed, so it was refused
+and never recorded, and the fleet did not know it was installed. That was true
+when written and stopped being true on 2026-08-31, when the delivery was
+replayed. It was accepted, the workspace was derived from the installation
+rather than declared (ADR-012), and the repository it covers went into the
+allowlist. Both halves of that list are readable with no account:
 
 ```bash
 curl -s https://mitos-reader-437828525303.europe-west1.run.app/config
-# {"webhook_repositories": ["upgradedev/mitos-spec"], ...}
 ```
+
+The static half is the Terraform default in `infra/variables.tf`:
+
+    "webhook_repositories": ["upgradedev/mitos-spec"]
+
+and because the installation is now recorded, the endpoint also returns
+[`upgradedev/archon-gcp-agentic`](https://github.com/upgradedev/archon-gcp-agentic).
+A repository reaches that list by someone installing the App on it, never by
+being named in a request.
+
+So what is left is one step, and it needs no further configuration: a pull
+request on that repository now wakes the fleet and produces a check run under an
+installation token. Until one has, this paragraph says "not yet" rather than
+describing what would happen, which is the discipline the two corrections above
+were the cost of learning.
+
 
 Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested". That is why the false version survived for weeks, and why it is worth naming rather than quietly editing. The replacement reason was wrong within days of being written, which is the same lesson at a shorter interval: a reason is a claim too, and it goes stale faster than the sentence it supports.
 
