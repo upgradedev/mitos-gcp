@@ -105,7 +105,14 @@ flowchart TB
 
 This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`). Five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.
 
-None of it has executed against a real repository yet, because no GitHub App is installed. Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested". That is why the false version survived for weeks, and why it is worth naming rather than quietly editing.
+None of it has executed against a real repository yet. The reason given here used to be that no GitHub App was installed, and that stopped being true on 2026-08-30. An App is installed, GitHub delivers to `/webhook/github`, and those deliveries now verify: requests from GitHub's own address range are answered `202` or `403`, not the `401` they were getting while the webhook secret was cached from before the App existed. What has not happened is the step after that. The `installation` delivery arrived during the window when that cache was still stale, so it was refused and never recorded, and the fleet's `repositories` collection is empty. Until that delivery is replayed, the only repository the webhook will act on is the one in the static allowlist, which anyone can read:
+
+```bash
+curl -s https://mitos-reader-437828525303.europe-west1.run.app/config
+# {"webhook_repositories": ["upgradedev/mitos-spec"], ...}
+```
+
+Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested". That is why the false version survived for weeks, and why it is worth naming rather than quietly editing. The replacement reason was wrong within days of being written, which is the same lesson at a shorter interval: a reason is a claim too, and it goes stale faster than the sentence it supports.
 
 The two dotted red-herring arrows into Secret Manager are the point of the whole design. The reader
 and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code
@@ -575,7 +582,7 @@ one level down.
 What is checkable anonymously is the mechanism the claim was standing in for:
 
 ```bash
-curl -s https://mitos-reader-idlonbaoaq-ew.a.run.app/thread
+curl -s https://mitos-reader-437828525303.europe-west1.run.app/thread
 ```
 
 That answers with the demo corpus, which says so in its own `scope` field, and
