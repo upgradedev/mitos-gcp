@@ -262,3 +262,70 @@ def test_append_only_is_never_claimed_as_an_iam_property():
         "these append-only claims are unqualified, and IAM does not enforce "
         "them: " + " | ".join(unqualified)
     )
+
+
+# The two claims below were found by running the same check on the README that
+# the README asks a judge to run on it: take the sentence, take the command it
+# implies, see whether they agree.
+
+
+def test_no_judge_facing_claim_rests_on_a_delivery_log_that_is_empty():
+    """The README pointed at GitHub's delivery log for the webhook proof.
+
+    That log is empty. The hook on `upgradedev/mitos-spec` was replaced on
+    2026-08-22, one day after the event the paragraph describes, so the current
+    hook reports `last_response.status == "unused"` and zero deliveries:
+
+        gh api repos/upgradedev/mitos-spec/hooks --jq '.[].last_response.status'
+
+    The claim may well have been true when it was written, against a hook that
+    no longer exists. That is exactly what makes it dangerous: it is checkable
+    in one command, it is the sentence a sceptical reader checks first, and it
+    resolves to nothing. An unverifiable pointer to somebody else's log costs
+    more than the claim it was carrying, because the reader who finds it empty
+    stops believing the paragraphs that are true.
+
+    This asserts on the shape of the claim, not on one wording, so a rephrasing
+    that makes the same promise fails too.
+    """
+    flat = " ".join(README.split())
+
+    # A response code presented as evidence, anywhere near the delivery log.
+    for hit in re.finditer(r"deliver(?:y|ies|ed)", flat, re.IGNORECASE):
+        window = flat[hit.start() - 120 : hit.end() + 160]
+        code = re.search(r"\b(20[0-9]|2xx)\b|\bOK\b", window)
+        assert not code, (
+            "the README presents a GitHub delivery response as evidence, and "
+            "the hook's delivery log is empty (last_response.status is "
+            f"'unused'): ...{window.strip()}..."
+        )
+
+    # And the paragraph must still say the log is empty, or the correction has
+    # been dropped and the next writer has no reason not to re-add the claim.
+    assert "delivery log is empty" in flat, (
+        "the README no longer records that the webhook's delivery log is empty, "
+        "which is the fact that keeps the removed claim from coming back"
+    )
+
+
+def test_the_readme_does_not_reduce_two_write_credentials_to_one():
+    """ADR-005 was amended because it said "the" write credential and there are two.
+
+    The reader mints a GitHub App installation token per request (ADR-013) and
+    the writer holds a deploy key scoped to the specification repository
+    (ADR-005). They have different blast radii and different homes. The README's
+    compliance table still summarised them as one, which is the same error the
+    ADR was amended to stop making, in the file a judge reads first.
+    """
+    flat = " ".join(README.split()).lower()
+    adrs = " ".join((REPO / "CLAUDE.md").read_text(encoding="utf-8").split()).lower()
+
+    assert "adr-013" in adrs, (
+        "ADR-013 is gone; this test's premise is stale and needs rewriting "
+        "rather than deleting"
+    )
+    assert "one write credential" not in flat, (
+        "the README says 'one write credential' and CLAUDE.md documents two: a "
+        "repository-scoped deploy key (ADR-005) and a per-request GitHub App "
+        "installation token (ADR-013)"
+    )
