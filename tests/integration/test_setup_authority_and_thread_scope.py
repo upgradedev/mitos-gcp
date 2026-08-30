@@ -234,3 +234,34 @@ def test_a_descendant_arriving_before_its_root_is_still_scoped(client):
 
     assert "a/b.sql" not in text
     assert "acme/late" not in text
+
+
+def test_the_setup_refusal_is_not_cacheable():
+    """A cached 403 outlives the reason for it.
+
+    `no-store` was put on the manifest page because it mints a single-use state
+    paired with a short cookie. The refusal was built separately and got no
+    header, and for as long as the route was public nothing noticed. When the
+    route became owner-only, every anonymous request took the branch without
+    the header, and `deployed.yml` failed with "the manifest page is cacheable:
+    absent" against a live deployment.
+
+    The refusal is the response that matters more. It tells the owner to set
+    MITOS_SETUP_TOKEN and retry; if a cache answers that retry, the product
+    looks broken at the exact step where it just explained how to proceed, and
+    no second request appears in any log.
+    """
+    from fastapi.testclient import TestClient
+
+    from service.main import app
+
+    refused = TestClient(app).get("/github/app/new")
+
+    assert refused.status_code == 403, (
+        "the setup route no longer refuses an anonymous caller, which is a "
+        "bigger problem than caching"
+    )
+    assert "no-store" in refused.headers.get("cache-control", ""), (
+        "the setup refusal is cacheable: "
+        f"{refused.headers.get('cache-control') or 'no Cache-Control header'}"
+    )

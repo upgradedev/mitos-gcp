@@ -537,6 +537,16 @@ jobs:
           # It mints a single-use state paired with a ten minute cookie. A
           # cached copy carries a state the cookie no longer matches, and that
           # failure appears at GitHub, one step after the one that caused it.
+          #
+          # This runs with no setup token, so what it receives is the 403, and
+          # that is the response this asserts on. It was written when the route
+          # was public, kept passing while it was, and went red the moment the
+          # route became owner-only, because the refusal was built without the
+          # header. Both responses have to carry it: a cached refusal outlives
+          # the reason for it and answers the owner after they set the token.
+          # The 200 path cannot be reached from here without holding the token
+          # in CI, which is the whole point of the token, so it is covered by
+          # test_setup_authority_and_thread_scope.py instead.
           header=$(curl -s -D - -o /dev/null --max-time 60 \
             "$READER/github/app/new" | tr -d '\r' \
             | grep -i '^cache-control:' || true)
