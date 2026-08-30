@@ -1891,9 +1891,32 @@ ALLOWED_REPOS = frozenset(
 NO_SECRET_CONFIGURED = ""  # nosec B105 - the absence of a secret, not a secret
 
 
-def _webhook_secret() -> str:
-    """Read once, cached on the module, like every other client here."""
+def _webhook_secret(*, refresh: bool = False) -> str:
+    """The secret GitHub signs deliveries with, re-readable on demand.
+
+    Cached once and never reconsidered, which broke the flow this product is
+    about at the exact moment it started working.
+
+    The service boots, finds no App, and caches the pre-App secret. The owner
+    then completes the manifest flow, GitHub returns a NEW webhook secret, and
+    the callback stores it. GitHub immediately sends `ping` and `installation`,
+    signed with the new secret, and this function keeps returning the old one.
+    Every delivery is refused 401. Observed live: the App was created at
+    19:29:09 and the deliveries at 19:29:07 and 19:32:52 were both refused.
+
+    Nothing was misconfigured and nothing said so. Registration reported
+    success, `configured: true`, and the webhook silently never worked, which is
+    worse than failing at registration.
+
+    `refresh` is for the caller that has just seen a signature not match. Four
+    instances can be running and only the one that handled the callback has the
+    new value, so clearing the cache at the callback would fix one process out
+    of four; re-reading on a mismatch fixes all of them and costs one Secret
+    Manager read on a request that was going to be refused anyway.
+    """
     global _WEBHOOK_SECRET
+    if refresh:
+        _WEBHOOK_SECRET = None
     if _WEBHOOK_SECRET is None:
         try:
             from google.cloud import secretmanager  # noqa: PLC0415
@@ -2061,7 +2084,34 @@ async def github_webhook(request: Request) -> JSONResponse:
     try:
         if len(body) > wh.MAX_BODY_BYTES:
             raise wh.Rejected(f"body of {len(body)} bytes exceeds the cap", 413)
-        wh.verify_signature(body, headers.get("x-hub-signature-256"), _webhook_secret())
+        # Once with what is cached, and if that fails, once with a fresh read.
+        #
+        # The cached value can be a secret that was correct when this process
+        # started and is not any more. Completing the manifest flow replaces the
+        # webhook secret, and only the instance that handled the callback would
+        # know; the other three keep refusing GitHub with 401 while reporting
+        # `configured: true`.
+        #
+        # The retry cannot weaken anything: it is the same constant-time
+        # comparison against the current stored secret, and a delivery that
+        # matches neither is still refused. It costs one Secret Manager read on
+        # a request that was already going to be rejected.
+        try:
+            wh.verify_signature(body, headers.get("x-hub-signature-256"), _webhook_secret())
+        except wh.Rejected as mismatch:
+            if getattr(mismatch, "status", 401) != 401:
+                raise
+            wh.verify_signature(
+                body, headers.get("x-hub-signature-256"), _webhook_secret(refresh=True)
+            )
+            print(
+                json.dumps({
+                    "event": "webhook.secret_refreshed",
+                    "delivery": delivery_id,
+                    "note": "the cached secret was stale; a fresh read matched",
+                }),
+                flush=True,
+            )
         payload = json.loads(body)
         if not isinstance(payload, dict):
             raise wh.Rejected("body is not a JSON object", 400)
