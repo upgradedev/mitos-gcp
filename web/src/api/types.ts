@@ -50,7 +50,8 @@ export interface GitHubAppStatus {
   configured: boolean;
   app_slug: string | null;
   install_url: string | null;
-  create_url: string;
+  create_url: string | null;
+  setup?: { who: string; why: string; needs: string; how: string };
   webhook_endpoint: string;
   webhook_secret_configured: boolean;
   accepted_repositories: string[];

@@ -56,7 +56,12 @@ def test_an_empty_store_really_is_no_app(client, monkeypatch):
 
     assert body["configured"] is False
     assert body["status_unavailable"] is None
-    assert body["create_url"] == "/github/app/new"
+    # `null`, not a link. The route is owner-only, so advertising it to every
+    # visitor produced a prominent button whose only outcome was 403, which
+    # reads as a broken product rather than a closed door.
+    assert body["create_url"] is None
+    assert "setup token" in body["setup"]["needs"]
+    assert "terraform" in body["setup"]["how"]
 
 
 def test_a_configured_app_is_reported_as_configured(client, monkeypatch):

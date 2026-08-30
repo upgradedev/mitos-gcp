@@ -1030,7 +1030,28 @@ def github_app_status() -> dict[str, Any]:
         "status_unavailable": unavailable or None,
         "app_slug": slug or None,
         "install_url": f"/github/app/install" if slug else None,
-        "create_url": "/github/app/new",
+        # `null`, not a link, because that route is owner-only and anyone
+        # following it gets 403. Advertising it to every visitor turned the
+        # setup fix into a dead end: a prominent button whose only outcome is a
+        # refusal reads as a broken product rather than as a closed door.
+        #
+        # The owner does not need the link; they need to know a token is
+        # required and where it comes from. Everyone else needs to know this is
+        # not their job.
+        "create_url": None,
+        "setup": {
+            "who": "the owner of this deployment, and nobody else",
+            "why": (
+                "completing this flow stores a GitHub App private key, client "
+                "secret and webhook secret in this deployment. Whoever completes "
+                "it decides what this fleet trusts."
+            ),
+            "needs": "a setup token, held only in this service's environment",
+            "how": (
+                "terraform -chdir=infra output -raw setup_token, then open "
+                "/github/app/new?setup_token=<token>"
+            ),
+        },
         "webhook_endpoint": "/webhook/github",
         "webhook_secret_configured": secret_configured,
         "accepted_repositories": _connected_repositories(),
