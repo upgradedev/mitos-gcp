@@ -236,32 +236,50 @@ def test_a_descendant_arriving_before_its_root_is_still_scoped(client):
     assert "acme/late" not in text
 
 
-def test_the_setup_refusal_is_not_cacheable():
-    """A cached 403 outlives the reason for it.
+def test_neither_setup_response_is_cacheable(client, monkeypatch):
+    """Both responses, because the header was on one of them and the check on the other.
 
     `no-store` was put on the manifest page because it mints a single-use state
-    paired with a short cookie. The refusal was built separately and got no
-    header, and for as long as the route was public nothing noticed. When the
-    route became owner-only, every anonymous request took the branch without
-    the header, and `deployed.yml` failed with "the manifest page is cacheable:
-    absent" against a live deployment.
+    paired with a short cookie: a cached copy carries a state the cookie no
+    longer matches, and that failure surfaces at GitHub, one step after the one
+    that caused it. The refusal was built separately and got no header, and for
+    as long as the route was public nothing noticed, because the check in
+    `deployed.yml` only ever saw the 200.
+
+    Making setup owner-only sent every anonymous request down the other branch,
+    and the deployed suite failed against a live deployment with "the manifest
+    page is cacheable: absent".
+
+    That check runs with no setup token, so it can only ever assert on the 403.
+    The 200 needs the token, which is the point of the token, so it is asserted
+    here — and this test covers both rather than the missing half, because a
+    header split across two responses is what produced the defect in the first
+    place.
 
     The refusal is the response that matters more. It tells the owner to set
     MITOS_SETUP_TOKEN and retry; if a cache answers that retry, the product
     looks broken at the exact step where it just explained how to proceed, and
     no second request appears in any log.
     """
-    from fastapi.testclient import TestClient
+    api, _ = client
+    monkeypatch.setenv("MITOS_SETUP_TOKEN", "the-owners-token")
 
-    from service.main import app
-
-    refused = TestClient(app).get("/github/app/new")
-
+    refused = api.get("/github/app/new")
     assert refused.status_code == 403, (
-        "the setup route no longer refuses an anonymous caller, which is a "
-        "bigger problem than caching"
+        "the setup route no longer refuses a stranger, which is a bigger "
+        "problem than caching"
     )
     assert "no-store" in refused.headers.get("cache-control", ""), (
         "the setup refusal is cacheable: "
         f"{refused.headers.get('cache-control') or 'no Cache-Control header'}"
+    )
+
+    served = api.get("/github/app/new?setup_token=the-owners-token")
+    assert served.status_code == 200, (
+        "the owner holding the token can no longer reach the page"
+    )
+    assert "no-store" in served.headers.get("cache-control", ""), (
+        "the manifest page is cacheable, which is the failure the header was "
+        "added for: "
+        f"{served.headers.get('cache-control') or 'no Cache-Control header'}"
     )

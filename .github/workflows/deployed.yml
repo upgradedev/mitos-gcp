@@ -545,8 +545,12 @@ jobs:
           # header. Both responses have to carry it: a cached refusal outlives
           # the reason for it and answers the owner after they set the token.
           # The 200 path cannot be reached from here without holding the token
-          # in CI, which is the whole point of the token, so it is covered by
-          # test_setup_authority_and_thread_scope.py instead.
+          # in CI, which is the whole point of the token. It is asserted by
+          # test_neither_setup_response_is_cacheable in
+          # tests/integration/test_setup_authority_and_thread_scope.py, which
+          # checks both responses in one test. This comment first named that
+          # file while only the 403 was covered there, which is the same defect
+          # this batch was opened to correct, written into a workflow file.
           header=$(curl -s -D - -o /dev/null --max-time 60 \
             "$READER/github/app/new" | tr -d '\r' \
             | grep -i '^cache-control:' || true)

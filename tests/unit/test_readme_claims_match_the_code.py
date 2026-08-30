@@ -378,3 +378,43 @@ def test_the_readme_never_prints_a_command_a_stranger_cannot_run():
         "these are printed as evidence for a reader with no admin on the "
         "repository, and answer 401 or 404:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_the_config_example_names_the_allowlist_terraform_actually_sets():
+    """The README prints a /config response as the one thing a stranger can read.
+
+    Printed output is a claim like any other. This one names the static webhook
+    allowlist, which lives in `infra/variables.tf` and reaches the reader as
+    `MITOS_WEBHOOK_REPOS`; the live endpoint returns that list unioned with the
+    repositories a persisted installation added. The README says as much, so the
+    example is correct only while it matches the Terraform default.
+
+    Tied here rather than to the live endpoint on purpose: the live value moves
+    the moment an installation is recorded, and a test that chased it would go
+    red on success. The Terraform default is what the sentence is about.
+    """
+    tf = (REPO / "infra" / "variables.tf").read_text(encoding="utf-8")
+
+    block = re.search(
+        r'variable\s+"webhook_repositories".*?default\s*=\s*\[(.*?)\]',
+        tf,
+        re.DOTALL,
+    )
+    assert block, (
+        "infra/variables.tf no longer declares webhook_repositories with a "
+        "default; the README example has nothing to be checked against"
+    )
+    declared = set(re.findall(r'"([^"]+)"', block.group(1)))
+    assert declared, "the webhook allowlist default is empty"
+
+    example = re.search(r'"webhook_repositories":\s*\[(.*?)\]', README)
+    assert example, (
+        "the README no longer shows a /config response, which is the one "
+        "anonymous command substantiating what the webhook will act on"
+    )
+    shown = set(re.findall(r'"([^"]+)"', example.group(1)))
+
+    assert shown == declared, (
+        "the README prints a webhook allowlist that Terraform does not set. "
+        f"README shows {sorted(shown)}, infra/variables.tf sets {sorted(declared)}"
+    )
