@@ -41,6 +41,10 @@ def client(monkeypatch):
     # actually reads.
     monkeypatch.setattr(main, "DEMO_MODE", True)
 
+    # `_LEDGER` is a module singleton, so entries written by one test are still
+    # there for the next and a scope assertion becomes order dependent.
+    monkeypatch.setattr(main, "_LEDGER", None)
+
     return TestClient(main.app, raise_server_exceptions=False), main
 
 
@@ -106,7 +110,9 @@ def test_the_state_cookie_is_only_issued_to_an_authorised_caller(client, monkeyp
     assert "mitos_github_manifest_state" not in refused.cookies
 
 
-def _entry(main, repository=None):
+def _entry(main, repository=None, run_id="run-1"):
+    """One entry. The run id matters: scope is decided per RUN, so two entries
+    sharing a run share a verdict, which is the point rather than an accident."""
     from mitos.ledger import Entry
 
     return Entry(
@@ -114,15 +120,15 @@ def _entry(main, repository=None):
         actor="db-architect-leader",
         subject="a column",
         payload={"repository": repository, "detail": "retention"},
-        run_id="run-1",
+        run_id=run_id,
     )
 
 
 def test_the_public_thread_never_serves_an_entry_that_names_a_repository(client, monkeypatch):
     api, main = client
     led = main.ledger()
-    led.append(_entry(main, repository=None))
-    led.append(_entry(main, repository="acme/private-billing"))
+    led.append(_entry(main, repository=None, run_id="demo-run"))
+    led.append(_entry(main, repository="acme/private-billing", run_id="tenant-run"))
 
     body = api.get("/thread?limit=50").json()
 
@@ -152,3 +158,79 @@ def test_the_filter_reads_the_payload_because_entry_has_no_repository_field(clie
     assert not hasattr(Entry(kind="k", actor="a", subject="s"), "repository")
     assert main._names_a_repository(_entry(main, repository="acme/x")) is True
     assert main._names_a_repository(_entry(main, repository=None)) is False
+
+
+def _run(main, led, run_id, repository):
+    """A run shaped the way the chore really writes one.
+
+    Only the ROOT carries `payload.repository`. Everything after it, which is
+    the analysis itself, does not.
+    """
+    from mitos.ledger import Entry
+
+    root = led.append(Entry(
+        kind="trigger.pull_request", actor="github", subject=f"PR in {repository or 'the corpus'}",
+        payload={"repository": repository, "number": 7}, run_id=run_id,
+    ))
+    for kind, actor, payload in (
+        ("fleet.dispatch", "architect-leader", {"specialists": ["db-architect-leader"]}),
+        ("specialist.response", "db-architect-leader", {"summary": "a retention column"}),
+        ("finding.raised", "db-architect-leader", {"detail": "personal data kept too long",
+                                                   "path": f"services/{run_id}/schema.sql"}),
+        ("evaluator.verdict", "evaluator-companion", {"passed": False}),
+    ):
+        led.append(Entry(kind=kind, actor=actor, subject="the change", payload=payload,
+                         parent_id=root.entry_id, run_id=run_id))
+    return root
+
+
+def test_a_descendant_of_a_tenant_run_is_never_public(client):
+    """The entry-level filter removed the one line naming the repository and
+    served every descendant of it: the findings, the paths and the verdict for
+    somebody's private code, to anyone."""
+    api, main = client
+    led = main.ledger()
+    _run(main, led, "demo-1", None)
+    _run(main, led, "tenant-1", "acme/private-billing")
+
+    body = api.get("/thread?limit=200").json()
+    text = api.get("/thread?limit=200").text
+
+    assert body["entries"], "the demo run should still be served"
+    assert "acme/private-billing" not in text
+    assert "services/tenant-1/schema.sql" not in text, (
+        "a finding from a tenant run leaked: only its root named the repository"
+    )
+    assert {e["run_id"] for e in body["entries"]} == {"demo-1"}
+
+
+def test_two_workspaces_cannot_see_each_other_through_the_public_thread(client):
+    api, main = client
+    led = main.ledger()
+    _run(main, led, "w1-run", "one/repo")
+    _run(main, led, "w2-run", "two/repo")
+    _run(main, led, "demo-2", None)
+
+    text = api.get("/thread?limit=200").text
+
+    for leaked in ("one/repo", "two/repo"):
+        assert leaked not in text
+    assert "demo-2" in text
+
+
+def test_a_descendant_arriving_before_its_root_is_still_scoped(client):
+    """A slice of the ledger does not guarantee the root comes first, so the set
+    of tenant runs has to be complete before anything is filtered."""
+    api, main = client
+    from mitos.ledger import Entry
+
+    led = main.ledger()
+    led.append(Entry(kind="finding.raised", actor="db-architect-leader", subject="x",
+                     payload={"detail": "secret-looking", "path": "a/b.sql"}, run_id="late-root"))
+    led.append(Entry(kind="trigger.pull_request", actor="github", subject="x",
+                     payload={"repository": "acme/late"}, run_id="late-root"))
+
+    text = api.get("/thread?limit=200").text
+
+    assert "a/b.sql" not in text
+    assert "acme/late" not in text

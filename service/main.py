@@ -1030,7 +1030,28 @@ def github_app_status() -> dict[str, Any]:
         "status_unavailable": unavailable or None,
         "app_slug": slug or None,
         "install_url": f"/github/app/install" if slug else None,
-        "create_url": "/github/app/new",
+        # `null`, not a link, because that route is owner-only and anyone
+        # following it gets 403. Advertising it to every visitor turned the
+        # setup fix into a dead end: a prominent button whose only outcome is a
+        # refusal reads as a broken product rather than as a closed door.
+        #
+        # The owner does not need the link; they need to know a token is
+        # required and where it comes from. Everyone else needs to know this is
+        # not their job.
+        "create_url": None,
+        "setup": {
+            "who": "the owner of this deployment, and nobody else",
+            "why": (
+                "completing this flow stores a GitHub App private key, client "
+                "secret and webhook secret in this deployment. Whoever completes "
+                "it decides what this fleet trusts."
+            ),
+            "needs": "a setup token, held only in this service's environment",
+            "how": (
+                "terraform -chdir=infra output -raw setup_token, then open "
+                "/github/app/new?setup_token=<token>"
+            ),
+        },
         "webhook_endpoint": "/webhook/github",
         "webhook_secret_configured": secret_configured,
         "accepted_repositories": _connected_repositories(),
@@ -1477,14 +1498,25 @@ def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Reque
     # a crash releases it after fifteen minutes rather than wedging the change
     # forever, and the publish below is idempotent so the retry adopts the pull
     # request that already exists instead of making another.
-    if not claims().claim(f"suggest:{req.run_id}"):
+    # `claim()` returns None and raises `AlreadySeen`. It does not return a
+    # boolean, and `if not claims().claim(...)` therefore fired on the FIRST
+    # legitimate approval, because None is falsy. The owner clicked approve and
+    # got 409, every time.
+    #
+    # The correct usage was eleven hundred lines below in this same file, where
+    # the webhook has always caught `AlreadySeen`. The test that should have
+    # caught this used a boolean fake, so it agreed with the wrong code instead
+    # of with the contract.
+    try:
+        claims().claim(f"suggest:{req.run_id}", note=f"approved by {user['login']}")
+    except AlreadySeen as seen:
         raise HTTPException(
             status_code=409,
             detail=(
-                "this suggested change is already being published. If it failed, "
-                "the claim expires and it can be approved again."
+                f"this suggested change is already being published: {seen}. If "
+                f"it failed, the claim is a lease and expires."
             ),
-        )
+        ) from seen
 
     actor = str(user["login"])
     approval = approvals().grant(Approval(
@@ -1508,6 +1540,11 @@ def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Reque
         source_pr=int(change["source_pr"]), expected_head=str(change["source_head_sha"]),
         path=str(change["path"]), body=str(change["body"]), run_id=req.run_id,
     )
+    # Only now. Completing before the write would tell the next attempt the work
+    # had happened when it had not, and completing on the failure path would do
+    # the same. A crash before this leaves the claim as a lease, which expires
+    # and lets the owner try again against an idempotent publish.
+    claims().complete(f"suggest:{req.run_id}", outcome="published")
     approvals().consume(approval.nonce, by=actor)
     reference.set({
         "status": "published", "approved_by": actor, "approval_nonce": approval.nonce,
@@ -1548,15 +1585,35 @@ def workspace_thread(request: Request, limit: int = 500) -> dict[str, Any]:
 
 
 def _names_a_repository(entry: Any) -> bool:
-    """True when this entry belongs to somebody's repository rather than the
-    demo corpus.
-
-    `Entry` carries no repository field; the chore puts it in the payload, and
-    a run against the synthetic corpus leaves it None. Anything truthy here is
-    tenant data.
-    """
+    """True when this single entry names a repository in its payload."""
     payload = getattr(entry, "payload", None) or {}
     return bool(payload.get("repository"))
+
+
+def _demo_corpus_only(entries: list[Any]) -> list[Any]:
+    """The entries belonging to runs that name no repository anywhere.
+
+    Filtering entry by entry was not enough and was worse than it looked. Only
+    the ROOT of a run carries `payload.repository`; the specialist responses,
+    the findings, the evaluator verdict and the plan that follow it do not. So
+    an entry-level filter removed the one line naming the repository and served
+    every descendant of it, which is the analysis itself: the findings, the
+    paths, the hunks and the verdict for somebody's private code, to anyone.
+
+    The decision belongs to the run. A run is tenant data if ANY entry in it
+    names a repository, and then none of it is public.
+
+    Two passes rather than one, deliberately: the root is not guaranteed to
+    arrive before its descendants in a slice of the ledger, so the set of
+    tenant runs has to be complete before anything is filtered.
+    """
+    tenant_runs = {
+        getattr(entry, "run_id", "")
+        for entry in entries
+        if _names_a_repository(entry)
+    }
+    tenant_runs.discard("")
+    return [entry for entry in entries if getattr(entry, "run_id", "") not in tenant_runs]
 
 
 @app.get("/thread")
@@ -1581,7 +1638,7 @@ def thread(limit: int = 100) -> dict[str, Any]:
     the first place.
     """
     _require_demo_mode()
-    entries = [e for e in ledger().all() if not _names_a_repository(e)][-limit:]
+    entries = _demo_corpus_only(ledger().all())[-limit:]
     return {
         "count": len(entries),
         "entries": [e.to_doc() for e in entries],

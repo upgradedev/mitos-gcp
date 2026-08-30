@@ -201,29 +201,55 @@ jobs:
           # ordering was exercised by nothing, on the one endpoint the whole
           # product is triggered by and the one a stranger can reach.
           #
-          # Three shapes: no signature at all, a well formed sha256 that is
-          # wrong, and the retired sha1 algorithm. All three must be refused
-          # before the body is looked at.
-          fail=0
-          probe() {
-            code=$(curl -s -o /tmp/wh.json -w '%{http_code}' --max-time 30 \
-              -X POST "$READER/webhook/github" \
-              -H 'Content-Type: application/json' \
-              -H 'X-GitHub-Event: pull_request' \
-              -H 'X-GitHub-Delivery: deployed-suite-probe' \
-              $2 -d '{"action":"opened"}')
-            echo "$1 -> $code $(head -c 120 /tmp/wh.json)"
-            case "$code" in
-              401|403) ;;
-              503) echo "::warning::no webhook secret is configured, so this refusal is not the signature check" ;;
-              2*) echo "::error::$1 was ACCEPTED"; fail=1 ;;
-              *) echo "::error::$1 answered $code, which is neither a refusal nor a known state"; fail=1 ;;
-            esac
+          # Python rather than shell, and the reason is the first version of
+          # this step. It passed the headers as a single string, `$2`, and let
+          # word splitting hand them to curl. `-H 'X-Hub-Signature-256: sha256=...'`
+          # split into three words, curl received a malformed header, exited
+          # non-zero, and `bash -e` killed the step immediately AFTER the first
+          # probe had printed a correct 401. The output said the check was
+          # working and the job said it had failed.
+          python - <<'PY'
+          import json, os, sys, urllib.error, urllib.request
+
+          READER = os.environ["READER"]
+          PROBES = {
+              "no signature": {},
+              "wrong sha256": {"X-Hub-Signature-256": "sha256=" + "0" * 64},
+              "retired sha1": {"X-Hub-Signature": "sha1=deadbeef"},
           }
-          probe "no signature"      ""
-          probe "wrong sha256"      "-H 'X-Hub-Signature-256: sha256=0000000000000000000000000000000000000000000000000000000000000000'"
-          probe "retired sha1"      "-H 'X-Hub-Signature: sha1=deadbeef'"
-          exit $fail
+
+          problems = []
+          for name, extra in PROBES.items():
+              headers = {
+                  "Content-Type": "application/json",
+                  "X-GitHub-Event": "pull_request",
+                  "X-GitHub-Delivery": "deployed-suite-probe",
+                  **extra,
+              }
+              request = urllib.request.Request(
+                  READER + "/webhook/github",
+                  data=json.dumps({"action": "opened"}).encode(),
+                  headers=headers,
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      print(f"::error::{name} was ACCEPTED with {response.status}")
+                      problems.append(name)
+              except urllib.error.HTTPError as refused:
+                  body = (refused.read() or b"")[:120].decode("utf-8", "replace")
+                  print(f"{name} -> {refused.code} {body}")
+                  if refused.code == 503:
+                      print(
+                          f"::warning::no webhook secret is configured, so this "
+                          f"refusal is not the signature check"
+                      )
+                  elif refused.code not in (401, 403):
+                      print(f"::error::{name} answered {refused.code}, neither a refusal nor a known state")
+                      problems.append(name)
+
+          sys.exit(1 if problems else 0)
+          PY
 
       - name: The public reader is public, and says it cannot write
         run: |
@@ -470,7 +496,7 @@ jobs:
           PAGES
           exit $fail
 
-      - name: The GitHub App manifest is one GitHub would accept
+      - name: The setup route refuses a stranger
         run: |
           set -o pipefail
           # The manifest is the only artefact here that a third party parses and
@@ -483,7 +509,27 @@ jobs:
           # POST to github.com: that endpoint's unauthenticated answer depends
           # on session and anti-abuse state, not on the manifest, so it makes a
           # flaky gate rather than a check.
-          python scripts/check_manifest.py "$READER/github/app/new"
+          # The route is owner-only now, so an unauthenticated probe must get
+          # 403 and that IS the property worth checking here. Anyone could bind
+          # their own GitHub App to this deployment: the callback verified a
+          # state cookie the same response had just set, which is CSRF
+          # protection standing in for authorisation.
+          #
+          # The manifest's SHAPE is checked before merge, by
+          # `tests/integration/test_github_app_manifest.py`, which renders the
+          # real route with a token and runs the same `service/manifest.py`
+          # rules. Sending the live setup token through CI to re-check the shape
+          # here would put the credential that guards this route into a workflow
+          # in order to verify something already verified.
+          code=$(curl -s -o /tmp/setup.json -w '%{http_code}' --max-time 60 "$READER/github/app/new")
+          echo "unauthenticated /github/app/new -> $code"
+          case "$code" in
+            403) echo "refused, which is the point" ;;
+            200) echo "::error::anyone can bind a GitHub App to this deployment"; exit 1 ;;
+            *)   echo "::error::unexpected $code from the setup route"; exit 1 ;;
+          esac
+          grep -q "setup token" /tmp/setup.json \
+            || { echo "::error::the refusal does not say what is required"; exit 1; }
 
       - name: The manifest page is never cached
         run: |
