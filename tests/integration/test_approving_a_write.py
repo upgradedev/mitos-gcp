@@ -128,28 +128,40 @@ def world(monkeypatch):
     # implement the create() precondition the real one relies on. What is under
     # test here is that the endpoint TAKES a claim before writing, not how the
     # claim is stored, which `test_once.py` covers.
-    taken: set[str] = set()
+    # The REAL implementation, not a boolean fake.
+    #
+    # The fake returned True on success and False on a duplicate. `claim()`
+    # returns None and raises `AlreadySeen`, so the endpoint's
+    # `if not claims().claim(...)` fired on the FIRST legitimate approval and
+    # every owner got 409. The test agreed with the wrong code because it had
+    # been written to match it rather than to match the contract.
+    from mitos.once import InMemoryClaims
+
+    store = InMemoryClaims()
     asked: list[str] = []
+    completed: list[str] = []
 
-    class _Claims:
-        def claim(self, key):
+    class _Watched(InMemoryClaims):
+        def claim(self, key, *, note=""):
             asked.append(key)
-            if key in taken:
-                return False
-            taken.add(key)
-            return True
+            return store.claim(key, note=note)
 
-        def complete(self, key):
-            return None
+        def complete(self, key, *, outcome=""):
+            completed.append(key)
+            return store.complete(key, outcome=outcome)
 
-    monkeypatch.setattr(main, "claims", lambda: _Claims())
+        def seen(self, key):
+            return store.seen(key)
+
+    watched = _Watched()
+    monkeypatch.setattr(main, "claims", lambda: watched)
 
     published = []
     monkeypatch.setattr(
         main, "_github_suggested_pr",
         lambda **kwargs: published.append(kwargs) or {"published": True, "pull_number": 9},
     )
-    return main, data, published, asked
+    return main, data, published, asked, completed
 
 
 def _as(main, monkeypatch, role):
@@ -170,7 +182,7 @@ def _as(main, monkeypatch, role):
 
 def test_a_reviewer_cannot_approve_a_write(world, monkeypatch):
     """Every member after the first is a reviewer automatically."""
-    main, _, published, _asked = world
+    main, _, published, _asked, _done = world
     _as(main, monkeypatch, "reviewer")
     from fastapi.testclient import TestClient
 
@@ -184,7 +196,7 @@ def test_a_reviewer_cannot_approve_a_write(world, monkeypatch):
 
 def test_an_owner_can_approve(world, monkeypatch):
     """The refusal has to let the one legitimate caller through."""
-    main, _, published, _asked = world
+    main, _, published, _asked, _done = world
     _as(main, monkeypatch, "owner")
     from fastapi.testclient import TestClient
 
@@ -199,7 +211,7 @@ def test_an_owner_can_approve(world, monkeypatch):
 def test_a_second_approval_of_the_same_change_opens_no_second_pull_request(world, monkeypatch):
     """Two clicks, or two people, or a retry after a crash. The claim is the
     same Firestore create() precondition the webhook uses for delivery ids."""
-    main, _, published, asked = world
+    main, _, published, asked, completed = world
     _as(main, monkeypatch, "owner")
     from fastapi.testclient import TestClient
 
@@ -221,7 +233,7 @@ def test_the_claim_is_taken_before_anything_is_written(world, monkeypatch):
     So this asserts the mechanism directly: a claim keyed on the run is taken,
     and it is taken before GitHub is called.
     """
-    main, _, published, asked = world
+    main, _, published, asked, completed = world
     _as(main, monkeypatch, "owner")
     from fastapi.testclient import TestClient
 
