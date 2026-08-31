@@ -21,13 +21,13 @@
    "id": "03-trigger",
    "text": "A pull request lands. Nobody opened Mitos.",
    "cue": "RUN 1  nobody opened Mitos",
-   "offset": 1.0
+   "offset": 3.1
   },
   {
    "id": "04-signals",
    "text": "Every signal cites the exact hunk that raised it.",
    "cue": "signal  schema-change",
-   "offset": 0.0
+   "offset": 1.8
   },
   {
    "id": "05-dispatch",
@@ -39,13 +39,13 @@
    "id": "06-recall",
    "text": "The thread remembers. This service was here in July, and that deferral has now expired.",
    "cue": "ESCALATE  the deferral has expired",
-   "offset": 1.5
+   "offset": 2.7
   },
   {
    "id": "07-gate",
-   "text": "The gate rejects the first draft. The pull request carried a live looking credential, and an instruction telling the review agent to approve itself.",
+   "text": "The gate rejects the first draft. A live looking credential, and an instruction planted in the diff for the review agent.",
    "cue": "GATE  draft 1: FAIL",
-   "offset": 0.0
+   "offset": 1.7
   },
   {
    "id": "08-repair",
@@ -63,57 +63,57 @@
    "id": "10-identity",
    "text": "The reader identity cannot perform it. That is Google IAM refusing, outside this process.",
    "cue": "approve this write",
-   "offset": 1.0
+   "offset": 2.1
   },
   {
    "id": "11-run2",
    "text": "Second run. No personal data this time, so compliance is skipped. The fleet is deciding, not following a pipeline.",
    "cue": "RUN 2  a different PR",
-   "offset": 1.7
+   "offset": 4.9
   },
   {
    "id": "12-memory",
    "text": "And it recalls what the first run wrote, minutes earlier. In the deployed fleet that ledger is Firestore.",
    "cue": "not re-filing it",
-   "offset": 0.0
+   "offset": 4.1
   },
   {
    "id": "13-backlog",
-   "text": "Then the rest of the morning, unattended. Some are parked, most are left to a reviewer, and every one of them names why.",
+   "text": "Then the rest of the morning, unattended. Some parked, most left to a reviewer, and every one of them names why.",
    "cue": "THE REST OF THE MORNING",
    "offset": 0.0
   },
   {
    "id": "14-decisive",
-   "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does, and that is proven in CI.",
+   "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does.",
    "cue": "THE ONE THE RULES CANNOT SEE",
-   "offset": 1.5
+   "offset": 3.3
   },
   {
    "id": "15-close",
-   "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so writing one deferral hands the fleet every open one, and the expired ones are escalated with nobody watching.",
+   "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore subscriptions, so one deferral wakes the whole fleet.",
    "cue": "run 1: governed write approved",
-   "offset": 1.9
+   "offset": 4.2
   },
   {
    "id": "16-cloud",
-   "after_run": 17.8,
-   "text": "This is not a local script. Three Cloud Run services in europe west one, each under its own service account, and only the writer holds the credential that can change a repository."
+   "after_run": 17.1,
+   "text": "This is not a local script. Three Cloud Run services, each under its own service account."
   },
   {
    "id": "17-models",
-   "after_run": 33.2,
-   "text": "Gemini three point seven flash routes the fleet and reads the repository, on Vertex AI. Gemma four, a managed open model, reviews every draft independently and can only add advice a human reads."
+   "after_run": 33.0,
+   "text": "Gemini three point seven flash routes and reads, on Vertex AI. Gemma four reviews every draft, and cannot approve anything."
   },
   {
    "id": "18-ledger",
-   "after_run": 49.1,
-   "text": "Every decision is appended to Firestore, and the check on the pull request is posted by the fleet itself. None of this is a screenshot of an intention."
+   "after_run": 48.0,
+   "text": "Every decision is appended to Firestore, and the check on the pull request is posted by the fleet itself."
   },
   {
    "id": "19-close",
-   "after_run": 62.7,
-   "text": "So: three services, two model families, and not one of them can write anything. That is the feature, and you can check every part of it yourself without an account."
+   "after_run": 62.0,
+   "text": "Three services, two model families, and not one of them can write anything. That is the feature."
   }
  ],
  "stills_s": 58.0,
