@@ -535,8 +535,17 @@ POINTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "one write, and a person holds it",
-        "The service that reads production data holds no credential that can "
-        "write it. The single write is bound to the exact bytes approved.",
+        # Precise, because the sweeping version of this was false and lived
+        # here longest. The reader does hold a GitHub App installation token
+        # and posts check runs with it. What Google IAM refuses it is the
+        # specification repository's key, which is the boundary /identity
+        # proves live, and anything it proposes is bound to approved bytes.
+        # No apostrophe: the renderer escapes it to a numeric entity, and
+        # test_the_explainer_carries_no_number_of_its_own reads that as a number
+        # typed into the prose. The rule is right and the escaping is invisible.
+        "Google IAM refuses the service that reads production data the key to "
+        "the specification repository. Anything it proposes is bound to the "
+        "exact bytes a person approved.",
     ),
 )
 
