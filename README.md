@@ -13,7 +13,7 @@ column and why. Mitos is the fleet that answers that, and the thread you follow 
 
 **▶ Demo video:** `PENDING_YOUTUBE_UPLOAD`
 *(the master is 210.10s, built and verified in CI by
-[run 32749633575](https://github.com/upgradedev/mitos-gcp/actions/runs/32749633575), which asserts
+[run 33370003665](https://github.com/upgradedev/mitos-gcp/actions/runs/33370003665), which asserts
 on the shipped pixels rather than on the inputs. This line is replaced with the public URL at
 upload, and every CI run annotates a warning while the placeholder is still here so it cannot be
 quietly forgotten.)*
