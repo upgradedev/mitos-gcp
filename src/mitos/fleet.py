@@ -407,31 +407,121 @@ def run_specialist(
     """
     if name not in SPECIALISTS:
         return None
+
+    # The deterministic specialist runs first, always, and its verdict is the
+    # floor.
+    #
+    # It used to run only when there was no analyst: the model path returned
+    # `SPECIALISTS[name]` never having been called. So in production, where an
+    # analyst is always configured, the deterministic rules did not execute at
+    # all and the model's answer was the whole answer. A pull request dropping
+    # a table was refused offline and accepted live, which is the opposite of
+    # ADR-002 and was asserted to be impossible by a comment three lines above
+    # the code that made it possible.
+    #
+    # Reproduced before it was changed:
+    #
+    #     deterministic          -> blocked | irreversible migration in ...
+    #     with a model saying ok -> ok
+    #
+    # The two refusals this lost are the two that most need a human: an
+    # irreversible migration, and special-category data under GDPR Article 9.
+    deterministic = SPECIALISTS[name](pr, signals)
     if analyst is None:
-        return SPECIALISTS[name](pr, signals)
+        return deterministic
 
-    data = analyst.assess(name, pr, signals)
+    if deterministic.parks_the_item:
+        # The model is not consulted for a verdict it is not allowed to change.
+        # Asking and discarding the answer costs a request and invites a later
+        # edit that "uses" what came back.
+        return deterministic
 
-    # A specialist that read the repository itself may refuse on what it found.
-    # Under the tighten-only rule (ADR-002) that is permitted, because refusing
-    # is the cautious direction. It can never clear a refusal the deterministic
-    # rules already made: those run first and return before reaching here.
-    reported = str(data.get("status", "ok")).lower()
-    status = Status.BLOCKED if reported == "blocked" else Status.OK
+    try:
+        data = analyst.assess(name, pr, signals)
+    except Exception as exc:  # noqa: BLE001 - degradation is a recorded outcome
+        # ADR-002: an unreachable model contributes nothing. The deterministic
+        # verdict stands rather than being replaced by a guess, and the failure
+        # is recorded as a finding instead of vanishing, because a run that
+        # silently skipped half its analysis should not read as a clean one.
+        return _with_model_contribution(
+            deterministic,
+            findings=[
+                f"the model was unreachable for {name} "
+                f"({type(exc).__name__}); this verdict is the deterministic "
+                f"rules alone"
+            ],
+        )
+
+    if not isinstance(data, dict):
+        return _with_model_contribution(
+            deterministic,
+            findings=[
+                f"the model returned {type(data).__name__} rather than a "
+                f"result for {name}; this verdict is the deterministic rules "
+                f"alone"
+            ],
+        )
+
+    # Union, not replacement. `blocked` from either side blocks; anything the
+    # model says that is not a recognised refusal adds findings and cannot
+    # subtract a verdict. An absent or unrecognised status contributes no
+    # verdict at all, which is the only reading that cannot quietly clear one:
+    # the previous code defaulted a missing status to `ok`.
+    reported = str(data.get("status", "")).strip().lower()
+    model_blocks = reported == "blocked"
     reason = str(data.get("reason", "")).strip()
-    if status is Status.BLOCKED and not reason:
+    if model_blocks and not reason:
         reason = f"{name} blocked without giving a reason"
+
+    findings = list(deterministic.findings)
+    for item in data.get("findings", []) or []:
+        text = str(item)
+        if text not in findings:
+            findings.append(text)
 
     return Response(
         companion=name,
-        status=status,
-        assessment=data.get("assessment", ""),
-        paths_read=data.get("paths_read") or pr.paths(),
-        citations=data.get("citations") or data.get("paths_read") or pr.paths(),
-        findings=data.get("findings", []),
-        reason=reason,
+        status=Status.BLOCKED if model_blocks else deterministic.status,
+        assessment=data.get("assessment", "") or deterministic.assessment,
+        paths_read=_union(deterministic.paths_read, data.get("paths_read"), pr.paths()),
+        citations=_union(
+            deterministic.citations,
+            data.get("citations") or data.get("paths_read"),
+            pr.paths(),
+        ),
+        findings=findings,
+        reason=reason or deterministic.reason,
         confidence=float(data.get("confidence", 0.8) or 0.8),
         read_log=data.get("read_log") or {},
+    )
+
+
+def _union(*groups: Optional[list[str]]) -> list[str]:
+    """Order-preserving union, so a citation from either side is never dropped."""
+    out: list[str] = []
+    for group in groups:
+        for item in group or []:
+            if item not in out:
+                out.append(item)
+    return out
+
+
+def _with_model_contribution(base: Response, *, findings: list[str]) -> Response:
+    """The deterministic verdict, plus a note that the model added nothing.
+
+    ADR-014's rule applied here: a step that could not be evaluated is recorded
+    as such rather than counted as clean.
+    """
+    return Response(
+        companion=base.companion,
+        status=base.status,
+        assessment=base.assessment,
+        findings=list(base.findings) + [f for f in findings if f not in base.findings],
+        paths_read=list(base.paths_read),
+        citations=list(base.citations),
+        confidence=base.confidence,
+        reason=base.reason,
+        read_log=dict(base.read_log),
     )
 
 

@@ -12,6 +12,7 @@ demo that stalls for a human in the middle is not showing autonomy.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from . import fleet
@@ -145,7 +146,7 @@ def run_chore(
     run_id: str,
     emit: Emit = _noop,
     approve: Optional[Callable[[ApprovalCard], bool]] = None,
-    today: str = "2026-08-19",
+    today: Optional[str] = None,
     analyst: Any = None,
     critic: Any = None,
     publisher: Optional[SpecRepo] = None,
@@ -155,6 +156,20 @@ def run_chore(
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
+
+    # UTC today unless a caller pins it.
+    #
+    # This defaulted to the literal "2026-08-19", and the production webhook
+    # path never passed a value, so every deferral in production was compared
+    # against a date that stopped moving the day it was typed. A deferral due on
+    # the 20th was still "not expired" on the 31st, and would have been on any
+    # later date too: the window of findings that quietly never escalate grew by
+    # one day per day.
+    #
+    # The demo and the tests pin the clock on purpose, which is why the
+    # parameter stays. What changed is that not passing one means now, rather
+    # than meaning a date in the past.
+    today = today or datetime.now(timezone.utc).date().isoformat()
 
     subject = subject_of(repository, pr)
 

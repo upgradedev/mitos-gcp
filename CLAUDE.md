@@ -9,7 +9,7 @@ new contributor, which is the bar that section sets.
 # ORG_STANDARDS §1, session rescan. Run before changing anything.
 git log --oneline -10
 git status
-find tests -name "test_*.py" | wc -l          # 52 files, 787 collected, 2026-08-31
+find tests -name "test_*.py" | wc -l          # 55 files, 819 collected, 2026-08-31
 python scripts/generate_openapi.py --check     # the spec must match the app
 ```
 
@@ -58,6 +58,39 @@ classifier contributes nothing. `evaluator._with_critic` and
 former carries a structural test asserting that no subtracting branch exists.
 The router's guarantee rests on the code and on behavioural tests over the
 backlog, which is weaker, and this paragraph claimed otherwise for weeks.
+
+**Amended 2026-08-31, and this is the correction that matters most in the file.**
+The rule held for the critic and the router and did not hold for the
+specialists, which is where the refusals a human most needs actually live.
+`run_specialist` ran the deterministic companion only when no analyst was
+configured; the model branch returned before `SPECIALISTS[name]` was ever
+called. Production always configures an analyst. So the deterministic rules did
+not execute in production at all, and the model's answer was the whole answer.
+
+Reproduced before it was changed:
+
+    deterministic          -> blocked | irreversible migration in ...
+    with a model saying ok -> ok
+
+The two refusals lost were the two that exist precisely because a model's
+opinion is not good enough: an irreversible migration, and special-category data
+under GDPR Article 9. A comment three lines above the code asserted the
+opposite, that deterministic rules "run first and return before reaching here".
+They did not, and a comment is not a control.
+
+The deterministic verdict is now the floor. It runs first, always; a refusal is
+returned without consulting the model at all, because asking and discarding the
+answer costs a request and invites a later edit that uses it; and where the
+rules pass, the model's result is unioned in rather than substituted, so a
+missing or unparseable status contributes no verdict instead of defaulting to
+`ok`, which is what the old code did. An unreachable model leaves a finding
+saying so, per ADR-014, rather than letting a half-run read as clean.
+
+**Why every test passed throughout.** The suite exercised the deterministic path
+with `analyst=None` and the model path with a stub, separately, and never
+crossed them on a diff the rules refuse. `tests/unit/test_the_model_cannot_clear_a_refusal.py`
+now runs both through `run_chore`, because the helper looked correct in
+isolation and the chore is what the webhook calls.
 
 ### ADR-003 — The gate is deterministic; the model is a second opinion
 **Date:** 2026-08-19 | **Status:** Implemented
@@ -359,6 +392,42 @@ and the same conclusion already covers a pull request with no readable patch.
 turned the check green on this case and on every case where a specialist
 genuinely produced nothing it should have, which is the Never rule about widening
 a gate to make it pass.
+
+### ADR-017 — The read budget is counted at the read, not at the caller
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** every tool that opens a repository file goes through one bounded
+read: scope checked, budget consumed, bytes capped, entry written to the read
+log. `READING_TOOLS` names the tools that count, and `search` scans in sorted
+order, stops when the budget is gone, and returns `files_scanned`,
+`files_in_scope`, `bytes_read`, `reads_remaining` and `truncated`.
+**Reason:** `read_file` enforced all of that and `search` enforced none of it. It
+checked scope inline and then called `corpus.read` on every path in scope,
+whole, recording a single summary line. Measured on a 1,000 file corpus with the
+limit at 12: 1,000 reads served, 0 counted, 1 log entry. So the bound this
+product publishes at `/config`, and describes as what makes an agent's own
+choices safe, governed one of its two ways of opening a file. An agent that
+wanted the whole repository only had to search for a common word.
+**Consequence:** a search is now visibly partial when it is partial, which is
+the honest failure and the useful one: an agent that believes it searched
+everything reports that a field appears nowhere. It stops at the budget rather
+than continuing to test files it did not pay for, because a hit from one of
+those leaks exactly the term-presence the bound exists to withhold. The scan
+order is sorted so that which files fall inside the budget does not move between
+runs; a bound that moves cannot be audited.
+**Amended the same day, by the live agent failing.** Counting search reads
+without capping them per call made the tool unusable: one search spent all
+twelve reads, every later `read_file` was refused, and the agent returned an
+answer it could not support. `test_gemini_live.py` caught it in the honest
+words, "it refused without opening anything, so it guessed", which was true and
+was our doing. A search now opens at most `MAX_SEARCH_SCAN` files, inside the
+run budget rather than instead of it, so it is a way to find the two or three
+files worth reading rather than a way to read the repository. Both halves are
+needed: a per-call cap with no run budget lets an agent search fifty times, and
+a run budget with no per-call cap is what broke this.
+
+**Rejected:** a separate budget for search. Two budgets is no budget, and the
+question a reader asks is how much of my repository did it read, not how much
+did each tool read.
 
 ## Standards compliance
 
