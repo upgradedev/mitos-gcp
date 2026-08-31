@@ -133,16 +133,23 @@ The static half is the Terraform default in `infra/variables.tf`:
 
     "webhook_repositories": ["upgradedev/mitos-spec"]
 
-and because the installation is now recorded, the endpoint also returns
-[`upgradedev/archon-gcp-agentic`](https://github.com/upgradedev/archon-gcp-agentic).
-A repository reaches that list by someone installing the App on it, never by
-being named in a request.
+and because two installations are now recorded, the endpoint also returns
+[`upgradedev/archon-gcp-agentic`](https://github.com/upgradedev/archon-gcp-agentic)
+and **this repository**. A repository reaches that list by someone installing the
+App on it, never by being named in a request, which is why the list is worth
+reading rather than taking on trust.
 
-So what is left is one step, and it needs no further configuration: a pull
-request on that repository now wakes the fleet and produces a check run under an
-installation token. Until one has, this paragraph says "not yet" rather than
-describing what would happen, which is the discipline the two corrections above
-were the cost of learning.
+**Mitos now watches the repository you are reading.** The App is installed on
+this one as well, so every pull request here wakes the fleet and gets a check run
+posted under an installation token. That is the same product this entry
+describes, pointed at its own source, and the pull request that added this
+sentence was the first one it judged.
+
+The consequence is worth stating rather than hiding: a check that can pass on
+our pull requests can also fail on them, and a reader who scrolls the pull
+request list may find one that did. That is the honest version of "the same
+discipline is turned on Mitos itself". A gate that only ever agreed with us would
+not be evidence of anything.
 
 
 Saying "we do not do this" was easier to check and easier to trust than saying "we do this, under an approval, untested". That is why the false version survived for weeks, and why it is worth naming rather than quietly editing. The replacement reason was wrong within days of being written, which is the same lesson at a shorter interval: a reason is a claim too, and it goes stale faster than the sentence it supports.
