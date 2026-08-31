@@ -145,6 +145,35 @@ posted under an installation token. That is the same product this entry
 describes, pointed at its own source, and the pull request that added this
 sentence was the first one it judged.
 
+**What that first run found, within the hour.** Reading the thread it produced
+turned up two defects in this product, and both are recorded as decisions rather
+than quietly patched.
+
+The fleet's memory was one memory. Every run wrote its entries under a module
+constant, the demo fixture's subject, and passed that same constant to the
+step that asks what is already known. The recall filters on subject and nothing
+else, so every repository the deployment watched shared one set of prior
+findings with each other and with the synthetic corpus. The live thread showed
+it happening: a run about this README escalated a deferral belonging to the demo
+corpus as though it were prior knowledge about this repository. ADR-012 derives
+tenancy from the installation so it cannot be forged by a request; that is worth
+nothing if the memory underneath is global. ADR-015 is the fix.
+
+The second is smaller and more embarrassing. The router correctly decided that a
+documentation change concerned no specialist, and Gemini agreed with it in
+writing. The run then produced an empty draft, the gate refused the empty draft,
+and the pull request was reported as needing review. The product reached the
+right judgement and reported the opposite of it. The gate was not what changed:
+an empty draft is simply no longer manufactured out of a run with nothing to
+assess, and such a run now says so. ADR-016.
+
+Neither could have been found by any test in this repository. With one
+repository, a shared memory key and a scoped one return identical rows, so the
+whole suite agreed with the first bug for as long as it existed. Both needed the
+deployed system, a second tenant, and a real pull request, which is the argument
+for ADR-010 restated, and the reason this section is worth more than a green
+badge.
+
 The consequence is worth stating rather than hiding: a check that can pass on
 our pull requests can also fail on them, and a reader who scrolls the pull
 request list may find one that did. That is the honest version of "the same
