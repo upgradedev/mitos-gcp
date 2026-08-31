@@ -1,7 +1,7 @@
 {
  "voice_id": "onwK4e9ZLuTAKqWW03F9",
  "model_id": "eleven_multilingual_v2",
- "title_card_s": 7.0,
+ "title_card_s": 14.0,
  "end_card_s": 6.0,
  "note": "Beat times are derived from the recorded run, not written here. A beat names a `cue`, a substring of the line it is about, and `build.py` looks up when that line appeared. Fixed timestamps were the previous design and they drifted: tuned for a roughly 190s terminal, recorded at a pace that produced 89s, and nothing compared the two, so the shipped video spoke its last seven beats over a static card for 115 of its 210 seconds.",
  "beats": [
@@ -9,7 +9,7 @@
    "id": "01-open",
    "text": "A schema change ships on Tuesday. In March, a regulator asks who approved it. This is Mitos, the fleet that answers that.",
    "cue": "a fleet of institutional agents",
-   "offset": -7.0
+   "offset": -14.0
   },
   {
    "id": "02-catalog",
@@ -21,7 +21,7 @@
    "id": "03-trigger",
    "text": "A pull request lands. Nobody opened Mitos.",
    "cue": "RUN 1  nobody opened Mitos",
-   "offset": 0.0
+   "offset": 1.0
   },
   {
    "id": "04-signals",
@@ -39,7 +39,7 @@
    "id": "06-recall",
    "text": "The thread remembers. This service was here in July, and that deferral has now expired.",
    "cue": "ESCALATE  the deferral has expired",
-   "offset": 0.0
+   "offset": 1.5
   },
   {
    "id": "07-gate",
@@ -63,13 +63,13 @@
    "id": "10-identity",
    "text": "The reader identity cannot perform it. That is Google IAM refusing, outside this process.",
    "cue": "approve this write",
-   "offset": 0.0
+   "offset": 1.0
   },
   {
    "id": "11-run2",
    "text": "Second run. No personal data this time, so compliance is skipped. The fleet is deciding, not following a pipeline.",
    "cue": "RUN 2  a different PR",
-   "offset": 0.0
+   "offset": 1.7
   },
   {
    "id": "12-memory",
@@ -87,29 +87,36 @@
    "id": "14-decisive",
    "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does, and that is proven in CI.",
    "cue": "THE ONE THE RULES CANNOT SEE",
-   "offset": 0.0
+   "offset": 1.5
   },
   {
    "id": "15-close",
    "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so writing one deferral hands the fleet every open one, and the expired ones are escalated with nobody watching.",
    "cue": "run 1: governed write approved",
-   "offset": 0.0
+   "offset": 1.9
   },
   {
    "id": "16-cloud",
-   "after_run": 16.0,
+   "after_run": 17.8,
    "text": "This is not a local script. Three Cloud Run services in europe west one, each under its own service account, and only the writer holds the credential that can change a repository."
   },
   {
    "id": "17-models",
-   "after_run": 33.0,
+   "after_run": 33.2,
    "text": "Gemini three point seven flash routes the fleet and reads the repository, on Vertex AI. Gemma four, a managed open model, reviews every draft independently and can only add advice a human reads."
   },
   {
    "id": "18-ledger",
-   "after_run": 46.0,
+   "after_run": 49.1,
    "text": "Every decision is appended to Firestore, and the check on the pull request is posted by the fleet itself. None of this is a screenshot of an intention."
+  },
+  {
+   "id": "19-close",
+   "after_run": 62.7,
+   "text": "So: three services, two model families, and not one of them can write anything. That is the feature, and you can check every part of it yourself without an account."
   }
  ],
- "stills_s": 60.0
+ "stills_s": 58.0,
+ "opening_s": 14.0,
+ "closing_s": 13.0
 }

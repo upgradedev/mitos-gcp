@@ -109,6 +109,13 @@ drift from the system it describes:
 
 ![Mitos architecture: three Cloud Run services, two Google model families, a Firestore provenance thread that is append-only by interface, and one governed write behind a human](docs/architecture.png)
 
+And the infrastructure underneath it, drawn the same way from
+[`scripts/infra_diagram.py`](scripts/infra_diagram.py): every resource, every
+identity, and every IAM binding, read out of `infra/main.tf` rather than
+remembered.
+
+![Mitos infrastructure: six service accounts, per-secret bindings, Workload Identity Federation with no keys anywhere, and what each identity is refused](docs/infrastructure.png)
+
 **What the last box is, exactly.** The writer pushes a branch to the specification repository and returns a compare URL and a receipt naming the approval that authorised it. It does **not** open a pull request on the code repository and it does **not** post a status check, and `open_pull_request` and `set_commit_status` remain names in the guard's deny list that nothing may call.
 
 This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`). Five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.

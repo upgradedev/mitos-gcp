@@ -397,6 +397,65 @@ def _card(text_lines: list[str], out: Path, seconds: float) -> None:
     shutil.rmtree(txt_dir, ignore_errors=True)
 
 
+def _segment_from_frames(frames, name: str) -> Path:
+    """Frames with per-frame durations, encoded exactly like the body.
+
+    The same encoder settings as `stage_frames` and `_card`, because the four
+    segments are concatenated with `-c copy` and a mismatch there does not warn,
+    it produces a file that plays the first segment and then stops.
+    """
+    import motion  # noqa: PLC0415
+
+    written = motion.write(frames, BUILD / f"{name}_frames", name)
+    concat = ["ffconcat version 1.0"]
+    for path, dur in written:
+        concat.append(f"file '{path.as_posix()}'")
+        concat.append(f"duration {dur:.3f}")
+    concat.append(f"file '{written[-1][0].as_posix()}'")
+    lst = BUILD / f"{name}.ffconcat"
+    lst.write_text("\n".join(concat), encoding="utf-8")
+
+    out = BUILD / f"{name}.mp4"
+    run(
+        [
+            "ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0",
+            "-i", str(lst), "-fps_mode", "cfr", "-r", str(FPS),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-profile:v", "high", "-level", "4.0", "-pix_fmt", "yuv420p",
+            str(out),
+        ]
+    )
+    return out
+
+
+def stage_opening() -> Path:
+    """The problem, then the name, drawn frame by frame rather than held still.
+
+    Replaces a seven second static card. The name arrives on the sentence that
+    says it rather than before the viewer has a reason to care.
+    """
+    import motion  # noqa: PLC0415
+
+    cfg, _ = load_narration(resolve=False)
+    out = _segment_from_frames(
+        motion.opening_frames(float(cfg["opening_s"])), "opening"
+    )
+    print(f"opening: {duration_of(out):.1f}s animated")
+    return out
+
+
+def stage_closing() -> Path:
+    """Four claims and the two addresses that settle them."""
+    import motion  # noqa: PLC0415
+
+    cfg, _ = load_narration(resolve=False)
+    out = _segment_from_frames(
+        motion.closing_frames(float(cfg["closing_s"])), "closing"
+    )
+    print(f"closing: {duration_of(out):.1f}s")
+    return out
+
+
 def stage_stills() -> Path:
     """The Google Cloud evidence, held long enough to read.
 
@@ -410,7 +469,9 @@ def stage_stills() -> Path:
     a video that silently ships five of eight is the same defect as a check that
     passes over the thing it is named after.
     """
-    cfg, _ = load_narration()
+    import motion  # noqa: PLC0415
+
+    cfg, _ = load_narration(resolve=False)
     total = float(cfg["stills_s"])
     shots = sorted(p for p in STILLS_DIR.glob("*.png"))
     if not shots:
@@ -419,40 +480,19 @@ def stage_stills() -> Path:
             f"is running on Google Cloud; see {STILLS_DIR / 'README.md'} for the "
             f"exact filenames and what has to be visible in each."
         )
+    missing = sorted(set(motion.CAPTIONS) - {p.stem for p in shots})
+    if missing:
+        print(f"stills: no capture for {', '.join(missing)}")
     each = total / len(shots)
 
-    parts = []
-    for i, shot in enumerate(shots):
-        out = BUILD / f"still{i:02d}.mp4"
-        run(
-            [
-                "ffmpeg", "-v", "error", "-y", "-loop", "1", "-t", f"{each:.3f}",
-                "-i", str(shot),
-                # Fit inside the frame and letterbox on the project's own
-                # background rather than cropping: a console screenshot cropped
-                # to fill is a console screenshot with the evidence cut off.
-                "-vf",
-                f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
-                f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color={BG},"
-                f"format=yuv420p",
-                "-r", str(FPS), "-c:v", "libx264", "-preset", "medium",
-                "-crf", "23", "-profile:v", "high", "-level", "4.0", str(out),
-            ]
-        )
-        parts.append(out)
-
-    lst = BUILD / "stills.txt"
-    lst.write_text(
-        "\n".join(f"file '{p.as_posix()}'" for p in parts), encoding="utf-8"
+    frames = []
+    for shot in shots:
+        frames.extend(motion.stills_frames(shot, each))
+    cloud = _segment_from_frames(frames, "cloud")
+    print(
+        f"stills: {len(shots)} console captures, {each:.1f}s each, "
+        f"{duration_of(cloud):.1f}s, zoomed and captioned"
     )
-    cloud = BUILD / "cloud.mp4"
-    run(
-        [
-            "ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0",
-            "-i", str(lst), "-c", "copy", str(cloud),
-        ]
-    )
-    print(f"stills: {len(shots)} console captures, {each:.1f}s each, {total:.0f}s")
     return cloud
 
 
@@ -476,23 +516,20 @@ def stage_mux() -> None:
         ]
     )
 
-    title = BUILD / "title.mp4"
-    _card(
-        [
-            "MITOS",
-            "a fleet of institutional agents, one governed write",
-            "All Things Agentic  ·  The Fortified Enterprise Fleet",
-        ],
-        title,
-        lead,
-    )
+    # The opening is animated now, and it is the lead. `lead` is read back off
+    # the encoded file rather than assumed from the config, because every
+    # narration delay is measured from the end of it and a segment that came out
+    # a tenth of a second long would put every beat a tenth of a second late.
+    title = stage_opening()
+    lead = duration_of(title)
     # The closing card holds until the narrator has finished, rather than the
     # run pace being tuned until the two happen to coincide. Without this the
     # last line was cut off whenever the recording came in shorter than the
     # narration, which made the pace a hidden dependency of the script: change
     # one word of narration and a passing build starts failing.
     cloud = stage_stills()
-    body_s = duration_of(body) + duration_of(cloud)
+    closing = stage_closing()
+    body_s = duration_of(body) + duration_of(cloud) + duration_of(closing)
     speech_ends_at = max((beat.at + lead + dur) for beat, dur in timed)
     tail = float(cfg["end_card_s"])
     end_s = max(tail, speech_ends_at - (lead + body_s) + tail)
@@ -509,7 +546,7 @@ def stage_mux() -> None:
     lst = BUILD / "parts.txt"
     lst.write_text(
         "\n".join(
-            f"file '{p.as_posix()}'" for p in (title, body, cloud, end)
+            f"file '{p.as_posix()}'" for p in (title, body, cloud, closing, end)
         ),
         encoding="utf-8",
     )
