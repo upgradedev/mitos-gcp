@@ -213,6 +213,52 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Approve Suggested Change
+  /api/workspace/suggested-changes/{run_id}:
+    get:
+      description: 'Exactly what a person is being asked to approve, before they approve
+        it.
+
+
+        The interface offered a button and a digest and never showed the bytes. A
+
+        content-addressed approval whose content nobody can read is a hash of
+
+        something you took on trust, which is most of the value of addressing it
+
+        gone.
+
+
+        Readable by a reviewer as well as an owner. Reading a proposal is how a
+
+        reviewer reviews; only pressing approve is restricted, and that asymmetry
+        is
+
+        the point rather than an oversight.'
+      operationId: suggested_change_detail_api_workspace_suggested_changes__run_id__get
+      parameters:
+      - in: path
+        name: run_id
+        required: true
+        schema:
+          title: Run Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Suggested Change Detail Api Workspace Suggested Changes  Run
+                  Id  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Suggested Change Detail
   /api/workspace/thread:
     get:
       operationId: workspace_thread_api_workspace_thread_get

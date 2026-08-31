@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -19,8 +19,8 @@ import {
   Webhook,
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { approveSuggestedChange } from "../api/client";
-import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread, WorkspaceAnalytics } from "../api/types";
+import { approveSuggestedChange, getSuggestedChange, load } from "../api/client";
+import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, SuggestedChange, Thread, WorkspaceAnalytics } from "../api/types";
 import { groupIntoRuns, type RunSummary } from "./thread-model";
 
 interface DataProps {
@@ -165,10 +165,53 @@ export function PullRequestsView(props: DataProps) {
   </div>;
 }
 
+function ProposedChange({ change, confirmed, onConfirm }: { change: SuggestedChange; confirmed: boolean; onConfirm: (value: boolean) => void }) {
+  return <div className="mb-5 flex flex-col gap-4">
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">What you are approving</h4>
+      <dl className="mt-3 grid gap-2 text-xs">
+        <div className="flex justify-between gap-3"><dt className="text-ink-600">File</dt><dd className="truncate font-mono text-ink-300">{change.path}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-ink-600">Repository</dt><dd className="truncate font-mono text-ink-300">{change.repository}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-ink-600">Source commit</dt><dd className="truncate font-mono text-ink-300">{change.source_head_sha.slice(0, 12)}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-ink-600">Size</dt><dd className="font-mono text-ink-300">{change.bytes} bytes</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-ink-600">sha256</dt><dd className="truncate font-mono text-ink-300">{change.plan_hash.slice(0, 16)}</dd></div>
+      </dl>
+    </div>
+    {/* The bytes themselves. A digest of something nobody can read is not a
+        control, it is a formality. */}
+    <pre className="max-h-64 overflow-auto rounded-lg border border-ink-800 bg-ink-950 p-3 font-mono text-[11px] leading-5 text-ink-300">{change.body}</pre>
+    {!change.digest_matches && <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs leading-5 text-red-300">These bytes no longer hash to the digest this plan was recorded under. Nothing here can be approved until that is explained.</p>}
+    <div className="rounded-lg border border-ink-800 bg-ink-950 p-3 text-xs leading-5 text-ink-500">
+      <p className="text-ink-300">Approving creates <span className="font-mono">{change.on_approval.creates_branch}</span>, writes <span className="font-mono">{change.on_approval.writes_path}</span> and opens a pull request against {change.on_approval.base}.</p>
+      <p className="mt-2">It runs as {change.on_approval.identity}, and is bound to {change.on_approval.bound_to}.</p>
+    </div>
+    <label className="flex items-start gap-2 text-xs leading-5 text-ink-400">
+      <input type="checkbox" checked={confirmed} onChange={(event) => onConfirm(event.target.checked)} className="mt-0.5" />
+      <span>I have read these bytes and I am approving this write.</span>
+    </label>
+  </div>;
+}
+
 function RunDetail({ run, session, onClose }: { run: RunSummary; session: Loaded<SessionStatus>; onClose: () => void }) {
   const [approvalState, setApprovalState] = useState<"idle" | "working" | "published" | "error">("idle");
   const [approvalDetail, setApprovalDetail] = useState("");
+  const [proposal, setProposal] = useState<Loaded<SuggestedChange> | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   const membership = session.status === "ok" ? session.value.memberships[0] : undefined;
+
+  // The bytes, fetched when there is a plan to read. Nobody should be asked to
+  // approve a digest of something they cannot see.
+  useEffect(() => {
+    if (!(run.plans > 0) || run.write?.published) return;
+    let live = true;
+    setProposal({ status: "loading" });
+    load(() => getSuggestedChange(run.id)).then((result) => {
+      if (live) setProposal(result);
+    });
+    return () => {
+      live = false;
+    };
+  }, [run.id, run.plans, run.write?.published]);
   // Owner only, because that is what the service enforces:
   // `_require_role(request, workspace_id, frozenset({"owner"}))`. Offering the
   // button to a reviewer produced an enabled control whose only outcome is a
@@ -186,7 +229,7 @@ function RunDetail({ run, session, onClose }: { run: RunSummary; session: Loaded
     }
   };
   const findings = run.entries.filter((entry) => entry.kind === "finding.raised" || entry.kind === "finding.deferred" || entry.kind === "finding.escalated");
-  return <section aria-label={`Pull request ${run.pr} details`} className="card-dark mt-6 overflow-hidden"><div className="flex flex-col gap-4 border-b border-ink-800 p-6 md:flex-row md:items-start md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><Status run={run} /><span className="font-mono text-xs text-ink-600">{run.id}</span></div><h2 className="mt-4 text-xl font-semibold text-ink-50">#{run.pr} {run.title ?? "Untitled pull request"}</h2><p className="mt-2 text-sm text-ink-400">{run.repository} · {run.filesChanged ?? "Unknown"} changed files</p></div><button onClick={onClose} className="button-secondary">Close</button></div><div className="grid lg:grid-cols-[1fr_280px]"><div className="p-6"><h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Recorded findings</h3>{findings.length === 0 ? <p className="mt-5 text-sm text-ink-500">No findings were recorded for this run.</p> : <div className="mt-5 flex flex-col gap-3">{findings.map((entry) => <article key={entry.entry_id} className="rounded-lg border border-ink-800 bg-ink-950 p-4"><div className="flex items-center gap-2"><AlertTriangle size={15} className="text-amber-400" /><p className="text-sm font-medium text-ink-200">{entry.subject || "Finding requires review"}</p></div><p className="mt-2 text-xs leading-5 text-ink-500">{typeof entry.payload.reason === "string" ? entry.payload.reason : typeof entry.payload.summary === "string" ? entry.payload.summary : "See the technical trace for the recorded evidence."}</p></article>)}</div>}</div><aside className="border-t border-ink-800 bg-ink-950/50 p-6 lg:border-l lg:border-t-0"><h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Governance</h3>{run.plans > 0 && !run.write && <div className="mt-5"><button type="button" onClick={approve} disabled={!canApprove || approvalState === "working" || approvalState === "published"} className="button-primary w-full disabled:cursor-not-allowed disabled:opacity-50"><GitPullRequest size={16} />{approvalState === "working" ? "Creating PR…" : approvalState === "published" ? "Suggested PR created" : "Approve suggested PR"}</button>{!canApprove && <p className="mt-2 text-xs leading-5 text-ink-600">Owner access is required. Approving a write is the one action this product does not delegate.</p>}{approvalDetail && <p className={`mt-2 break-words text-xs leading-5 ${approvalState === "error" ? "text-red-400" : "text-cyan-400"}`}>{approvalDetail}</p>}</div>}<dl className="mt-5 flex flex-col gap-4 text-xs"><div><dt className="text-ink-600">Policy result</dt><dd className="mt-1 text-ink-300">{run.gatePassed === null ? "Undetermined" : run.gatePassed ? "Passed" : "Review required"}</dd></div><div><dt className="text-ink-600">Suggested plan</dt><dd className="mt-1 text-ink-300">{run.plans > 0 ? "Recorded" : "None"}</dd></div><div><dt className="text-ink-600">Write</dt><dd className="mt-1 text-ink-300">{run.write?.published ? "Published" : "Not published"}</dd></div></dl>{run.plans > 0 && !run.write?.published && <div className="mt-6 rounded-lg border border-ink-800 bg-ink-950 p-4"><p className="text-xs font-medium text-ink-300">Nothing is written until an owner approves.</p><p className="mt-2 text-xs leading-5 text-ink-500">Approval is bound to the exact bytes of the plan by their sha256, and the write runs in the writer service under its own identity. The browser sends a run id and nothing else.</p></div>}</aside></div></section>;
+  return <section aria-label={`Pull request ${run.pr} details`} className="card-dark mt-6 overflow-hidden"><div className="flex flex-col gap-4 border-b border-ink-800 p-6 md:flex-row md:items-start md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><Status run={run} /><span className="font-mono text-xs text-ink-600">{run.id}</span></div><h2 className="mt-4 text-xl font-semibold text-ink-50">#{run.pr} {run.title ?? "Untitled pull request"}</h2><p className="mt-2 text-sm text-ink-400">{run.repository} · {run.filesChanged ?? "Unknown"} changed files</p></div><button onClick={onClose} className="button-secondary">Close</button></div><div className="grid lg:grid-cols-[1fr_280px]"><div className="p-6"><h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Recorded findings</h3>{findings.length === 0 ? <p className="mt-5 text-sm text-ink-500">No findings were recorded for this run.</p> : <div className="mt-5 flex flex-col gap-3">{findings.map((entry) => <article key={entry.entry_id} className="rounded-lg border border-ink-800 bg-ink-950 p-4"><div className="flex items-center gap-2"><AlertTriangle size={15} className="text-amber-400" /><p className="text-sm font-medium text-ink-200">{entry.subject || "Finding requires review"}</p></div><p className="mt-2 text-xs leading-5 text-ink-500">{typeof entry.payload.reason === "string" ? entry.payload.reason : typeof entry.payload.summary === "string" ? entry.payload.summary : "See the technical trace for the recorded evidence."}</p></article>)}</div>}</div><aside className="border-t border-ink-800 bg-ink-950/50 p-6 lg:border-l lg:border-t-0"><h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Governance</h3>{run.plans > 0 && !run.write && <div className="mt-5">{proposal?.status === "ok" && <ProposedChange change={proposal.value} confirmed={confirmed} onConfirm={setConfirmed} />}{proposal?.status === "error" && <p className="mb-4 text-xs leading-5 text-red-400">The proposal could not be read, so there is nothing to approve: {proposal.detail}</p>}<button type="button" onClick={approve} disabled={!canApprove || !confirmed || proposal?.status !== "ok" || !proposal.value.digest_matches || approvalState === "working" || approvalState === "published"} className="button-primary w-full disabled:cursor-not-allowed disabled:opacity-50"><GitPullRequest size={16} />{approvalState === "working" ? "Creating PR…" : approvalState === "published" ? "Suggested PR created" : "Approve suggested PR"}</button>{!canApprove && <p className="mt-2 text-xs leading-5 text-ink-600">Owner access is required. Approving a write is the one action this product does not delegate.</p>}{approvalDetail && <p className={`mt-2 break-words text-xs leading-5 ${approvalState === "error" ? "text-red-400" : "text-cyan-400"}`}>{approvalDetail}</p>}</div>}<dl className="mt-5 flex flex-col gap-4 text-xs"><div><dt className="text-ink-600">Policy result</dt><dd className="mt-1 text-ink-300">{run.gatePassed === null ? "Undetermined" : run.gatePassed ? "Passed" : "Review required"}</dd></div><div><dt className="text-ink-600">Suggested plan</dt><dd className="mt-1 text-ink-300">{run.plans > 0 ? "Recorded" : "None"}</dd></div><div><dt className="text-ink-600">Write</dt><dd className="mt-1 text-ink-300">{run.write?.published ? "Published" : "Not published"}</dd></div></dl>{run.plans > 0 && !run.write?.published && <div className="mt-6 rounded-lg border border-ink-800 bg-ink-950 p-4"><p className="text-xs font-medium text-ink-300">Nothing is written until an owner approves.</p><p className="mt-2 text-xs leading-5 text-ink-500">Approval is bound to the exact bytes of the plan by their sha256, and the write runs in the writer service under its own identity. The browser sends a run id and nothing else.</p></div>}</aside></div></section>;
 }
 
 export function RepositoriesProductView(props: DataProps) {

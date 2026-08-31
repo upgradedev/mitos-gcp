@@ -7,6 +7,7 @@ import type {
   Loaded,
   SessionStatus,
   Standards,
+  SuggestedChange,
   Thread,
   Watch,
   WorkspaceAnalytics,
@@ -113,6 +114,12 @@ export function threadSourceFor(session: SessionStatus | null): {
 }
 export const getWorkspaceAnalytics = () =>
   getJson<WorkspaceAnalytics>("/api/workspace/analytics");
+// The proposal itself, so the bytes can be read before they are approved.
+export const getSuggestedChange = (runId: string) =>
+  getJson<SuggestedChange>(
+    `/api/workspace/suggested-changes/${encodeURIComponent(runId)}`
+  );
+
 export const approveSuggestedChange = (runId: string) =>
   postJson<{ status: string; receipt: { url?: string } }>("/api/workspace/suggested-changes/approve", { run_id: runId });
 
