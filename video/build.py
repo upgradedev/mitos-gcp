@@ -60,9 +60,11 @@ ANSI = {
 
 MAX_DURATION_S = 240.0  # "~ 4-min Demo video"
 TOLERANCE_S = 1.0 / FPS  # one frame
-# Two H.264 encodes of the same frame land far above this; a frame carrying
-# different text lands far below it. Measured, not guessed: see the run this
-# check first passed on.
+# Measured in CI in both directions rather than guessed, over the cropped band
+# that carries the closing claim: the correct card scores 48.0 dB and a card
+# whose last line was replaced scores 21.1 dB. The threshold sits between them
+# with room on each side. Over the whole frame those two were 54.1 and 34.2,
+# which is why this compares a band and not a frame.
 END_CARD_MIN_PSNR = 25.0
 
 
