@@ -11,7 +11,7 @@ The commit is there. The reasoning is not. It was in a review comment, in somebo
 
 That gap is what we built Mitos for, and it is why the interesting part of the project is not what the agents can do. It is what they cannot.
 
-![Mitos architecture: three Cloud Run services, two Google model families, an append only Firestore thread, and one governed write behind a human](https://raw.githubusercontent.com/upgradedev/mitos-gcp/main/docs/architecture.png)
+![Mitos architecture: three Cloud Run services, two Google model families, a Firestore thread that is append only by interface, and one governed write behind a human](https://raw.githubusercontent.com/upgradedev/mitos-gcp/main/docs/architecture.png)
 
 ## The one thing it does
 
