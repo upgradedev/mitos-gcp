@@ -140,7 +140,7 @@ def test_the_installation_token_is_only_sent_when_there_is_one(main, monkeypatch
     write, which is the argument this project makes about itself."""
     github = _GitHub(changed_files=1, compare=[_file("a.py")])
     monkeypatch.setattr(main, "httpx", github)
-    monkeypatch.setattr(main, "_github_installation_token", lambda i: "tok-9")
+    monkeypatch.setattr(main, "_github_installation_token", lambda i, repository="": "tok-9")
 
     main._fetch_diff("owner/repo", 1, head_sha="h")
     assert all("Authorization" not in (k.get("headers") or {}) for _, k in github.calls)

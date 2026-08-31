@@ -83,7 +83,17 @@ def main(monkeypatch):
     monkeypatch.setenv("MITOS_LEDGER", "memory")
     import service.main as module
 
-    monkeypatch.setattr(module, "_github_installation_token", lambda installation_id: "tok-123")
+    # Records what each caller asked for. Both write paths used to mint an
+    # installation-wide token while knowing the repository, so the stub took one
+    # argument and the tests could not have noticed.
+    minted: list[tuple] = []
+
+    def _token(installation_id, repository=""):
+        minted.append((installation_id, repository))
+        return "tok-123"
+
+    monkeypatch.setattr(module, "_github_installation_token", _token)
+    module._minted_for_tests = minted
     return module
 
 
@@ -353,3 +363,34 @@ def test_the_installation_token_is_scoped_to_one_repository(monkeypatch):
     main._github_installation_token(42, repository="owner/private-billing")
 
     assert sent["json"] == {"repositories": ["private-billing"]}
+
+
+def test_every_write_token_names_its_repository(main, monkeypatch):
+    """An installation token with no repository carries the App's permissions
+    across every repository the installation covers. Both write paths knew
+    which one they were writing to and asked for all of them anyway."""
+    module = main
+
+    class _Created:
+        status_code = 201
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": 5}
+
+    # Stubbed, because the assertion is about the token the caller asks for and
+    # not about GitHub. Without this the test reached api.github.com and failed
+    # on a 401, which is a real request this suite has no business making.
+    monkeypatch.setattr(module.httpx, "post", lambda *a, **k: _Created())
+
+    module._github_check(
+        repository="acme/billing", installation_id=42, head_sha="abc",
+        status="queued",
+    )
+
+    assert module._minted_for_tests, "no token was minted, so this proves nothing"
+    assert all(
+        repository == "acme/billing" for _installation, repository in module._minted_for_tests
+    ), module._minted_for_tests
