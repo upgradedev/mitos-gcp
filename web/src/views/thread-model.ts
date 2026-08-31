@@ -52,6 +52,7 @@ export const KIND_VOCABULARY: Record<string, Vocab> = {
   "plan.review_only": { label: "review", tone: "finding" },
   "run.nothing_to_govern": { label: "nothing to govern", tone: "quiet" },
   "gate.delegated": { label: "gate delegated", tone: "route" },
+  "critic.independent_review": { label: "independent review", tone: "finding" },
   "write.executed": { label: "write", tone: "write" },
 };
 

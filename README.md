@@ -4,6 +4,7 @@
 [![Submission video](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml/badge.svg?branch=main)](https://github.com/upgradedev/mitos-gcp/actions/workflows/video.yml)
 [![coverage 86%](https://img.shields.io/badge/coverage-86%25-green.svg)](https://github.com/upgradedev/mitos-gcp/actions/runs/32756367127)
 [![Gemini 3.7 Flash](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4.svg)](https://cloud.google.com/vertex-ai)
+[![Gemma 4 26B](https://img.shields.io/badge/Gemma-4%2026B%20A4B%20IT-F9AB00.svg)](https://cloud.google.com/vertex-ai/generative-ai/docs/open-models/use-gemma)
 [![Cloud Run, 3 identities](https://img.shields.io/badge/Cloud%20Run-3%20identities-4285F4.svg)](https://console.cloud.google.com/run?project=upgradegr-mitos)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -70,18 +71,18 @@ flowchart TB
         R --> S1["db-architect-leader"]
         R --> S2["documentation-companion"]
         R --> S3["compliance-companion<br/><i>skipped when no personal data</i>"]
-        G["deterministic gate<br/>secrets · injection · bypass · hallucinated paths"]
-        C["Gemini critic<br/><i>advisory only, cannot change the verdict</i>"]
-        G --> C
+        C["independent critic · <b>Gemma 4 26B</b><br/><i>advisory only, cannot change the verdict</i>"]
     end
 
     S1 & S2 & S3 --> D["draft"]
 
     subgraph EVAL["mitos-evaluator &nbsp;·&nbsp; Cloud Run"]
-        E["third identity, refused the write credential<br/><i>and refuses anonymous callers</i>"]
+        G["deterministic gate<br/>secrets · injection · bypass · hallucinated paths<br/><i>third identity, refused the write credential,<br/>and refuses anonymous callers</i>"]
     end
 
-    D --> G
+    D -->|"OIDC, audience bound to this service"| G
+    G --> C
+    C -.->|"sanitised envelope only:<br/>no diff, no file, no credential"| MAAS[["Gemma 4 26B A4B IT<br/>Google Cloud managed open models"]]
     C -->|FAIL| RE["repair"] --> G
     C -->|PASS| CARD["approval card<br/>sha256 of the exact plan"]
 
@@ -630,6 +631,7 @@ Sources: [Cloud Run](https://cloud.google.com/run/pricing),
 | three Cloud Run services, three service accounts | **deployed**, verifiable with the two `curl`s above |
 | Firestore provenance thread | **deployed**, append-only by interface: no update or delete method exists in the code. IAM does not enforce it |
 | Gemini 3.7 reads the diffs and reviews the drafts | **live**, `MITOS_MODEL=gemini-3.7-flash` |
+| a second model family reviews the draft independently | **proven in CI, both directions.** Gemma 4 26B A4B IT, served by Google Cloud managed open models, reviews a sanitised draft and can only add advisories a human reads. It cannot approve, cannot remove a deterministic finding and cannot clear the injection flag — a property of `_with_critic`, not of the prompt, asserted in `tests/unit/test_the_second_model_cannot_approve.py` and checked by mutating the invariant seven ways. The managed endpoint answered this project on 2026-08-30: requested and returned `google/gemma-4-26b-a4b-it-maas`, 200 in 0.51s. **Not yet deployed at the time of writing**; the row below the table says how to check whether it is |
 | the spec-repo write | **real.** The writer service pushes a branch to [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) over SSH, using a deploy key scoped to that one repository. Commits are authored by the writer's own service account, which is the claim: no human and no other service can make them. The commit on record, [`e065d3b`](https://github.com/upgradedev/mitos-spec/commit/e065d3b3a739ffb15dca1195e3df6944fe1e4a21), is authored by `mitos-writer@mitos-fleet.iam.gserviceaccount.com`, because it was written before the fleet moved to `upgradegr-mitos`. The identity that would author the next one is `mitos-writer@upgradegr-mitos.iam.gserviceaccount.com`, which `/identity` on the writer reports. Said this way rather than printing the current address over an older commit, because the address is checkable in one click |
 | the webhook | **real.** A GitHub webhook on [upgradedev/mitos-spec](https://github.com/upgradedev/mitos-spec) posts to `/webhook/github`. Signature verified with HMAC-SHA256 over the raw body, repository allowlisted, and the fleet wakes with nobody calling anything. The hook is registered and active; its delivery log is empty and is not readable without repository admin, and the paragraph under this table says what that costs the claim |
 | **a check run on a real pull request** | **real, public, and the one thing here a judge can verify without an account.** The GitHub App is installed on this repository, so every pull request wakes the fleet and gets a `Mitos change governance` check posted under an installation token. Open [#102](https://github.com/upgradedev/mitos-gcp/pull/102): `action_required`, *"Analysis completed with 1 finding(s) and 1 suggested plan(s). Any repository write remains blocked until an authorised reviewer approves it."* Then open [#105](https://github.com/upgradedev/mitos-gcp/pull/105), which is `neutral` because the router found nothing to govern in it and said which specialists it skipped. Two different verdicts, on two real pull requests, from the deployed fleet |

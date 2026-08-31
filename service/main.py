@@ -316,6 +316,36 @@ def watch() -> dict[str, Any]:
     }
 
 
+def _last_independent_review() -> Optional[dict[str, Any]]:
+    """The most recent review that actually happened, or nothing.
+
+    Deliberately not derived from `MITOS_CRITIC_MODEL`. An environment variable
+    proves a deployment intends to call a model; it proves nothing about whether
+    one ever answered, and "active" on the strength of a variable is exactly the
+    kind of claim this project keeps finding in itself.
+    """
+    try:
+        entries = [
+            entry
+            for entry in ledger().all()
+            if entry.kind == "critic.independent_review"
+        ]
+    except Exception:  # noqa: BLE001 - evidence is optional, lying is not
+        return None
+    if not entries:
+        return None
+    latest = entries[-1]
+    payload = dict(latest.payload)
+    return {
+        "run_id": latest.run_id,
+        "model": payload.get("model"),
+        "status": payload.get("status"),
+        "advisory_count": payload.get("advisory_count"),
+        "latency_ms": payload.get("latency_ms"),
+        "at": latest.recorded_at,
+    }
+
+
 def _running_as() -> Optional[str]:
     """Ask the metadata server who we are. Not a value we chose."""
     try:
@@ -360,6 +390,30 @@ def identity() -> dict[str, Any]:
         "may_call_write_tools": write_checks,
         "spec_repo_write_credential": _can_reach_write_credential(),
         "model": os.environ.get("MITOS_MODEL", "stub"),
+        # Two models, named apart, because "which model" has two answers here
+        # and reporting one of them is how a claim about the other goes
+        # unchecked.
+        "models": {
+            "primary_agent_model": os.environ.get("MITOS_MODEL", "stub"),
+            "primary_agent_provider": "Vertex AI",
+            "primary_agent_does": (
+                "the router, the specialists and the repository-reading agent"
+            ),
+            "independent_critic_model": os.environ.get("MITOS_CRITIC_MODEL") or None,
+            "independent_critic_provider": (
+                "Google Cloud managed open models"
+                if os.environ.get("MITOS_CRITIC_MODEL")
+                else None
+            ),
+            "independent_critic_does": (
+                "reviews a sanitised draft and may add advisories for the human. "
+                "It cannot approve, cannot clear a finding and cannot change a "
+                "verdict, by construction rather than by instruction"
+            ),
+            # Configured is not the same as ran, and only one of them is
+            # evidence. This reads the thread rather than the environment.
+            "independent_critic_last_review": _last_independent_review(),
+        },
         # Which source this process is. Reported rather than inferred from
         # the image tag, because a tag is a label and this is a fact.
         "build_sha": BUILD_SHA,
@@ -788,6 +842,7 @@ def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: in
 
 def _run_webhook_chore(*, wh: Any, delivery: Any, files: Any, led: Any) -> Any:
     gate = _gate()
+    critic = build_critic(PROJECT)
     result = run_chore(
         wh.to_pull_request(delivery, files), led,
         run_id=delivery.delivery_id, repository=delivery.repository,
@@ -796,10 +851,36 @@ def _run_webhook_chore(*, wh: Any, delivery: Any, files: Any, led: Any) -> Any:
             PROJECT, role=ROLE, repository=delivery.repository,
             ref=delivery.head_sha or "HEAD", scope=READ_SCOPE,
         ),
-        critic=build_critic(PROJECT), classifier=build_classifier(PROJECT),
+        critic=critic, classifier=build_classifier(PROJECT),
         doc_agent=build_doc_agent(PROJECT, role=ROLE),
         gate=gate,
     )
+
+    # The independent review, as an entry rather than a log line.
+    #
+    # A second model that only writes to stdout is a second model nobody can
+    # check. This records which model answered, what it concluded, how long it
+    # took and hashes of what went in and came out. Not the envelope and not the
+    # reasoning: the envelope is sanitised and there is still no reason to store
+    # it twice, and chain-of-thought is not evidence of anything.
+    review = getattr(critic, "last", None)
+    if review:
+        led.append(
+            Entry(
+                kind="critic.independent_review",
+                actor="independent-critic",
+                subject=f"{delivery.repository}#{delivery.number}",
+                payload={
+                    **review,
+                    "note": (
+                        "a second model family reviewed the draft. It is "
+                        "advisory by construction: the deterministic verdict is "
+                        "unchanged by anything it said"
+                    ),
+                },
+                run_id=delivery.delivery_id,
+            )
+        )
 
     # Which process judged this, in the thread rather than in a log line.
     #
@@ -838,6 +919,24 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
     )
     plans = sum(item.kind == "plan.proposed" for item in entries)
 
+    # What the second model said, on the surface a reviewer actually opens.
+    #
+    # Derived from the thread rather than from `MITOS_CRITIC_MODEL`, so it says
+    # nothing when the review did not happen. A configured model and a model
+    # that answered are different claims, and only one of them is evidence.
+    second_opinion = ""
+    for item in entries:
+        if item.kind != "critic.independent_review":
+            continue
+        count = item.payload.get("advisory_count") or 0
+        model = str(item.payload.get("model") or "an independent model")
+        second_opinion = (
+            f" A second model family ({model}) then reviewed the draft "
+            f"independently and raised {count} advisory note(s) for the human "
+            f"reviewer; it cannot approve, clear a finding or change this "
+            f"result."
+        )
+
     # `neutral`, not `success`, when no specialist was concerned. GitHub renders
     # a neutral check as "not applicable" rather than as a pass, which is the
     # honest reading: nothing was assessed, so nothing passed. The same
@@ -860,7 +959,7 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
                 f"this change, and none opened while reading the repository, is "
                 f"the paperwork for it, so nothing is proposed for approval and "
                 f"a reviewer decides what to update. The router's decision and "
-                f"the evidence read are in the thread."
+                f"the evidence read are in the thread." + second_opinion
             ),
         )
         return
@@ -872,7 +971,7 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
             summary=(
                 "No specialist is concerned by this change, so there was nothing "
                 "to assess. The router recorded which specialists it skipped and "
-                "why, and that decision is in the thread."
+                "why, and that decision is in the thread." + second_opinion
             ),
         )
         return
@@ -881,7 +980,11 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
         repository=delivery.repository, installation_id=installation_id,
         head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
         conclusion="action_required" if needs_review else "success",
-        summary=f"Analysis completed with {findings} finding(s) and {plans} suggested plan(s). Any repository write remains blocked until an authorised reviewer approves it.",
+        summary=(
+            f"Analysis completed with {findings} finding(s) and {plans} "
+            f"suggested plan(s). Any repository write remains blocked until an "
+            f"authorised reviewer approves it." + second_opinion
+        ),
     )
 
 

@@ -114,3 +114,75 @@ def test_no_check_is_posted_without_an_installation(monkeypatch):
     )
 
     assert calls == [], f"a check was posted with no App to post it: {calls}"
+
+
+# ---------------------------------------------------------------------------
+# The second opinion, on the surface a reviewer opens
+# ---------------------------------------------------------------------------
+#
+# A second model that only writes to a log is a second model nobody can check.
+# The requirement was that a human-facing surface changes when it adds
+# something, so these assert the change and — the half that is easy to skip —
+# that the surface stays quiet when the review did not happen.
+
+
+def _review(count, model="google/gemma-4-26b-a4b-it-maas"):
+    return _entry(
+        "critic.independent_review",
+        {"model": model, "advisory_count": count, "status": "concerns_found"},
+    )
+
+
+def test_the_check_names_the_second_model_when_it_reviewed(monkeypatch):
+    seen = _conclusion_for(
+        [_entry("fleet.dispatch"), _entry("plan.proposed"), _review(2)], monkeypatch
+    )
+
+    assert "google/gemma-4-26b-a4b-it-maas" in seen["summary"]
+    assert "2 advisory note(s)" in seen["summary"]
+
+
+def test_it_says_so_on_a_run_with_no_plan_too(monkeypatch):
+    """The three completion branches are three separate strings, and a line
+    added to one of them is absent from the other two."""
+    seen = _conclusion_for(
+        [_entry("fleet.dispatch"), _entry("plan.review_only"), _review(1)], monkeypatch
+    )
+
+    assert "reviewed the draft" in seen["summary"]
+
+
+def test_and_on_a_run_with_nothing_to_govern(monkeypatch):
+    seen = _conclusion_for(
+        [_entry("fleet.dispatch"), _entry("run.nothing_to_govern"), _review(0)],
+        monkeypatch,
+    )
+
+    assert "reviewed the draft" in seen["summary"]
+
+
+def test_the_check_says_nothing_about_a_review_that_did_not_run(monkeypatch):
+    """The line is derived from the thread, not from the deployment. An
+    environment variable proves a deployment intends to call a model; it proves
+    nothing about whether one answered, and a check run that claims a second
+    opinion it never got is the exact failure this project keeps finding in
+    itself."""
+    seen = _conclusion_for(
+        [_entry("fleet.dispatch"), _entry("plan.proposed")], monkeypatch
+    )
+
+    assert "second model" not in seen["summary"]
+    assert "gemma" not in seen["summary"].lower()
+
+
+def test_the_second_opinion_cannot_change_the_conclusion(monkeypatch):
+    """It reports; it does not decide. A run that passed still passes when the
+    critic had four things to say, because the advisories are for the human and
+    the conclusion is the deterministic result."""
+    clean = _conclusion_for([_entry("fleet.dispatch"), _entry("plan.proposed")], monkeypatch)
+    noisy = _conclusion_for(
+        [_entry("fleet.dispatch"), _entry("plan.proposed"), _review(4)], monkeypatch
+    )
+
+    assert clean["conclusion"] == "success"
+    assert noisy["conclusion"] == "success"
