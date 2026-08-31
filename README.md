@@ -240,7 +240,7 @@ only runs while someone happens to be calling you is a poller with extra steps.
 > rather than in a prompt, so the identity that reads production data cannot reach the credential
 > that writes the specification repository, and no agent in the fleet can talk its way past the gate.
 
-That sentence used to end "holds no credential that can write", unqualified, and one command
+That sentence used to end without naming which credential, and one command
 refuted it: the reader holds `secretVersionAdder` on the GitHub App private key, because the
 manifest flow has to store what GitHub returns exactly once. That is a write grant to Secret
 Manager. The boundary that holds is the specific one, and `/identity` proves it live.
@@ -285,7 +285,7 @@ repository:
 curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute \
   -H 'content-type: application/json' \
   -d '{"path":"docs/x.md","body":"x","message":"m","branch":"b"}'
-# {"detail":"the reader service holds no credential that can write"}
+# {"detail":"the reader service cannot reach the specification repository credential"}
 ```
 
 The reader orchestrates the whole chore and then has to **ask** the writer service, over an
@@ -481,7 +481,7 @@ curl -N -X POST https://mitos-reader-437828525303.europe-west1.run.app/run/strea
 
 ```bash
 curl -s -X POST https://mitos-reader-437828525303.europe-west1.run.app/execute   -H 'content-type: application/json'   -d '{"path":"docs/x.md","body":"x","message":"m","branch":"b"}'
-# {"detail":"the reader service holds no credential that can write"}
+# {"detail":"the reader service cannot reach the specification repository credential"}
 ```
 
 ### From source, against the same stack

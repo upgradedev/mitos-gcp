@@ -1857,7 +1857,7 @@ def execute(req: ExecuteRequest) -> dict:
     if ROLE != "writer":
         raise HTTPException(
             status_code=403,
-            detail=f"the {ROLE} service holds no credential that can write",
+            detail=f"the {ROLE} service cannot reach the specification repository credential",
         )
 
     # The write is bound to an approval, and this is where the binding is

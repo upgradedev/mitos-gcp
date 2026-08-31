@@ -167,6 +167,7 @@ def test_the_three_coverage_numbers_come_from_one_run():
 # cannot write." while the same process opens pull requests and posts check runs
 # over plain httpx, which ADK's `before_tool_callback` never sees.
 BOUNDARY_VIEW = (REPO / "web" / "src" / "views" / "BoundaryView.tsx").read_text(encoding="utf-8")
+APPSHELL = (REPO / "service" / "appshell.py").read_text(encoding="utf-8")
 
 
 def test_no_judge_facing_file_says_the_reader_cannot_write_without_saying_where():
@@ -181,9 +182,28 @@ def test_no_judge_facing_file_says_the_reader_cannot_write_without_saying_where(
         ("README.md", README),
         ("BoundaryView.tsx", BOUNDARY_VIEW),
         ("service/main.py", SERVICE),
+        # The interface card, which is the broadest statement of this claim and
+        # the place the unqualified version survived longest. It was not in this
+        # list, and the phrase it used was not in the list below either, so the
+        # guard read three files and missed the one a visitor meets first.
+        ("service/appshell.py", APPSHELL),
     ):
         flat = " ".join(text.split()).lower()
-        for phrase in ("cannot write", "nothing to write with"):
+        # Adjacent string literals are one sentence to a reader and two to a
+        # grep. `"...that can " "write it."` contains the claim and does not
+        # contain the phrase, which is exactly how the interface card kept an
+        # unqualified version of this for weeks while a test named after it
+        # passed. Joining them costs a few false neighbours and buys back every
+        # claim a formatter happened to wrap.
+        flat = flat.replace('" "', "").replace("' '", "")
+        for phrase in (
+            "cannot write",
+            "nothing to write with",
+            # Added after the wording above was corrected and this one was not.
+            # A guard written around the phrasing of one mistake does not catch
+            # the same claim said differently.
+            "no credential that can write",
+        ):
             start = 0
             while True:
                 at = flat.find(phrase, start)
