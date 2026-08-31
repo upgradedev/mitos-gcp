@@ -107,7 +107,7 @@ The same architecture as a single image, drawn by
 [`scripts/architecture_diagram.py`](scripts/architecture_diagram.py) so it cannot
 drift from the system it describes:
 
-![Mitos architecture: three Cloud Run services, two Google model families, an append-only Firestore thread, and one governed write behind a human](docs/architecture.png)
+![Mitos architecture: three Cloud Run services, two Google model families, a Firestore provenance thread that is append-only by interface, and one governed write behind a human](docs/architecture.png)
 
 **What the last box is, exactly.** The writer pushes a branch to the specification repository and returns a compare URL and a receipt naming the approval that authorised it. It does **not** open a pull request on the code repository and it does **not** post a status check, and `open_pull_request` and `set_commit_status` remain names in the guard's deny list that nothing may call.
 

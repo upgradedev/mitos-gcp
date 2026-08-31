@@ -2387,6 +2387,17 @@ class Diff:
     whole: bool
     reason: str = ""
     pinned_to: str = ""
+    # Whether the read itself is in doubt, as opposed to the change simply
+    # containing something a diff cannot express.
+    #
+    # Both mean the fleet must refuse, because a verdict over part of a change
+    # is a verdict about a different change. They are not the same news. A file
+    # count that does not match, or a read that drifted off the delivered head,
+    # says the read was unreliable and someone should look. A PNG in the commit
+    # says the change contains a picture, which is normal, and reporting it as a
+    # failing check tells every contributor who adds an image that they broke
+    # something.
+    read_is_in_doubt: bool = False
 
     def __iter__(self):
         """So existing callers that treat this as the list keep working."""
@@ -2485,11 +2496,14 @@ def _fetch_diff(
     ]
 
     problems = []
+    doubt = False
     if expected and len(raw) != expected:
+        doubt = True
         problems.append(f"GitHub reports {expected} changed files and {len(raw)} were read")
     if patchless:
         problems.append(f"{len(patchless)} file(s) came back with no patch: {patchless[:5]}")
     if not pinned:
+        doubt = True
         problems.append(
             f"read from the pull request as it is now rather than pinned to "
             f"{head_sha or 'the delivered head'}"
@@ -2500,6 +2514,7 @@ def _fetch_diff(
         whole=not problems,
         reason="; ".join(problems),
         pinned_to=pinned,
+        read_is_in_doubt=doubt,
     )
 
 
@@ -2669,8 +2684,14 @@ async def github_webhook(request: Request) -> JSONResponse:
                     _safe_github_check(
                         repository=delivery.repository, installation_id=installation_id,
                         head_sha=delivery.head_sha, status="completed",
-                        check_run_id=check_run_id, conclusion="failure",
-                        summary=f"Mitos could not read the whole change: {files.reason}",
+                        check_run_id=check_run_id,
+                        conclusion="failure" if files.read_is_in_doubt else "neutral",
+                        summary=(
+                            f"Mitos could not read the whole change, so it did "
+                            f"not judge any of it: {files.reason}. A verdict over "
+                            f"part of a change is a verdict about a different "
+                            f"change."
+                        ),
                     )
                 return
             if not files:

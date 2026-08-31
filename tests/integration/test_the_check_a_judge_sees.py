@@ -186,3 +186,68 @@ def test_the_second_opinion_cannot_change_the_conclusion(monkeypatch):
 
     assert clean["conclusion"] == "success"
     assert noisy["conclusion"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# A picture in a commit is not a failing check
+# ---------------------------------------------------------------------------
+#
+# Found on this repository's own pull request. Adding `docs/architecture.png`
+# turned the Mitos check red with "1 file(s) came back with no patch". The
+# refusal is right, because a verdict over part of a change is a verdict about a
+# different change. The conclusion was not: `failure` tells every contributor
+# who adds an image that they broke something, on the one surface a judge sees.
+#
+# Two different pieces of news, so two different conclusions. A file that has no
+# diff because it is binary is normal and reports `neutral`. A file count that
+# does not match, or a read that drifted off the delivered head, means the read
+# itself was unreliable and still reports `failure`.
+
+
+def _diff(**kw):
+    import service.main as main
+
+    return main.Diff(files=[], whole=False, **kw)
+
+
+def test_a_binary_file_is_not_reported_as_a_failure():
+    seen = _diff(reason="1 file(s) came back with no patch: ['docs/a.png']")
+
+    assert seen.read_is_in_doubt is False
+
+
+def test_a_read_that_does_not_add_up_still_fails(monkeypatch):
+    """The premise of the split. If nothing sets this, the branch below is
+    dead and every unreadable change reports neutral, which is the same
+    mistake pointing the other way."""
+    import service.main as main
+
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+
+        class R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                # GitHub says three files changed and returns one.
+                if "/files" in url:
+                    return [{"filename": "a.py", "patch": "@@ -1 +1 @@"}]
+                return {"changed_files": 3, "head": {"sha": "abc"}}
+
+            headers: dict = {}
+
+        return R()
+
+    monkeypatch.setattr(main.httpx, "get", fake_get)
+    out = main._fetch_diff("o/r", 1, head_sha="abc")
+
+    assert out.whole is False
+    assert out.read_is_in_doubt is True, (
+        "a file count that does not match is a read nobody should trust, and it "
+        "must not be softened into the branch meant for binary files"
+    )
