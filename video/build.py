@@ -60,6 +60,10 @@ ANSI = {
 
 MAX_DURATION_S = 240.0  # "~ 4-min Demo video"
 TOLERANCE_S = 1.0 / FPS  # one frame
+# Two H.264 encodes of the same frame land far above this; a frame carrying
+# different text lands far below it. Measured, not guessed: see the run this
+# check first passed on.
+END_CARD_MIN_PSNR = 25.0
 
 
 def font_file() -> str:
@@ -269,6 +273,17 @@ def stage_frames() -> None:
 # --------------------------------------------------------------------------
 
 
+# The last thing a judge sees, and the last claim this project makes. Hoisted out
+# of the render stage so `stage_verify` can re-render it and compare against the
+# frames that actually shipped: a constant used by one of the two would let them
+# drift, which is the whole failure this check exists to catch.
+END_CARD = [
+    "github.com/upgradedev/mitos-gcp",
+    "three Cloud Run services, three service accounts",
+    "the reader cannot reach the spec-repo credential",
+]
+
+
 def _card(text_lines: list[str], out: Path, seconds: float) -> None:
     font = font_file()
     txt_dir = BUILD / "card"
@@ -343,15 +358,7 @@ def stage_mux() -> None:
         )
 
     end = BUILD / "end.mp4"
-    _card(
-        [
-            "github.com/upgradedev/mitos-gcp",
-            "three Cloud Run services, three service accounts",
-            "the reader cannot reach the spec-repo credential",
-        ],
-        end,
-        end_s,
-    )
+    _card(END_CARD, end, end_s)
 
     silent = BUILD / "silent.mp4"
     lst = BUILD / "parts.txt"
@@ -444,7 +451,53 @@ def stage_verify() -> None:
     print(f"verify: {silent_tail:.1f}s silent outro on the end card")
     if kinds["video"]["width"] != WIDTH:
         raise SystemExit("unexpected frame width")
+
+    _verify_end_card(out)
     print("verify: OK")
+
+
+def _verify_end_card(out: Path) -> None:
+    """Assert the closing card that shipped, not the strings that were passed in.
+
+    Everything above this reads the container: streams, duration, the cap, a
+    narration that is not cut off. None of it can tell one rendered sentence
+    from another, and the README claimed this stage "asserts on the shipped
+    pixels" while asserting nothing of the kind.
+
+    That gap had a cost waiting to happen. The closing card carried an
+    unqualified claim about the reader's credentials for as long as the video
+    existed, it was corrected, and the rebuild was declared good on a log line
+    that would have looked identical had the correction silently not applied.
+
+    So: pull the final frame out of the file that ships, render the card again
+    from `END_CARD`, and compare them. PSNR rather than an exact match, because
+    the shipped frame has been through H.264 twice and the reference has not.
+    A frame carrying different text scores far below this threshold; two encodes
+    of the same frame score far above it.
+    """
+    last = BUILD / "last-frame.png"
+    run(["ffmpeg", "-v", "error", "-y", "-sseof", "-1", "-i", str(out),
+         "-frames:v", "1", str(last)])
+
+    reference = BUILD / "end-reference.mp4"
+    _card(END_CARD, reference, 1.0)
+    ref_png = BUILD / "end-reference.png"
+    run(["ffmpeg", "-v", "error", "-y", "-i", str(reference),
+         "-frames:v", "1", str(ref_png)])
+
+    report = run(["ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
+                  "-lavfi", "psnr", "-f", "null", "-"])
+    match = re.search(r"average:([0-9.]+|inf)", report)
+    if not match:
+        raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
+    score = float("inf") if match.group(1) == "inf" else float(match.group(1))
+    print(f"verify: closing frame matches the expected card, PSNR {score:.1f} dB")
+    if score < END_CARD_MIN_PSNR:
+        raise SystemExit(
+            f"the closing frame does not match END_CARD (PSNR {score:.1f} dB, "
+            f"need {END_CARD_MIN_PSNR}). The video shipped a different closing "
+            f"card from the one this build says it renders."
+        )
 
 
 STAGES = {
