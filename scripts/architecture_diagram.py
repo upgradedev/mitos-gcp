@@ -131,7 +131,7 @@ def main() -> None:
     d.text((84, 358), "mitos-reader", font=F_H, fill=WHITE)
     d.text((84, 390), "Cloud Run", font=F_S, fill=DIM)
     tag(d, "SA mitos-reader", 470, 356, DIM)
-    d.text((470, 388), "no write credential", font=F_S, fill=RED)
+    d.text((424, 388), "no spec-repo write credential", font=F_S, fill=RED)
 
     box(d, [90, 424, 670, 490], fill="#20202a", outline=BLUE, width=2)
     d.text((110, 436), "architect-leader", font=F_B, fill=BLUE)
@@ -199,7 +199,7 @@ def main() -> None:
     d.text((834, 982), "governed write", font=F_B, fill=INK)
     d.text((834, 1006), "refuses any plan whose hash it was not given.",
            font=F_S, fill=DIM)
-    d.text((834, 1026), "The only identity holding a write credential.",
+    d.text((834, 1026), "The only identity holding the spec-repo write credential.",
            font=F_S, fill=GREEN)
 
     # ------------------------------------------------------- state and secrets
@@ -217,18 +217,20 @@ def main() -> None:
     ]):
         d.text((1404, 420 + i * 19), line, font=F_S, fill=DIM)
 
-    box(d, [1380, 620, 1740, 790], outline=EDGE)
+    box(d, [1380, 620, 1740, 832], outline=EDGE)
     d.text((1404, 638), "Secret Manager", font=F_H, fill=WHITE)
     for i, line in enumerate([
-        "GitHub App private key,",
-        "webhook secret, spec-repo",
-        "deploy key.",
+        "GitHub App private key and",
+        "webhook secret: the reader",
+        "holds these, and mints a",
+        "scoped installation token to",
+        "post the check run.",
         "",
-        "Granted to the writer.",
-        "Refused to the reader.",
+        "spec-repo deploy key: the",
+        "writer, and nothing else.",
     ]):
         d.text((1404, 674 + i * 19), line, font=F_S,
-               fill=RED if i == 5 else DIM)
+               fill=RED if i >= 6 else DIM)
 
     box(d, [1380, 850, 1740, 1075], outline=EDGE)
     d.text((1404, 868), "Build and identity", font=F_H, fill=WHITE)
