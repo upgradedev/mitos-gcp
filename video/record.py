@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess  # nosec B404 - runs this repo's own demo with fixed argv
 import sys
 import time
@@ -88,7 +89,13 @@ def record(pace: float, out: Path, ledger: str) -> dict:
     # silently getting the other one is exactly the class of defect this project
     # keeps finding in itself.
     if ledger == "firestore":
-        text = "\n".join(item["line"] for item in lines)
+        # Colour codes stripped first. The header colours the value, so the
+        # captured bytes read `ledger ESC[33mfirestore`, and a plain substring
+        # test for the two words together fails on a correct recording. Same
+        # shape as a claim split across two string literals: what a person
+        # reads as one phrase is not one phrase in the text being searched.
+        raw = "\n".join(item["line"] for item in lines)
+        text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
         if "THIS IS NOT THE REAL SYSTEM" in text:
             # Carry the demo's own reason up. Without it this said "check the
             # credential" while the actual cause was an ImportError, and the
