@@ -376,7 +376,7 @@ jobs:
           done <<'SCREENS'
           value|Turn every pull request into an explainable change decision.
           policy|Schema, API, and security checks run deterministically.
-          write safety|No write action is simulated or sent from the browser.
+          write safety|Nothing is written until an owner approves.
           webhook|Signatures and delivery IDs are checked server-side.
           repositories|No repository activity yet. Demo and unscoped entries are hidden.
           SCREENS
