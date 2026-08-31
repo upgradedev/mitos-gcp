@@ -76,6 +76,31 @@ def record(pace: float, out: Path, ledger: str) -> dict:
         "lines": lines,
     }
     out.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+
+    # A silent fallback would ship the words THIS IS NOT THE REAL SYSTEM in the
+    # submission video.
+    #
+    # `mitos.demo` prints that banner in red and keeps going when it cannot
+    # reach Firestore, which is the right behaviour for a person running it and
+    # the wrong one for an unattended build: the recording would succeed, the
+    # duration checks would pass, and the artifact would open on a red banner
+    # nobody looked at until a judge did. Asking for the real ledger and
+    # silently getting the other one is exactly the class of defect this project
+    # keeps finding in itself.
+    if ledger == "firestore":
+        text = "\n".join(item["line"] for item in lines)
+        if "THIS IS NOT THE REAL SYSTEM" in text:
+            raise SystemExit(
+                "asked for the Firestore ledger and the demo fell back to memory. "
+                "The recording would have shipped the fallback banner. Check the "
+                "credential and that requirements/spike.txt is installed."
+            )
+        if "ledger firestore" not in text:
+            raise SystemExit(
+                "the recorded header does not say `ledger firestore`, so what "
+                "was captured is not what was asked for"
+            )
+
     return meta
 
 

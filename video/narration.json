@@ -63,7 +63,7 @@
     {
       "id": "12-memory",
       "at": 130.0,
-      "text": "And it recalls what the first run wrote, minutes earlier. In the deployed fleet that ledger is Firestore."
+      "text": "And it recalls what the first run wrote, minutes earlier, live, out of Firestore."
     },
     {
       "id": "13-backlog",
