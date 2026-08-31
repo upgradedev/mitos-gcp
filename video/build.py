@@ -284,19 +284,26 @@ END_CARD = [
 ]
 
 
+CARD_LINE_H = 44
+
+
+def _card_top(lines: int) -> int:
+    return HEIGHT // 2 - (lines * CARD_LINE_H) // 2
+
+
 def _card(text_lines: list[str], out: Path, seconds: float) -> None:
     font = font_file()
     txt_dir = BUILD / "card"
     txt_dir.mkdir(parents=True, exist_ok=True)
     filters = []
-    top = HEIGHT // 2 - (len(text_lines) * 44) // 2
+    top = _card_top(len(text_lines))
     for i, line in enumerate(text_lines):
         tf = txt_dir / f"c{i}.txt"
         tf.write_text(line, encoding="utf-8")
         filters.append(
             f"drawtext=fontfile='{font}':textfile='{tf.as_posix()}'"
             f":expansion=none:fontcolor={'0xffffff' if i == 0 else '0x8a8790'}"
-            f":fontsize={34 if i == 0 else 21}:x=(w-tw)/2:y={top + i * 44}"
+            f":fontsize={34 if i == 0 else 21}:x=(w-tw)/2:y={top + i * CARD_LINE_H}"
         )
     run(
         [
@@ -488,9 +495,25 @@ def _verify_end_card(out: Path) -> None:
     # stderr, not stdout. ffmpeg writes its whole log there, the psnr filter
     # included, and `run` returns stdout, so the first version of this compared
     # an empty string and failed with an empty report.
+    # The band carrying the last line, not the whole frame.
+    #
+    # Comparing whole frames does not work and was proven not to work rather
+    # than assumed: a build shipping a completely different third line scored
+    # 34.2 dB against a matching build's 54.1 dB, and passed a 25 dB threshold.
+    # Most of the card is background, so one changed sentence barely moves a
+    # full-frame average, and a threshold tuned to catch it would sit a hair
+    # under the noise of two H.264 encodes. Raising the number would have been
+    # widening a gate to make it pass.
+    #
+    # Cropping to the line that carries the claim makes the comparison about the
+    # thing being claimed. The geometry comes from `_card_top`, which the render
+    # also uses, so the crop cannot drift from what was drawn.
+    band_y = _card_top(len(END_CARD)) + (len(END_CARD) - 1) * CARD_LINE_H - 6
+    crop = f"crop={WIDTH}:{CARD_LINE_H}:0:{band_y}"
     proc = subprocess.run(  # nosec B603 - fixed argv, shell=False
         ["ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
-         "-lavfi", "psnr", "-f", "null", "-"],
+         "-lavfi", f"[0:v]{crop}[a];[1:v]{crop}[b];[a][b]psnr",
+         "-f", "null", "-"],
         capture_output=True, text=True,
     )
     report = proc.stderr
@@ -498,7 +521,8 @@ def _verify_end_card(out: Path) -> None:
     if not match:
         raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
     score = float("inf") if match.group(1) == "inf" else float(match.group(1))
-    print(f"verify: closing frame matches the expected card, PSNR {score:.1f} dB")
+    print(f"verify: the closing claim matches END_CARD, PSNR {score:.1f} dB "
+          f"over the band at y={band_y}")
     if score < END_CARD_MIN_PSNR:
         raise SystemExit(
             f"the closing frame does not match END_CARD (PSNR {score:.1f} dB, "
