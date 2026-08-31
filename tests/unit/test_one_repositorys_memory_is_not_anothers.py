@@ -132,3 +132,28 @@ def test_the_demo_corpus_is_not_recalled_by_a_real_repository():
         "a real run recalled the demo corpus as prior knowledge about its own "
         "repository"
     )
+
+
+def test_the_granularity_adr_015_claims_is_the_granularity_it_has():
+    """ADR-015 names this case, so it is asserted rather than described.
+
+    Two segments is a guess about layout. Against this repository's own tree,
+    two pull requests touching different files under `src/mitos/` share a key
+    and recall each other, which the ADR calls the service being that module.
+    A change spanning unrelated directories shares nothing and falls back to
+    the repository rather than borrowing a narrower key, which is the case that
+    would be wrong in the other direction.
+    """
+    same_module = [
+        subject_of("r/x", _pr(["src/mitos/chore.py"])),
+        subject_of("r/x", _pr(["src/mitos/ledger.py"])),
+    ]
+    assert same_module[0] == same_module[1] == "r/x:src/mitos", (
+        f"ADR-015 says these share a key; they are {same_module}"
+    )
+
+    spanning = subject_of("r/x", _pr(["src/mitos/chore.py", "service/main.py"]))
+    assert spanning == "r/x", (
+        "a change spanning unrelated directories borrowed a narrower key: "
+        f"{spanning}"
+    )
