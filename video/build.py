@@ -358,7 +358,7 @@ def stage_mux() -> None:
         )
 
     end = BUILD / "end.mp4"
-    _card(END_CARD, end, end_s)
+    _card(END_CARD[:2] + ["MUTATION: a different closing claim"], end, end_s)
 
     silent = BUILD / "silent.mp4"
     lst = BUILD / "parts.txt"
