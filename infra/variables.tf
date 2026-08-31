@@ -32,6 +32,25 @@ variable "image" {
   type        = string
 }
 
+# The second model, named apart from the first on purpose.
+#
+# The fleet runs on Gemini: the router, the specialists and the
+# repository-reading agent all use `var.model`. This one reviews the draft those
+# produced, from a different model family, and can only add advisories to what a
+# human is shown — it cannot approve, clear a finding or change a verdict, which
+# is a property of `_with_critic` rather than of the prompt.
+#
+# Two variables rather than one because a single ambiguous MODEL would make it
+# possible to move the whole fleet onto a review model by editing a deployment.
+#
+# Empty is a supported value and means no second opinion: the offline suite and
+# the recorded demo run that way and need no credential.
+variable "critic_model" {
+  description = "The independent critic model, served by Google Cloud managed open models. Additional to var.model, never instead of it."
+  type        = string
+  default     = "google/gemma-4-26b-a4b-it-maas"
+}
+
 variable "model" {
   description = "The Gemini model. The rules require 3.5 or newer, so anything lower is a disqualification rather than a preference."
   type        = string

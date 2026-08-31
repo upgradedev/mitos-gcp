@@ -185,6 +185,23 @@ function ProposedChange({ change, confirmed, onConfirm }: { change: SuggestedCha
       <p className="text-ink-300">Approving creates <span className="font-mono">{change.on_approval.creates_branch}</span>, writes <span className="font-mono">{change.on_approval.writes_path}</span> and opens a pull request against {change.on_approval.base}.</p>
       <p className="mt-2">It runs as {change.on_approval.identity}, and is bound to {change.on_approval.bound_to}.</p>
     </div>
+    {/* The second opinion, in front of the person about to approve.
+
+        A second model that only writes to a log is a second model nobody
+        reads. These are advisory by construction — the deterministic verdict
+        above is unchanged by anything said here — and that is exactly why they
+        have to be shown rather than counted: a judgement the gate cannot act
+        on is a judgement for the human, and this is where the human is. */}
+    {change.advisories.length > 0 && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+        <p className="text-xs font-medium text-amber-200">{change.advisories.length} advisory from an independent model review</p>
+      </div>
+      <ul className="mt-3 flex flex-col gap-2">
+        {change.advisories.map((advisory, index) => <li key={index} className="text-xs leading-5 text-ink-300">{advisory}</li>)}
+      </ul>
+      <p className="mt-3 border-t border-amber-500/20 pt-2 text-xs leading-5 text-ink-500">A different model family reviewed the draft after the deterministic checks ran. It cannot approve, cannot clear a finding and cannot change the result above. It can only add what you are reading.</p>
+    </div>}
     <label className="flex items-start gap-2 text-xs leading-5 text-ink-400">
       <input type="checkbox" checked={confirmed} onChange={(event) => onConfirm(event.target.checked)} className="mt-0.5" />
       <span>I have read these bytes and I am approving this write.</span>

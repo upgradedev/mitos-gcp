@@ -39,6 +39,9 @@ KIND_STYLE = {
     "run.nothing_to_govern": ("#8a8790", "nothing to govern"),
     # The deterministic gate ran in the evaluator service, not here.
     "gate.delegated": ("#7aa2f7", "gate delegated"),
+    # A second model family reviewing the draft. Advisory, so it is toned
+    # like an advisory and not like a verdict.
+    "critic.independent_review": ("#bb9af7", "independent review"),
     "write.executed": ("#5fd75f", "write"),
     "finding.raised": ("#ff9e64", "finding"),
     "finding.deferred": ("#ffd75f", "deferred"),

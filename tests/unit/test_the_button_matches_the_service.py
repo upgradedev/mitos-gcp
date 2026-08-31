@@ -58,3 +58,64 @@ def test_the_panel_says_what_approval_is_bound_to():
     """Replacing a false statement with nothing would also pass the test above."""
     assert "sha256" in VIEWS
     assert "until an owner approves" in VIEWS
+
+
+# ---------------------------------------------------------------------------
+# The second opinion reaches the person approving
+# ---------------------------------------------------------------------------
+#
+# The requirement was not "call a second model". It was that the human-facing
+# approval card visibly changes when the second model has something to add. A
+# call that only writes an invisible log satisfies the first and not the second,
+# and the first on its own is a claim rather than a feature.
+
+
+def _proposed_change_component() -> str:
+    start = VIEWS.index("function ProposedChange(")
+    return VIEWS[start : VIEWS.index("function RunDetail(", start)]
+
+
+def test_the_service_still_hands_the_advisories_to_the_browser():
+    """The premise, checked the same way as the one above: the assertion after
+    this is about nothing if the endpoint stops sending them."""
+    detail = SERVICE[SERVICE.index("suggested-changes/") :][:6000]
+
+    assert '"advisories"' in detail
+
+
+def test_the_card_renders_them_rather_than_counting_them():
+    card = _proposed_change_component()
+
+    assert "change.advisories.map" in card, (
+        "the approval card no longer renders the advisory text, so a second "
+        "opinion reaches a log and not the person approving"
+    )
+
+
+def test_they_sit_above_the_confirmation_and_not_below_it():
+    """Order is the whole point. "I have read these bytes and I am approving
+    this write" is the last thing on the card, and a second opinion printed
+    after it is a second opinion the reader ticks past."""
+    card = _proposed_change_component()
+
+    assert card.index("change.advisories.map") < card.index("I have read these bytes")
+
+
+def test_the_card_does_not_overstate_what_the_second_model_did():
+    """It cannot approve, cannot clear a finding and cannot change the verdict.
+    The card says so, next to the advisories, because a reader who thinks a
+    model judged this change is reading a different product than the one that
+    exists."""
+    card = _proposed_change_component()
+    block = card[card.index("change.advisories.length") :]
+
+    assert "cannot approve" in block
+    assert "cannot change the result" in block
+
+
+def test_nothing_is_shown_when_there_is_nothing_to_say():
+    """An empty amber panel on every card teaches a reader to ignore the amber
+    panel."""
+    card = _proposed_change_component()
+
+    assert "change.advisories.length > 0 &&" in card

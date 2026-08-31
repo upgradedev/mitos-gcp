@@ -479,6 +479,66 @@ every route and only the right identity may serve it.
 deterministic verdict, and shipping a draft to a second process for a model to
 look at buys nothing and costs a round trip.
 
+### ADR-020 — A second model family reviews the draft, and can only add to it
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** the critic runs on Gemma 4 26B A4B IT, served by Google Cloud
+managed open models, selected by `MITOS_CRITIC_MODEL`. Gemini 3.7 on Vertex is
+unchanged and remains load bearing: the router, the specialists and the
+repository-reading agent are all Gemini, on `MITOS_MODEL`. Two variables, not
+one, because a single ambiguous MODEL would make it possible to move the whole
+fleet onto a review model by editing a deployment. Unset means no critic, which
+is what the offline suite and the recorded demo do and is why they need no
+credential.
+**Reason:** the critic was a second opinion from the same model family that
+wrote the draft, which is the weakest possible form of a second opinion: shared
+training, shared blind spots, shared failure modes. A different family is a
+genuinely independent read, and this is the one place in the fleet where an
+independent read is safe to add.
+**Consequence:** it is safe because it cannot do anything. `_with_critic` is
+union-only by construction — there is no branch in it that clears a finding,
+flips `passed` or reduces what a human is shown, which is ADR-002 — so a critic
+on any model is structurally advisory. That is asserted rather than assumed:
+`tests/unit/test_the_second_model_cannot_approve.py` gives it a critic that
+returns `{"status": "passed"}` and asks to remove a finding, and checks the
+verdict, the findings and the injection flag all survive intact. The invariant
+was then mutated seven ways — critic approves, critic subtracts, outage goes
+silent, fences sent, indented blocks sent, no length cap, findings quoted
+verbatim — and every mutation was caught.
+
+**What leaves the process.** The critic reviews prose about a change and does
+not need the change, and it answers on a global endpoint, so the envelope is the
+part of this worth writing down. `sanitise_for_independent_review` removes
+everything the deterministic gate objects to using the same patterns the repair
+uses, then drops every fenced and every indented block whole, then caps the
+length. Dropping blocks rather than redacting inside them is deliberate: a
+redactor removes what it recognises, and the question is not whether a line
+looks like a credential but whether repository content should cross this
+boundary at all. The deterministic findings travel as their check names only,
+because `detail` and `evidence` quote the draft and quoting the draft into a
+field marked safe is how sanitising gets undone.
+
+**It has to be visible.** A second model that only writes to a log is a second
+model nobody reads, and "we call two models" would then be a claim rather than a
+feature. So the review lands in three places a person actually opens: a
+`critic.independent_review` entry in the provenance thread naming the model that
+answered, its latency and hashes of what went in and came out; a line on the
+GitHub check run; and an amber panel on the approval card, above the "I have
+read these bytes" confirmation and not below it, saying what the second model
+said and — next to it — that it cannot approve, cannot clear a finding and
+cannot change the result above.
+
+All three are derived from the thread, never from `MITOS_CRITIC_MODEL`. A
+configured model and a model that answered are different claims and only one of
+them is evidence; `/identity` reports the last review that happened rather than
+the variable that intends one. `test_the_check_a_judge_sees.py` asserts the
+quiet direction too: a run with no review says nothing about one.
+
+**Cost and footprint:** managed, so there is no endpoint to run, no GPU, no GKE,
+no extra Cloud Run service and no API key — Application Default Credentials on
+the Vertex global openapi surface, under the `roles/aiplatform.user` the three
+service accounts already hold. Chain-of-thought is never requested and never
+stored.
+
 ## Standards compliance
 
 | ORG_STANDARDS | State |

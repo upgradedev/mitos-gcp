@@ -1,84 +1,115 @@
 {
-  "voice_id": "onwK4e9ZLuTAKqWW03F9",
-  "model_id": "eleven_multilingual_v2",
-  "title_card_s": 7.0,
-  "end_card_s": 6.0,
-  "note": "Anchors are seconds from the start of the recorded run, before the title card is added. The total video is the last beat's end plus the closing card, so an anchor moved later here moves the whole artifact toward the 240s cap no matter what pace the run is recorded at. The closing card is silent, and `verify` refuses more than 8 seconds of dead air, so this value cannot exceed that: 16.0 did, which made a correct build fail once the narration finished before the recording did.",
-  "beats": [
-    {
-      "id": "01-open",
-      "at": 0.0,
-      "text": "A schema change ships on Tuesday. In March, a regulator asks who approved it. This is Mitos, the fleet that answers that."
-    },
-    {
-      "id": "02-catalog",
-      "at": 12.0,
-      "text": "Five agents, catalogued by department. The router reads this catalogue to decide who wakes."
-    },
-    {
-      "id": "03-trigger",
-      "at": 21.0,
-      "text": "A pull request lands. Nobody opened Mitos."
-    },
-    {
-      "id": "04-signals",
-      "at": 27.0,
-      "text": "Every signal cites the exact hunk that raised it."
-    },
-    {
-      "id": "05-dispatch",
-      "at": 41.0,
-      "text": "Three of three wake, because this change carries personal data."
-    },
-    {
-      "id": "06-recall",
-      "at": 48.0,
-      "text": "The thread remembers. This service was here in July, and that deferral has now expired."
-    },
-    {
-      "id": "07-gate",
-      "at": 65.0,
-      "text": "The gate rejects the first draft. The pull request carried a live looking credential, and an instruction telling the review agent to approve itself."
-    },
-    {
-      "id": "08-repair",
-      "at": 89.0,
-      "text": "Repaired, resubmitted, passed."
-    },
-    {
-      "id": "09-approval",
-      "at": 96.0,
-      "text": "One write is proposed, addressed by its own sha256."
-    },
-    {
-      "id": "10-identity",
-      "at": 103.0,
-      "text": "The reader identity cannot perform it. That is Google IAM refusing, outside this process."
-    },
-    {
-      "id": "11-run2",
-      "at": 116.0,
-      "text": "Second run. No personal data this time, so compliance is skipped. The fleet is deciding, not following a pipeline."
-    },
-    {
-      "id": "12-memory",
-      "at": 130.0,
-      "text": "And it recalls what the first run wrote, minutes earlier. In the deployed fleet that ledger is Firestore."
-    },
-    {
-      "id": "13-backlog",
-      "at": 148.0,
-      "text": "Then the rest of the morning, unattended. Some are parked, most are left to a reviewer, and every one of them names why."
-    },
-    {
-      "id": "14-decisive",
-      "at": 163.0,
-      "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does, and that is proven in CI."
-    },
-    {
-      "id": "15-close",
-      "at": 181.0,
-      "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so writing one deferral hands the fleet every open one, and the expired ones are escalated with nobody watching."
-    }
-  ]
+ "voice_id": "onwK4e9ZLuTAKqWW03F9",
+ "model_id": "eleven_multilingual_v2",
+ "title_card_s": 7.0,
+ "end_card_s": 6.0,
+ "note": "Beat times are derived from the recorded run, not written here. A beat names a `cue`, a substring of the line it is about, and `build.py` looks up when that line appeared. Fixed timestamps were the previous design and they drifted: tuned for a roughly 190s terminal, recorded at a pace that produced 89s, and nothing compared the two, so the shipped video spoke its last seven beats over a static card for 115 of its 210 seconds.",
+ "beats": [
+  {
+   "id": "01-open",
+   "text": "A schema change ships on Tuesday. In March, a regulator asks who approved it. This is Mitos, the fleet that answers that.",
+   "cue": "a fleet of institutional agents",
+   "offset": -7.0
+  },
+  {
+   "id": "02-catalog",
+   "text": "Five agents, catalogued by department. The router reads this catalogue to decide who wakes.",
+   "cue": "THE CATALOG",
+   "offset": 2.5
+  },
+  {
+   "id": "03-trigger",
+   "text": "A pull request lands. Nobody opened Mitos.",
+   "cue": "RUN 1  nobody opened Mitos",
+   "offset": 0.0
+  },
+  {
+   "id": "04-signals",
+   "text": "Every signal cites the exact hunk that raised it.",
+   "cue": "signal  schema-change",
+   "offset": 0.0
+  },
+  {
+   "id": "05-dispatch",
+   "text": "Three of three wake, because this change carries personal data.",
+   "cue": "DISPATCH  waking 3 of 3",
+   "offset": 0.0
+  },
+  {
+   "id": "06-recall",
+   "text": "The thread remembers. This service was here in July, and that deferral has now expired.",
+   "cue": "ESCALATE  the deferral has expired",
+   "offset": 0.0
+  },
+  {
+   "id": "07-gate",
+   "text": "The gate rejects the first draft. The pull request carried a live looking credential, and an instruction telling the review agent to approve itself.",
+   "cue": "GATE  draft 1: FAIL",
+   "offset": 0.0
+  },
+  {
+   "id": "08-repair",
+   "text": "Repaired, resubmitted, passed.",
+   "cue": "REPAIR  stripping what the gate objected",
+   "offset": 0.0
+  },
+  {
+   "id": "09-approval",
+   "text": "One write is proposed, addressed by its own sha256.",
+   "cue": "APPROVAL  one write proposed",
+   "offset": 0.0
+  },
+  {
+   "id": "10-identity",
+   "text": "The reader identity cannot perform it. That is Google IAM refusing, outside this process.",
+   "cue": "approve this write",
+   "offset": 0.0
+  },
+  {
+   "id": "11-run2",
+   "text": "Second run. No personal data this time, so compliance is skipped. The fleet is deciding, not following a pipeline.",
+   "cue": "RUN 2  a different PR",
+   "offset": 0.0
+  },
+  {
+   "id": "12-memory",
+   "text": "And it recalls what the first run wrote, minutes earlier. In the deployed fleet that ledger is Firestore.",
+   "cue": "not re-filing it",
+   "offset": 0.0
+  },
+  {
+   "id": "13-backlog",
+   "text": "Then the rest of the morning, unattended. Some are parked, most are left to a reviewer, and every one of them names why.",
+   "cue": "THE REST OF THE MORNING",
+   "offset": 0.0
+  },
+  {
+   "id": "14-decisive",
+   "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does, and that is proven in CI.",
+   "cue": "THE ONE THE RULES CANNOT SEE",
+   "offset": 0.0
+  },
+  {
+   "id": "15-close",
+   "text": "Mitos has no scheduler and no queue. Its agents hold open Firestore query subscriptions, so writing one deferral hands the fleet every open one, and the expired ones are escalated with nobody watching.",
+   "cue": "run 1: governed write approved",
+   "offset": 0.0
+  },
+  {
+   "id": "16-cloud",
+   "after_run": 16.0,
+   "text": "This is not a local script. Three Cloud Run services in europe west one, each under its own service account, and only the writer holds the credential that can change a repository."
+  },
+  {
+   "id": "17-models",
+   "after_run": 33.0,
+   "text": "Gemini three point seven flash routes the fleet and reads the repository, on Vertex AI. Gemma four, a managed open model, reviews every draft independently and can only add advice a human reads."
+  },
+  {
+   "id": "18-ledger",
+   "after_run": 46.0,
+   "text": "Every decision is appended to Firestore, and the check on the pull request is posted by the fleet itself. None of this is a screenshot of an intention."
+  }
+ ],
+ "stills_s": 60.0
 }

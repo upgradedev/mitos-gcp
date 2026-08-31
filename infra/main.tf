@@ -83,6 +83,7 @@ locals {
     MITOS_SETUP_TOKEN         = random_password.setup_token.result
     MITOS_LEDGER              = "firestore"
     MITOS_MODEL               = var.model
+    MITOS_CRITIC_MODEL        = var.critic_model
     GOOGLE_CLOUD_LOCATION     = "global"
     GOOGLE_GENAI_USE_VERTEXAI = "True"
   }
