@@ -63,7 +63,7 @@
     {
       "id": "12-memory",
       "at": 130.0,
-      "text": "And it recalls what the first run wrote, live, out of Firestore."
+      "text": "And it recalls what the first run wrote, minutes earlier. In the deployed fleet that ledger is Firestore."
     },
     {
       "id": "13-backlog",
@@ -73,7 +73,7 @@
     {
       "id": "14-decisive",
       "at": 163.0,
-      "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model reads the register, and refuses."
+      "text": "And this one. The column is called vuln code. No pattern matches it, so the rules never wake compliance. The model does, and that is proven in CI."
     },
     {
       "id": "15-close",
