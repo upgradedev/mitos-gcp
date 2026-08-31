@@ -546,13 +546,35 @@ def run(reader: str, evaluator: str, writer: str) -> int:
     # refused the write. Asserting a rejection here would be asserting that the
     # specialist leaked.
     gate_ran = any(b.get("kind") == "evaluate" for b in beats)
-    guard_fired = any(
-        b.get("kind") == "guard" and "refused" in b.get("text", "") for b in beats
-    )
+    guard_beats = [b.get("text", "") for b in beats if b.get("kind") == "guard"]
+    guard_fired = any("refused" in text for text in guard_beats)
+
+    # Three outcomes, not two, and conflating them was dangerous in the worse
+    # direction. The probe runs a live agent, so it can fail to run at all, and
+    # the run then carries "the guard probe could not run" instead of a refusal.
+    # Reported as a plain failure of "the interceptor refused the write", that
+    # reads as the interceptor having ALLOWED it, which is a security incident
+    # rather than a flaky model call. The one thing that genuinely must never
+    # appear is the tool being reachable, and that is asserted separately.
+    probe_broke = any("could not run" in text for text in guard_beats)
+    tool_reachable = any("was reachable" in text for text in guard_beats)
+
     r.record(gate_ran, "the gate ran on the draft")
     r.record(
+        not tool_reachable,
+        "the write tool was never reachable from the reader role",
+        "reachable" if tool_reachable else "",
+    )
+    r.record(
+        guard_fired or probe_broke,
+        "the interceptor probe ran in the product path",
+        "the probe did not run at all" if not guard_beats else "",
+    )
+    r.record(
         guard_fired,
-        "the interceptor refused the write inside the product path",
+        "the interceptor refused the write inside the product path"
+        + (" (the probe could not run this time, which is a model failure and "
+           "not a gate failure)" if probe_broke and not guard_fired else ""),
         next(
             (b["text"].splitlines()[0] for b in beats if b.get("kind") == "guard"), ""
         ),
