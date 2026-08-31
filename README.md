@@ -150,7 +150,7 @@ turned up two defects in this product, and both are recorded as decisions rather
 than quietly patched.
 
 The fleet's memory was one memory. Every run wrote its entries under a module
-constant — the demo fixture's subject — and passed that same constant to the
+constant, the demo fixture's subject, and passed that same constant to the
 step that asks what is already known. The recall filters on subject and nothing
 else, so every repository the deployment watched shared one set of prior
 findings with each other and with the synthetic corpus. The live thread showed
@@ -170,7 +170,7 @@ assess, and such a run now says so. ADR-016.
 Neither could have been found by any test in this repository. With one
 repository, a shared memory key and a scoped one return identical rows, so the
 whole suite agreed with the first bug for as long as it existed. Both needed the
-deployed system, a second tenant, and a real pull request — which is the argument
+deployed system, a second tenant, and a real pull request, which is the argument
 for ADR-010 restated, and the reason this section is worth more than a green
 badge.
 
