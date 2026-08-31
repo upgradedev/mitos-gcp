@@ -60,6 +60,12 @@ ANSI = {
 
 MAX_DURATION_S = 240.0  # "~ 4-min Demo video"
 TOLERANCE_S = 1.0 / FPS  # one frame
+# Measured in CI in both directions rather than guessed, over the cropped band
+# that carries the closing claim: the correct card scores 48.0 dB and a card
+# whose last line was replaced scores 21.1 dB. The threshold sits between them
+# with room on each side. Over the whole frame those two were 54.1 and 34.2,
+# which is why this compares a band and not a frame.
+END_CARD_MIN_PSNR = 25.0
 
 
 def font_file() -> str:
@@ -79,6 +85,16 @@ def run(cmd: list[str]) -> str:
     if proc.returncode != 0:
         raise SystemExit(f"command failed: {' '.join(cmd[:4])}…\n{proc.stderr[-2000:]}")
     return proc.stdout
+
+
+def run_reading_stderr(cmd: list[str]) -> str:
+    """ffmpeg writes its log, filter output included, to stderr rather than
+    stdout, and `run` returns stdout. Kept beside `run` so the one suppression
+    both need lives in one place and neither call site carries a literal
+    executable name for bandit to flag."""
+    # Fixed argv list, shell=False. Nothing here is user supplied.
+    proc = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
+    return proc.stderr
 
 
 def duration_of(path: Path) -> float:
@@ -269,19 +285,37 @@ def stage_frames() -> None:
 # --------------------------------------------------------------------------
 
 
+# The last thing a judge sees, and the last claim this project makes. Hoisted out
+# of the render stage so `stage_verify` can re-render it and compare against the
+# frames that actually shipped: a constant used by one of the two would let them
+# drift, which is the whole failure this check exists to catch.
+END_CARD = [
+    "github.com/upgradedev/mitos-gcp",
+    "three Cloud Run services, three service accounts",
+    "the reader cannot reach the spec-repo credential",
+]
+
+
+CARD_LINE_H = 44
+
+
+def _card_top(lines: int) -> int:
+    return HEIGHT // 2 - (lines * CARD_LINE_H) // 2
+
+
 def _card(text_lines: list[str], out: Path, seconds: float) -> None:
     font = font_file()
     txt_dir = BUILD / "card"
     txt_dir.mkdir(parents=True, exist_ok=True)
     filters = []
-    top = HEIGHT // 2 - (len(text_lines) * 44) // 2
+    top = _card_top(len(text_lines))
     for i, line in enumerate(text_lines):
         tf = txt_dir / f"c{i}.txt"
         tf.write_text(line, encoding="utf-8")
         filters.append(
             f"drawtext=fontfile='{font}':textfile='{tf.as_posix()}'"
             f":expansion=none:fontcolor={'0xffffff' if i == 0 else '0x8a8790'}"
-            f":fontsize={34 if i == 0 else 21}:x=(w-tw)/2:y={top + i * 44}"
+            f":fontsize={34 if i == 0 else 21}:x=(w-tw)/2:y={top + i * CARD_LINE_H}"
         )
     run(
         [
@@ -343,15 +377,7 @@ def stage_mux() -> None:
         )
 
     end = BUILD / "end.mp4"
-    _card(
-        [
-            "github.com/upgradedev/mitos-gcp",
-            "three Cloud Run services, three service accounts",
-            "the reader cannot reach the spec-repo credential",
-        ],
-        end,
-        end_s,
-    )
+    _card(END_CARD, end, end_s)
 
     silent = BUILD / "silent.mp4"
     lst = BUILD / "parts.txt"
@@ -444,7 +470,76 @@ def stage_verify() -> None:
     print(f"verify: {silent_tail:.1f}s silent outro on the end card")
     if kinds["video"]["width"] != WIDTH:
         raise SystemExit("unexpected frame width")
+
+    _verify_end_card(out)
     print("verify: OK")
+
+
+def _verify_end_card(out: Path) -> None:
+    """Assert the closing card that shipped, not the strings that were passed in.
+
+    Everything above this reads the container: streams, duration, the cap, a
+    narration that is not cut off. None of it can tell one rendered sentence
+    from another, and the README claimed this stage "asserts on the shipped
+    pixels" while asserting nothing of the kind.
+
+    That gap had a cost waiting to happen. The closing card carried an
+    unqualified claim about the reader's credentials for as long as the video
+    existed, it was corrected, and the rebuild was declared good on a log line
+    that would have looked identical had the correction silently not applied.
+
+    So: pull the final frame out of the file that ships, render the card again
+    from `END_CARD`, and compare them. PSNR rather than an exact match, because
+    the shipped frame has been through H.264 twice and the reference has not.
+    A frame carrying different text scores far below this threshold; two encodes
+    of the same frame score far above it.
+    """
+    last = BUILD / "last-frame.png"
+    run(["ffmpeg", "-v", "error", "-y", "-sseof", "-1", "-i", str(out),
+         "-frames:v", "1", str(last)])
+
+    reference = BUILD / "end-reference.mp4"
+    _card(END_CARD, reference, 1.0)
+    ref_png = BUILD / "end-reference.png"
+    run(["ffmpeg", "-v", "error", "-y", "-i", str(reference),
+         "-frames:v", "1", str(ref_png)])
+
+    # stderr, not stdout. ffmpeg writes its whole log there, the psnr filter
+    # included, and `run` returns stdout, so the first version of this compared
+    # an empty string and failed with an empty report.
+    # The band carrying the last line, not the whole frame.
+    #
+    # Comparing whole frames does not work and was proven not to work rather
+    # than assumed: a build shipping a completely different third line scored
+    # 34.2 dB against a matching build's 54.1 dB, and passed a 25 dB threshold.
+    # Most of the card is background, so one changed sentence barely moves a
+    # full-frame average, and a threshold tuned to catch it would sit a hair
+    # under the noise of two H.264 encodes. Raising the number would have been
+    # widening a gate to make it pass.
+    #
+    # Cropping to the line that carries the claim makes the comparison about the
+    # thing being claimed. The geometry comes from `_card_top`, which the render
+    # also uses, so the crop cannot drift from what was drawn.
+    band_y = _card_top(len(END_CARD)) + (len(END_CARD) - 1) * CARD_LINE_H - 6
+    crop = f"crop={WIDTH}:{CARD_LINE_H}:0:{band_y}"
+    compare = [
+        "ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
+        "-lavfi", f"[0:v]{crop}[a];[1:v]{crop}[b];[a][b]psnr",
+        "-f", "null", "-",
+    ]
+    report = run_reading_stderr(compare)
+    match = re.search(r"average:([0-9.]+|inf)", report)
+    if not match:
+        raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
+    score = float("inf") if match.group(1) == "inf" else float(match.group(1))
+    if score < END_CARD_MIN_PSNR:
+        raise SystemExit(
+            f"the closing frame does not match END_CARD (PSNR {score:.1f} dB, "
+            f"need {END_CARD_MIN_PSNR}). The video shipped a different closing "
+            f"card from the one this build says it renders."
+        )
+    print(f"verify: the closing claim matches END_CARD, PSNR {score:.1f} dB "
+          f"over the band at y={band_y}")
 
 
 STAGES = {

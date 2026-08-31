@@ -438,3 +438,28 @@ def test_the_config_example_names_the_allowlist_terraform_actually_sets():
         "the README prints a webhook allowlist that Terraform does not set. "
         f"README shows {sorted(shown)}, infra/variables.tf sets {sorted(declared)}"
     )
+
+
+def test_the_closing_card_of_the_video_names_which_credential():
+    """The last frame of the submission video is the widest audience any sentence
+    in this project gets, and it carried the unqualified claim.
+
+    Asserted here rather than only in `video/build.py` because the guard above
+    reads judge-facing files and the video was not one of them. It is now, by way
+    of the constant the build renders and `stage_verify` compares the shipped
+    frame against.
+    """
+    build = (REPO / "video" / "build.py").read_text(encoding="utf-8")
+
+    block = re.search(r"END_CARD = \[(.*?)\]", build, re.DOTALL)
+    assert block, "video/build.py no longer declares END_CARD"
+    lines = re.findall(r'"([^"]+)"', block.group(1))
+    assert lines, "END_CARD is empty"
+
+    flat = " ".join(lines).lower()
+    for phrase in ("cannot write", "no credential that can write"):
+        if phrase in flat:
+            assert "spec-repo" in flat or "specification repository" in flat, (
+                f"the closing card says {phrase!r} without naming the "
+                f"credential: {lines}"
+            )
