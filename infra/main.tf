@@ -302,46 +302,6 @@ resource "google_secret_manager_secret_iam_member" "reader_reads_github_app" {
   member    = "serviceAccount:${google_service_account.fleet["reader"].email}"
 }
 
-# A fourth identity, for the one job that needs Firestore and no model.
-#
-# The recording used to run on an in-memory ledger, so the first two seconds of
-# the submission video read `ledger memory`, and a narration beat claiming the
-# recall came out of Firestore was false against its own picture. Recording
-# against the real store fixes both.
-#
-# It gets its own service account rather than borrowing one. `mitos-ci` says of
-# itself that it may call Vertex AI and nothing else, and widening it would have
-# made that description false in the file a reviewer reads to check the least
-# privilege argument. `mitos-tf` can rebuild the project. Neither belongs in a
-# workflow whose whole job is to render a video.
-#
-# What it cannot do is as important as what it can: no `aiplatform.user`, so the
-# recording cannot call a model even by accident, which is ADR-009 enforced by
-# IAM rather than by an environment variable.
-resource "google_service_account" "video" {
-  account_id   = "mitos-video"
-  display_name = "Mitos video build (via Workload Identity Federation)"
-  description  = "Records the demo against the real ledger. No model, no secrets, no deploy."
-
-  depends_on = [google_project_service.enabled]
-}
-
-# `datastore.user` is project-wide and includes update and delete. Firestore IAM
-# has no per-collection or per-operation scope in its predefined roles, which
-# `src/mitos/ledger.py` already says at length rather than implying a narrower
-# grant exists. Stated here too, next to the grant, so the two cannot drift.
-resource "google_project_iam_member" "video_ledger" {
-  project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.video.email}"
-}
-
-resource "google_service_account_iam_member" "video_from_github" {
-  service_account_id = google_service_account.video.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_owner}/${var.github_repo}"
-}
-
 # The CI identity cannot read Firestore and cannot reach the write credential.
 # A test run that could publish would not be a test run.
 resource "google_project_iam_member" "ci_model" {
