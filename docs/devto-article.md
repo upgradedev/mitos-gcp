@@ -165,4 +165,4 @@ Three Cloud Run services, three service accounts, an append only Firestore threa
 Live, no install: https://mitos-reader-437828525303.europe-west1.run.app/identity
 Code: https://github.com/upgradedev/mitos-gcp
 
-#AllThingsAgentic Hackathon
+#AllThingsAgenticHackathon
