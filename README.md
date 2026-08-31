@@ -188,7 +188,7 @@ The two dotted red-herring arrows into Secret Manager are the point of the whole
 and the evaluator **ask** for the write credential and Google IAM refuses them. Nothing in our code
 decides that.
 
-**Every decision above is written down.** The sixteen architecture decision records live in
+**Every decision above is written down.** The seventeen architecture decision records live in
 [`CLAUDE.md`](CLAUDE.md), each with what was decided, why, and what it cost. They are in that file
 rather than a `docs/adr/` tree because Mitos audits repositories for a rule that requires exactly
 that, `adr-section-present`, and a product that fails its own rule is an argument against itself.

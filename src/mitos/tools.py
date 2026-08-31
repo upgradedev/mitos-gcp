@@ -56,6 +56,16 @@ def prefixes_for(scope: Optional[tuple[str, ...]] = None) -> tuple[str, ...]:
 MAX_BYTES_PER_READ = 8_000
 MAX_READS_PER_RUN = 12
 
+# Every tool that opens a file, so the budget counts the read rather than the
+# name of whoever asked for it. `search` used to be absent from this idea
+# entirely: it called `corpus.read` on every path in scope, counted nothing, and
+# recorded one log line. Measured on a 1,000 file corpus with the limit at 12,
+# it performed 1,000 reads and reported 0.
+# `search:read`, not `search`: the per-file reads are what the budget
+# counts, and `search` is the one summary line the tool returns. Counting
+# both made the ledger report one more read than the corpus served.
+READING_TOOLS = ("read_file", "search:read")
+
 
 class Corpus(Protocol):
     """Where the fleet reads from."""
@@ -190,7 +200,9 @@ class ReadLog:
         test that asserts the cap holds is what found it.
         """
         return sum(
-            1 for c in self.calls if c["tool"] == "read_file" and c["outcome"] == "ok"
+            1
+            for c in self.calls
+            if c["tool"] in READING_TOOLS and c["outcome"] == "ok"
         )
 
     def record(self, tool: str, arg: str, outcome: str, size: int = 0) -> None:
@@ -233,6 +245,19 @@ def make_tools(
         log.record("list_paths", pattern, "ok", len(hits))
         return {"paths": hits, "count": len(hits)}
 
+    def _bounded_read(path: str, tool: str) -> str:
+        """One read: scope checked, budget consumed, bytes capped, logged.
+
+        Both tools go through here. `read_file` enforced all of this and
+        `search` enforced none of it, so the limits the product publishes at
+        `/config` described one of its two ways of opening a file.
+        """
+        check_read(path, log.reads, scope)
+        body = corpus.read(path)
+        capped = body[:MAX_BYTES_PER_READ]
+        log.record(tool, path, "ok", len(capped))
+        return capped
+
     def read_file(path: str) -> dict:
         """Read one repository file.
 
@@ -270,18 +295,61 @@ def make_tools(
     def search(term: str) -> dict:
         """Find which readable files mention a term.
 
+        This spends the same read budget as read_file: each file it opens is one
+        read. It stops when the budget runs out and tells you so, rather than
+        scanning the rest of the repository, so search the narrowest scope you
+        can and read the files you actually need.
+
         Args:
             term: a word or field name, for example 'retention' or 'mobileNumber'.
         """
-        hits = []
         allowed = prefixes_for(scope)
-        for p in corpus.paths():
-            if not any(p.startswith(a) for a in allowed):
+        # Sorted, so the same corpus and the same budget scan the same files.
+        # Unsorted, which paths fell inside the budget depended on dictionary
+        # order, and a bound that moves is not a bound anyone can audit.
+        candidates = [
+            path
+            for path in sorted(corpus.paths())
+            if any(path.startswith(a) for a in allowed)
+        ]
+
+        hits: list[str] = []
+        scanned = 0
+        bytes_read = 0
+        stopped_early = False
+
+        for path in candidates:
+            try:
+                body = _bounded_read(path, "search:read")
+            except ReadBudgetExhausted:
+                # Break rather than continue. Continuing would keep testing
+                # files the budget did not pay for, and reporting a hit from one
+                # of them leaks the term-presence this bound exists to withhold.
+                stopped_early = True
+                break
+            except OutOfScope:
                 continue
-            if term.lower() in corpus.read(p).lower():
-                hits.append(p)
+            except KeyError:
+                log.record("search", path, "not_found")
+                continue
+            scanned += 1
+            bytes_read += len(body)
+            if term.lower() in body.lower():
+                hits.append(path)
+
         log.record("search", term, "ok", len(hits))
-        return {"term": term, "paths": hits}
+        return {
+            "term": term,
+            "paths": hits,
+            # Said out loud, because a partial answer that looks total is worse
+            # than a refusal: an agent that believes it searched everything will
+            # report that a field appears nowhere.
+            "files_scanned": scanned,
+            "files_in_scope": len(candidates),
+            "bytes_read": bytes_read,
+            "reads_remaining": max(0, MAX_READS_PER_RUN - log.reads),
+            "truncated": stopped_early or scanned < len(candidates),
+        }
 
     return [list_paths, read_file, search]
 
