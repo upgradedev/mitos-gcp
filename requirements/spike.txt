@@ -3,3 +3,6 @@
 # source at this release; see the README section "Why ADK is load-bearing".
 google-adk==2.7.1
 pytest==8.3.4
+
+# Draws the video's opening, closing and Google Cloud stills.
+Pillow==12.2.0

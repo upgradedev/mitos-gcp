@@ -113,7 +113,7 @@ def duration_of(path: Path) -> float:
 
 
 
-ANSI_RX = re.compile("\x1b\[([0-9;]*)m")
+ANSI_RX = re.compile("\x1b" + r"\[([0-9;]*)m")
 
 
 @dataclass
