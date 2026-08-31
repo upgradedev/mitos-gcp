@@ -50,6 +50,8 @@ export const KIND_VOCABULARY: Record<string, Vocab> = {
   // honestly propose editing. Toned as a finding rather than a plan,
   // because nothing is being offered for approval.
   "plan.review_only": { label: "review", tone: "finding" },
+  "run.nothing_to_govern": { label: "nothing to govern", tone: "quiet" },
+  "gate.delegated": { label: "gate delegated", tone: "route" },
   "write.executed": { label: "write", tone: "write" },
 };
 

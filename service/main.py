@@ -779,7 +779,8 @@ def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: in
 
 
 def _run_webhook_chore(*, wh: Any, delivery: Any, files: Any, led: Any) -> Any:
-    return run_chore(
+    gate = _gate()
+    result = run_chore(
         wh.to_pull_request(delivery, files), led,
         run_id=delivery.delivery_id, repository=delivery.repository,
         approve=lambda card: False,
@@ -789,7 +790,33 @@ def _run_webhook_chore(*, wh: Any, delivery: Any, files: Any, led: Any) -> Any:
         ),
         critic=build_critic(PROJECT), classifier=build_classifier(PROJECT),
         doc_agent=build_doc_agent(PROJECT, role=ROLE),
+        gate=gate,
     )
+
+    # Which process judged this, in the thread rather than in a log line.
+    #
+    # "Three Cloud Run services" was true of the deployment and not of the
+    # request path: the evaluator held its own identity, refused anonymous
+    # callers, and did no work. A reader following a verdict back should be able
+    # to see whose it was.
+    if gate is not None and getattr(gate, "decided_by", None):
+        led.append(
+            Entry(
+                kind="gate.delegated",
+                actor="evaluator-companion",
+                subject=f"{delivery.repository}#{delivery.number}",
+                payload={
+                    "url": gate.url,
+                    "decided_by": gate.decided_by,
+                    "note": (
+                        "the deterministic gate ran in the evaluator service, "
+                        "reached with a token audience bound to it"
+                    ),
+                },
+                run_id=delivery.delivery_id,
+            )
+        )
+    return result
 
 
 def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Optional[int], check_run_id: Optional[int]) -> None:
@@ -1956,6 +1983,141 @@ class _RemoteWriter:
                 "reason": f"the writer service refused or was unreachable: "
                 f"{type(exc).__name__}",
             }
+
+
+class EvaluateRequest(BaseModel):
+    draft: str
+    known_paths: list[str] = []
+
+
+class EvaluatorUnavailable(Exception):
+    """The gate could not be asked, so nothing downstream may proceed.
+
+    Raised rather than returned, and never caught into a local fallback. A
+    reader that judges its own draft when the evaluator is unreachable is a
+    reader with no evaluator, and the failure mode of that is silent: every run
+    still produces a verdict and nothing says which process decided it.
+    """
+
+
+@app.post("/internal/evaluate")
+def internal_evaluate(req: EvaluateRequest) -> dict[str, Any]:
+    """The deterministic gate, run by the identity that owns it.
+
+    Evaluation used to happen in the reader's own process. The evaluator was
+    deployed, held its own service account, refused anonymous callers and did no
+    work: three services in the diagram, two in the request path. This is the
+    third one earning its place.
+
+    Cloud Run IAM decides who may call this at all: only the reader's service
+    account holds `run.invoker` here, and the token is audience bound to this
+    service, so a token minted for the writer does not open this door. The role
+    check below is the second lock, on the same image, for the same reason
+    `/execute` has one: all three deployments carry every route, and only the
+    right identity may serve it.
+    """
+    if ROLE != "evaluator":
+        raise HTTPException(
+            status_code=403,
+            detail=f"the {ROLE} service does not judge drafts",
+        )
+    from mitos.evaluator import evaluate  # noqa: PLC0415
+
+    verdict = evaluate(req.draft, known_paths=req.known_paths or [])
+    return {
+        **verdict.as_dict(),
+        # Who decided, and on what. Recorded in the thread by the caller so a
+        # reader can tell which process and which build produced a verdict.
+        "decided_by": {
+            "role": ROLE,
+            "service_account": _running_as(),
+            "build_sha": BUILD_SHA,
+        },
+    }
+
+
+class RemoteGate:
+    """Asks the evaluator service, and fails closed.
+
+    Deliberately not a fallback. If this raises, `run_chore` stops and the
+    webhook records the failure: no draft is judged locally, no plan is
+    proposed, no approval card is minted. A gate that answers when the gate is
+    down is not a gate.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url.rstrip("/")
+        self.decided_by: dict[str, Any] = {}
+
+    def __call__(self, draft: str, *, known_paths=None, critic=None):
+        import google.auth.transport.requests  # noqa: PLC0415
+        import google.oauth2.id_token  # noqa: PLC0415
+
+        from mitos.evaluator import Finding, Verdict  # noqa: PLC0415
+
+        try:
+            token = google.oauth2.id_token.fetch_id_token(
+                google.auth.transport.requests.Request(), self.url
+            )
+            response = httpx.post(
+                f"{self.url}/internal/evaluate",
+                json={"draft": draft, "known_paths": list(known_paths or [])},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001 - re-raised as a refusal
+            raise EvaluatorUnavailable(
+                f"the evaluator service could not be asked "
+                f"({type(exc).__name__}); nothing was judged"
+            ) from exc
+
+        if not isinstance(data, dict) or "passed" not in data:
+            raise EvaluatorUnavailable(
+                "the evaluator service answered something that is not a verdict"
+            )
+
+        self.decided_by = data.get("decided_by") or {}
+
+        def _findings(items) -> list:
+            return [
+                Finding(
+                    severity=str(item.get("severity", "")),
+                    check=str(item.get("check", "")),
+                    detail=str(item.get("detail", "")),
+                    evidence=str(item.get("evidence", "")),
+                )
+                for item in (items or [])
+                if isinstance(item, dict)
+            ]
+
+        # The critic is advisory and runs beside the deterministic gate, so it
+        # stays with the caller: shipping a draft twice to have a model look at
+        # it in another process buys nothing and costs a round trip.
+        verdict = Verdict(
+            passed=bool(data["passed"]),
+            findings=_findings(data.get("findings")),
+            advisories=_findings(data.get("advisories")),
+            injection_attempt=bool(data.get("injection_attempt")),
+            checked=list(data.get("checks_run") or []),
+        )
+        if critic is not None:
+            from mitos.evaluator import _with_critic  # noqa: PLC0415
+
+            return _with_critic(verdict, draft, critic)
+        return verdict
+
+
+def _gate():
+    """The judge for a production run, or `None` to judge in this process.
+
+    Set `MITOS_EVALUATOR_URL` and the reader delegates and fails closed. Leave
+    it unset and the gate runs locally, which is what the offline suite and the
+    recorded demo need and why they require no credential.
+    """
+    url = os.environ.get("MITOS_EVALUATOR_URL", "").strip()
+    return RemoteGate(url) if url else None
 
 
 class ExecuteRequest(BaseModel):

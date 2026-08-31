@@ -4,6 +4,21 @@
 # endpoints that actually exist.
 components:
   schemas:
+    EvaluateRequest:
+      properties:
+        draft:
+          title: Draft
+          type: string
+        known_paths:
+          default: []
+          items:
+            type: string
+          title: Known Paths
+          type: array
+      required:
+      - draft
+      title: EvaluateRequest
+      type: object
     ExecuteRequest:
       properties:
         body:
@@ -532,6 +547,55 @@ paths:
                 type: object
           description: Successful Response
       summary: Identity
+  /internal/evaluate:
+    post:
+      description: 'The deterministic gate, run by the identity that owns it.
+
+
+        Evaluation used to happen in the reader''s own process. The evaluator was
+
+        deployed, held its own service account, refused anonymous callers and did
+        no
+
+        work: three services in the diagram, two in the request path. This is the
+
+        third one earning its place.
+
+
+        Cloud Run IAM decides who may call this at all: only the reader''s service
+
+        account holds `run.invoker` here, and the token is audience bound to this
+
+        service, so a token minted for the writer does not open this door. The role
+
+        check below is the second lock, on the same image, for the same reason
+
+        `/execute` has one: all three deployments carry every route, and only the
+
+        right identity may serve it.'
+      operationId: internal_evaluate_internal_evaluate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Internal Evaluate Internal Evaluate Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Internal Evaluate
   /metrics.json:
     get:
       description: 'The same figures the overview renders, as data.
