@@ -485,8 +485,15 @@ def _verify_end_card(out: Path) -> None:
     run(["ffmpeg", "-v", "error", "-y", "-i", str(reference),
          "-frames:v", "1", str(ref_png)])
 
-    report = run(["ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
-                  "-lavfi", "psnr", "-f", "null", "-"])
+    # stderr, not stdout. ffmpeg writes its whole log there, the psnr filter
+    # included, and `run` returns stdout, so the first version of this compared
+    # an empty string and failed with an empty report.
+    proc = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        ["ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
+         "-lavfi", "psnr", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    report = proc.stderr
     match = re.search(r"average:([0-9.]+|inf)", report)
     if not match:
         raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
