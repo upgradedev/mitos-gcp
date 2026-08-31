@@ -208,3 +208,36 @@ export type Loaded<T> =
   | { status: "ok"; value: T }
   | { status: "absent"; detail: string }
   | { status: "error"; detail: string };
+
+
+// What a person is being asked to approve, in full.
+//
+// The interface showed a digest and a button and never the bytes. A
+// content-addressed approval whose content nobody can read is a hash of
+// something you took on trust.
+export interface SuggestedChange {
+  run_id: string;
+  repository: string;
+  source_pr: number;
+  source_head_sha: string;
+  path: string;
+  body: string;
+  bytes: number;
+  plan_hash: string;
+  // Recomputed by the service from the bytes above, not echoed back. False
+  // means the stored content no longer matches the digest it was hashed under,
+  // and nothing should be approved on it.
+  digest_matches: boolean;
+  findings: string[];
+  advisories: string[];
+  status: string;
+  may_approve: boolean;
+  on_approval: {
+    creates_branch: string;
+    writes_path: string;
+    opens_pull_request: boolean;
+    base: string;
+    identity: string;
+    bound_to: string;
+  };
+}

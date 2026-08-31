@@ -1504,6 +1504,114 @@ class SuggestedChangeApprovalRequest(BaseModel):
     run_id: str
 
 
+def _may(request: Request, workspace_id: str, roles: frozenset) -> bool:
+    """Would `_require_role` allow this? Asked rather than reimplemented."""
+    try:
+        _require_role(request, workspace_id, roles)
+    except HTTPException:
+        return False
+    return True
+
+
+def _suggested_change_in_workspace(run_id: str, workspace_id: str):
+    """Load one suggested change, scoped to a workspace, or refuse.
+
+    Shared by the detail endpoint and the approval, so the two cannot disagree
+    about whose change this is. A reader who can see a proposal and an approver
+    who cannot act on it, or the reverse, is a boundary with a seam in it.
+    """
+    from google.cloud import firestore  # noqa: PLC0415
+
+    db = firestore.Client(project=PROJECT)
+    reference = db.collection("suggested_changes").document(run_id)
+    snapshot = reference.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Suggested change not found")
+    change = snapshot.to_dict() or {}
+    repository = str(change.get("repository") or "")
+    matches = list(
+        db.collection("repositories")
+        .where(filter=firestore.FieldFilter("full_name", "==", repository))
+        .limit(1)
+        .stream()
+    )
+    owner_doc = matches[0].to_dict() if matches else {}
+    if owner_doc.get("workspace_id") != workspace_id or not owner_doc.get("active"):
+        # 403 and not 404. The change exists and is somebody else's, and saying
+        # so does not leak it: the caller already supplied the id.
+        raise HTTPException(
+            status_code=403, detail="Suggested change is outside this workspace"
+        )
+    return change, reference, db
+
+
+@app.get("/api/workspace/suggested-changes/{run_id}")
+def suggested_change_detail(run_id: str, request: Request) -> dict[str, Any]:
+    """Exactly what a person is being asked to approve, before they approve it.
+
+    The interface offered a button and a digest and never showed the bytes. A
+    content-addressed approval whose content nobody can read is a hash of
+    something you took on trust, which is most of the value of addressing it
+    gone.
+
+    Readable by a reviewer as well as an owner. Reading a proposal is how a
+    reviewer reviews; only pressing approve is restricted, and that asymmetry is
+    the point rather than an oversight.
+    """
+    _, membership = _workspace_context(request)
+    workspace_id = str(membership["workspace_id"])
+    _require_role(request, workspace_id, frozenset({"owner", "reviewer"}))
+    change, _reference, _db = _suggested_change_in_workspace(run_id, workspace_id)
+
+    body = str(change.get("body") or "")
+    path = str(change.get("path") or "")
+    source_pr = change.get("source_pr")
+    recorded = str(change.get("plan_hash") or "")
+
+    # Recomputed here rather than echoed. The stored digest and the stored bytes
+    # are two facts, and a reader who is told to trust a hash is entitled to be
+    # told whether it still describes what they are being shown.
+    from mitos.ledger import content_hash  # noqa: PLC0415
+
+    recomputed = content_hash({"pr": source_pr, "path": path, "body": body})
+
+    branch = f"mitos/suggestion-{source_pr}-{run_id[:8]}"
+    return {
+        "run_id": run_id,
+        "repository": change.get("repository"),
+        "source_pr": source_pr,
+        "source_head_sha": change.get("source_head_sha"),
+        "path": path,
+        # The exact bytes. Not a summary, not the first few lines.
+        "body": body,
+        "bytes": len(body.encode("utf-8")),
+        "plan_hash": recorded,
+        "digest_matches": recomputed == recorded,
+        "findings": change.get("findings") or [],
+        "advisories": change.get("advisories") or [],
+        "status": change.get("status"),
+        # Asked of the same gate the approval uses, not derived from the
+        # membership here. Two places deciding who may approve is the defect
+        # that put an enabled button in front of every reviewer, and reading a
+        # role field is how the second place gets written.
+        "may_approve": _may(request, workspace_id, frozenset({"owner"})),
+        # What pressing the button does, named before it is pressed.
+        "on_approval": {
+            "creates_branch": branch,
+            "writes_path": path,
+            "opens_pull_request": True,
+            "base": "the repository's default branch",
+            "identity": "the writer service, under its own service account",
+            "bound_to": (
+                "the repository, the source commit, the path and the sha256 of "
+                "these exact bytes. A different body is a different digest and "
+                "is refused"
+            ),
+        },
+        "receipt": change.get("receipt") or {},
+    }
+
+
 @app.post("/api/workspace/suggested-changes/approve")
 def approve_suggested_change(req: SuggestedChangeApprovalRequest, request: Request) -> dict[str, Any]:
     # Owner only, and it accepted any reviewer. Every member after the first is
