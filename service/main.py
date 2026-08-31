@@ -802,6 +802,26 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
         for item in entries
     )
     plans = sum(item.kind == "plan.proposed" for item in entries)
+
+    # `neutral`, not `success`, when no specialist was concerned. GitHub renders
+    # a neutral check as "not applicable" rather than as a pass, which is the
+    # honest reading: nothing was assessed, so nothing passed. The same
+    # conclusion is already used above for a pull request with no readable
+    # patch, and the two are the same statement.
+    nothing_to_govern = any(item.kind == "run.nothing_to_govern" for item in entries)
+    if nothing_to_govern:
+        _safe_github_check(
+            repository=delivery.repository, installation_id=installation_id,
+            head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
+            conclusion="neutral",
+            summary=(
+                "No specialist is concerned by this change, so there was nothing "
+                "to assess. The router recorded which specialists it skipped and "
+                "why, and that decision is in the thread."
+            ),
+        )
+        return
+
     _safe_github_check(
         repository=delivery.repository, installation_id=installation_id,
         head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,

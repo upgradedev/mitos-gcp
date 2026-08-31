@@ -9,7 +9,7 @@ new contributor, which is the bar that section sets.
 # ORG_STANDARDS §1, session rescan. Run before changing anything.
 git log --oneline -10
 git status
-find tests -name "test_*.py" | wc -l          # 44 files, 708 passing, 2026-08-27
+find tests -name "test_*.py" | wc -l          # 52 files, 787 collected, 2026-08-31
 python scripts/generate_openapi.py --check     # the spec must match the app
 ```
 
@@ -256,6 +256,52 @@ for ten minutes so that looking twice costs once. That is mitigation, not a fix;
 the fix is reading under the installation token from ADR-013, which is not
 built.
 
+
+### ADR-015 — The fleet's memory is keyed on the repository, not on a constant
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** `run_chore` derives its subject from the delivery — the repository,
+plus the deepest directory every changed file shares, capped at two segments —
+and both the entries it writes and the `recall` it performs use that subject.
+The demo and offline paths pass no repository and keep the fixture's subject.
+**Reason:** it was a module constant, `services/customer`, the demo fixture's
+subject. `Ledger.recall` filters on subject and kind and nothing else, so one
+constant meant one memory shared by every repository the deployment watched,
+including the synthetic corpus. ADR-012 derives tenancy from the installation
+precisely so it cannot be forged by a request body; that guarantee is worth
+nothing if the memory underneath the read endpoints is global. The first run
+against a second repository escalated a deferral belonging to the demo corpus
+into a real pull request about a README, which is the defect performing itself.
+**Consequence:** two pull requests touching one service recall each other and two
+touching different services do not, which is what "context across weeks of
+asynchronous operations" was always supposed to mean. A change at the repository
+root, or one spanning unrelated directories, is keyed on the repository alone
+rather than borrowing a narrower key.
+
+It could not have been found offline. With one repository a shared key and a
+scoped key return identical rows, so every test agreed with the bug for as long
+as it existed. That is the argument for ADR-010 restated: the deployed system is
+a different system, and this one needed two tenants before it would show.
+
+### ADR-016 — A run with nothing to govern says so, and does not reach the gate
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** when the router wakes no specialist, the run records
+`run.nothing_to_govern` with the skipped specialists and stops. The check run
+posted to GitHub concludes `neutral`.
+**Reason:** an empty `woken` set is a real answer and often the right one. The
+run used to continue, collect no fragments, and hand an empty draft to the gate,
+where `non-empty` refused it as a HIGH finding and the pull request was reported
+`action_required`. On the first real pull request this fleet judged, its own, the
+router skipped all three specialists and Gemini agreed, its rationale being that
+the change only updated documentation; the report then contradicted both.
+**Consequence:** the gate is untouched and `non-empty` still refuses an empty
+draft. What changed is that an empty draft is no longer manufactured out of a run
+that had nothing to assess, which is fixing the reality rather than the measure.
+`neutral` rather than `success` because nothing was assessed, so nothing passed,
+and the same conclusion already covers a pull request with no readable patch.
+**Rejected:** relaxing `non-empty` to tolerate an empty draft. It would have
+turned the check green on this case and on every case where a specialist
+genuinely produced nothing it should have, which is the Never rule about widening
+a gate to make it pass.
 
 ## Standards compliance
 

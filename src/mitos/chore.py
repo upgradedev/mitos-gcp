@@ -89,6 +89,55 @@ class ChoreResult:
 SUBJECT = "services/customer"
 
 
+def subject_of(repository: Optional[str], pr: PullRequest) -> str:
+    """What a run is about, and what its memory is keyed on.
+
+    This was the module constant above, used for every entry of every run and,
+    worse, as the key `recall` looks up. `recall` filters on subject and kind
+    and nothing else, so one constant meant one memory shared by every run in
+    the deployment: the demo corpus, and each installed repository, all reading
+    and writing the same `finding.deferred` and `finding.raised` entries.
+
+    Found by installing the App on a second repository and reading the thread,
+    which is the only way it could have been found. Every offline test passed
+    throughout, because with one repository a shared key and a scoped key are
+    indistinguishable.
+
+    ADR-012 derives tenancy from the installation so it cannot be forged by a
+    request. That guarantee stops at the read endpoints if the fleet's own
+    memory is global, so the key carries the repository now. It is derived from
+    the delivery, never from anything a caller sends.
+
+    The path half is the deepest directory every changed file shares, capped at
+    two segments, because the claim this memory supports is about a service
+    rather than a file: two pull requests touching one service should recall
+    each other, and one touching a different service should not. A change with
+    nothing in common, or one at the repository root, is keyed on the
+    repository alone.
+
+    `repository` is absent on the demo and offline paths, and those keep the
+    fixture's subject, so the corpus a stranger reads is unchanged.
+    """
+    if not repository:
+        return SUBJECT
+
+    directories = [
+        str(f.get("path", "")).split("/")[:-1]
+        for f in pr.files
+        if isinstance(f, dict) and str(f.get("path", ""))
+    ]
+    shared: list[str] = []
+    if directories:
+        for parts in zip(*directories):
+            if len(set(parts)) != 1:
+                break
+            shared.append(parts[0])
+            if len(shared) == 2:
+                break
+
+    return f"{repository}:{'/'.join(shared)}" if shared else repository
+
+
 def run_chore(
     pr: PullRequest,
     ledger: Ledger,
@@ -107,12 +156,14 @@ def run_chore(
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
 
+    subject = subject_of(repository, pr)
+
     def record(kind: str, actor: str, payload: dict[str, Any], parent: Optional[str]) -> Entry:
         return ledger.append(
             Entry(
                 kind=kind,
                 actor=actor,
-                subject=SUBJECT,
+                subject=subject,
                 payload=payload,
                 parent_id=parent,
                 run_id=run_id,
@@ -197,8 +248,53 @@ def run_chore(
         + (f"\n  skipped: {', '.join(dispatch.skipped)}" if dispatch.skipped else ""),
     )
 
+    # Nothing downstream has anything to work on, so nothing downstream runs.
+    #
+    # An empty `woken` set is the router saying no specialist is concerned by
+    # this change, which is a real answer and often the right one: a pull
+    # request that edits documentation carries no schema, no personal data and
+    # no specification drift. The run used to continue anyway, collect no
+    # fragments, and hand `""` to the gate, where the `non-empty` check refused
+    # it as a HIGH finding and the pull request was reported as needing review.
+    #
+    # Observed on the first real pull request this fleet ever judged, its own.
+    # The router was right and agreed with the model, whose rationale was that
+    # the change only updated documentation; then the report contradicted both.
+    # A governance tool that cannot say "this needed no governance" will be
+    # ignored within a week, because everything it touches looks like a problem.
+    #
+    # The gate is untouched. `non-empty` still refuses an empty draft; what
+    # changed is that an empty draft is no longer manufactured out of a run that
+    # had nothing to assess. Fixing the reality rather than the measure, per the
+    # Never section in CLAUDE.md.
+    if not dispatch.woken:
+        record(
+            "run.nothing_to_govern",
+            "architect-leader",
+            {
+                "skipped": list(dispatch.skipped),
+                "reason": (
+                    "no specialist is concerned by this change, so there is "
+                    "nothing to assess and no draft to judge"
+                ),
+                "files": pr.paths(),
+            },
+            cursor,
+        )
+        emit(
+            "dispatch",
+            "no specialist is concerned by this change; nothing to govern",
+        )
+        return ChoreResult(
+            run_id, pr.number, dispatch, [], Verdict(passed=True),
+            None, None, False, False, {}, None, "", [],
+            root.entry_id, cursor, False,
+        )
+
     # 3. The thread. What do we already know about this subject?
-    recalled = ledger.recall(SUBJECT, kinds={"finding.deferred", "finding.raised"})
+    # Keyed on this run's subject, not on a constant. See `subject_of`:
+    # a global key made one memory for every repository in the deployment.
+    recalled = ledger.recall(subject, kinds={"finding.deferred", "finding.raised"})
     escalated = False
     for entry in recalled:
         p = entry.payload
