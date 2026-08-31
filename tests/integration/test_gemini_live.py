@@ -208,13 +208,25 @@ def test_gemini_catches_what_the_patterns_cannot():
             f"{response.assessment[:200]}"
         )
         assert response.reason.strip()
-        attempts.append(response.read_log.get("reads", 0))
-        if attempts[-1] >= 1:
+        attempts.append(
+            {
+                "reads": response.read_log.get("reads", 0),
+                # `unusable_reply` returns `blocked`, so a model whose answer
+                # could not be parsed is indistinguishable from one that
+                # considered the diff and refused, unless the reason is read.
+                # Naming the difference is what makes a red build actionable.
+                "usable": "did not return a usable answer" not in response.reason,
+                "reason": response.reason[:90],
+            }
+        )
+        if attempts[-1]["reads"] >= 1:
             break
 
-    assert max(attempts) >= 1, (
-        f"it refused without opening anything on {len(attempts)} attempts "
-        f"(reads per attempt: {attempts}), so it guessed every time"
+    assert max(a["reads"] for a in attempts) >= 1, (
+        f"it refused without opening anything on {len(attempts)} attempts. "
+        f"{sum(1 for a in attempts if not a['usable'])} of them were unusable "
+        f"replies rather than considered refusals, which is a model problem "
+        f"and not a gate problem: {attempts}"
     )
 
 
