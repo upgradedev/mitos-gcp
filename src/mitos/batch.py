@@ -48,6 +48,14 @@ class BatchReport:
         return sum(1 for o in self.outcomes if o.state == "no_action")
 
     @property
+    def review(self) -> int:
+        """Worked, findings recorded, and no document it could honestly propose
+        editing. Counted separately because folding it into `parked` would call
+        it a refusal, and folding it into `completed` would claim a proposal
+        that was never made."""
+        return sum(1 for o in self.outcomes if o.state == "review")
+
+    @property
     def findings(self) -> int:
         return sum(o.findings for o in self.outcomes)
 
@@ -146,10 +154,19 @@ def run_batch(
             Outcome(
                 pr_number=pr.number,
                 title=pr.title,
-                state="completed" if result.card else "parked",
+                state=(
+                    "completed"
+                    if result.card
+                    else "review"
+                    if result.review_only
+                    else "parked"
+                ),
                 reason=(
                     ""
                     if result.card
+                    else "no document in this change is the paperwork for it; "
+                    "a reviewer decides what to update"
+                    if result.review_only
                     else "; ".join(
                         f"{f.check}: {f.detail}"
                         for f in (

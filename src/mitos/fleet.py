@@ -268,8 +268,11 @@ def _schema_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
         companion="db-architect-leader",
         status=Status.OK,
         assessment="\n".join(lines),
-        paths_read=[s.path for s in hits],
-        citations=[s.path for s in hits],
+        # An empty string is not a citation, and a model-raised signal has no
+        # path. Dropping it leaves an honest list rather than one that looks
+        # populated and points nowhere.
+        paths_read=[s.path for s in hits if s.path],
+        citations=[s.path for s in hits if s.path] or pr.paths(),
         confidence=0.9,
     )
 
@@ -335,26 +338,44 @@ def _compliance_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
     ]
     if special:
         hit, term = special[0]
+        # A signal the model raised carries no path: it classified the change,
+        # not a file. Rendered naively that produced the most serious refusal
+        # this product makes, the one that requires a Data Protection Impact
+        # Assessment, with empty backticks where the filename should be. Seen in
+        # a live run as:
+        #
+        #     `` introduces what looks like special-category data under GDPR
+        #
+        # A refusal a human cannot act on is barely better than no refusal, so
+        # it names the change when it cannot name a file, and cites the files
+        # that changed so there is something to open either way.
+        where = f"`{hit.path}`" if hit.path else "this change"
+        cites = [hit.path] if hit.path else pr.paths()
         return Response(
             companion="compliance-companion",
             status=Status.BLOCKED,
             reason=(
-                f"`{hit.path}` introduces what looks like special-category data "
+                f"{where} introduces what looks like special-category data "
                 f"under GDPR Article 9 (matched on {term!r}). That requires a "
                 f"Data Protection Impact Assessment and a named owner's "
                 f"decision, which cannot be derived from a diff"
             ),
-            findings=[f"special-category data added in `{hit.path}`"],
-            citations=[hit.path],
+            findings=[f"special-category data added in {where}"],
+            citations=cites,
             paths_read=[h.path for h in hits],
             confidence=0.7,
         )
     lines = [f"## Data protection, PR {pr.number}", ""]
     findings = []
     for s in hits:
+        # Same empty-path problem as the Article 9 branch above: a signal the
+        # model raised classifies the change rather than a file, and rendering
+        # it naively produced findings reading "added in `` with no retention
+        # entry" and a citation list containing one empty string.
         finding = (
-            f"personal data field added in `{s.path}` with no retention entry "
-            f"in the register"
+            f"personal data field added in "
+            f"{f'`{s.path}`' if s.path else 'this change'} with no retention "
+            f"entry in the register"
         )
         findings.append(finding)
         lines.append(f"- {finding}")
@@ -367,8 +388,11 @@ def _compliance_specialist(pr: PullRequest, signals: list[Signal]) -> Response:
         companion="compliance-companion",
         status=Status.OK,
         assessment="\n".join(lines),
-        paths_read=[s.path for s in hits],
-        citations=[s.path for s in hits],
+        # An empty string is not a citation, and a model-raised signal has no
+        # path. Dropping it leaves an honest list rather than one that looks
+        # populated and points nowhere.
+        paths_read=[s.path for s in hits if s.path],
+        citations=[s.path for s in hits if s.path] or pr.paths(),
         findings=findings,
         confidence=0.9,
     )

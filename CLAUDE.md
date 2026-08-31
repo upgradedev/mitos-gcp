@@ -429,6 +429,28 @@ a run budget with no per-call cap is what broke this.
 question a reader asks is how much of my repository did it read, not how much
 did each tool read.
 
+### ADR-018 — The document to update is chosen from evidence, or nothing is proposed
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** `choose_target` picks a document that is in the diff, failing that
+one a specialist actually opened, failing both returns nothing and the run
+records `plan.review_only` instead of an approval card.
+**Reason:** the target was the literal `docs/specs/customer-record.md`, for every
+run in every repository. A Go payments API touching `api/payments/handler.go`
+was handed a proposed write to a path that does not exist in it. Anyone who
+installed the App on their own repository met that on their first pull request,
+in the one output this product asks a human to approve.
+**Consequence:** the deterministic path usually produces a review plan on an
+unfamiliar repository, because templates read nothing and cannot know which
+document a change obliges you to update. That is the honest answer and it is
+also the argument for the agentic path: a specialist that opens the
+specification finds the target that a pattern cannot. A demo fixture keeps
+working because `docs/specs/customer-record.md` is genuinely in PR 4471's diff,
+which is a better reason than being written into the source.
+**Rejected:** falling back to the most plausible document in the corpus. A
+governance tool that always finds a file to change will find one for a change it
+did not understand, and the first wrong suggestion is the last one anybody
+reads.
+
 ## Standards compliance
 
 | ORG_STANDARDS | State |

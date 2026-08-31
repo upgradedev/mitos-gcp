@@ -236,6 +236,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"           {DIM}{o.parked_by}: {o.reason[:96]}{RESET}")
         elif o.state == "no_action":
             print(f"  {DIM}no action{RESET} PR {o.pr_number}  {o.title[:44]}")
+        elif o.state == "review":
+            # Worked, findings recorded, and no document it could honestly
+            # propose editing. Printing this as `completed` would claim a
+            # proposal that was never made, which is what the `else` branch did
+            # while every run proposed the same file regardless.
+            print(f"  {CYAN}review   {RESET} PR {o.pr_number}  {o.title[:44]}")
+            print(f"           {DIM}{o.reason[:96]}{RESET}")
         else:
             print(f"  {GREEN}completed{RESET} PR {o.pr_number}  {o.title[:44]}")
         sys.stdout.flush()
@@ -294,10 +301,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stdout.flush()
 
     _rule("THE COUNT")
+    # The two runs above the batch are counted here by hand, and what they are
+    # is no longer a constant. Run one proposes a write because its own
+    # specification is in the diff; run two has no document to point at and ends
+    # in a review plan. `+2 completed` was true while every run proposed the
+    # same file whatever the change was.
     total = report.presented + 2
     print(f"  {BOLD}{total} presented{RESET}, "
-          f"{BOLD}{report.completed + 2} completed unattended{RESET}, "
+          f"{BOLD}{report.completed + 1} completed unattended{RESET}, "
           f"{BOLD}{report.parked} parked for a human{RESET}, "
+          f"{BOLD}{report.review + 1} left to a reviewer{RESET}, "
           f"{report.no_action} needed nothing")
     print(f"  {DIM}human interventions before the approval step: 0{RESET}")
     print()

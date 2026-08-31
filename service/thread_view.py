@@ -30,6 +30,10 @@ KIND_STYLE = {
     "evaluator.verdict": ("#7aa2f7", "gate"),
     "item.parked": ("#ffd75f", "parked"),
     "plan.proposed": ("#ffffff", "plan"),
+    # Findings worth a reviewer, and no document this run could
+    # honestly propose editing. Coloured as a finding, not a plan:
+    # nothing is being offered for approval.
+    "plan.review_only": ("#e0af68", "review"),
     "write.executed": ("#5fd75f", "write"),
     "finding.raised": ("#ff9e64", "finding"),
     "finding.deferred": ("#ffd75f", "deferred"),

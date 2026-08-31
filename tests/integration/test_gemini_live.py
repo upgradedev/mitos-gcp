@@ -198,10 +198,24 @@ def test_gemini_catches_what_the_patterns_cannot():
         f"the model assessed special-category data instead of refusing it: "
         f"{response.assessment[:200]}"
     )
+
+    # A refusal a human cannot act on is barely better than no refusal.
     assert response.reason.strip()
-    assert response.read_log.get("reads", 0) >= 1, (
-        "it refused without opening anything, so it guessed"
+    assert "``" not in response.reason, (
+        f"the refusal names no file and no change: {response.reason[:160]}"
     )
+    assert response.citations, "the refusal cites nothing to open"
+
+    # This used to require that the model itself opened a file before refusing.
+    # It no longer does, and the reason is the tighten-only fix: the model
+    # widens the dispatch so compliance runs at all, and once it runs the
+    # deterministic Article 9 rule fires on the widened signal and the refusal
+    # stands without a model turn. That is the safer path, not a weaker one, so
+    # asserting the model read here would be asserting that the deterministic
+    # gate did not get there first.
+    #
+    # The agent's own reading is asserted directly by the next test, which is
+    # where that property belongs.
 
 
 def test_the_agentic_specialist_chooses_what_to_read():

@@ -81,6 +81,11 @@ class ChoreResult:
     root_entry_id: str = ""
     last_entry_id: str = ""
     escalated: bool = False
+    # No document this run could honestly propose editing. Distinct from parked,
+    # which is a refusal with a named reason, and from completed, which offers
+    # bytes to approve. Reporting it as parked gave it an empty reason, and a
+    # refusal without a reason is the one thing this envelope refuses to be.
+    review_only: bool = False
 
 
 # The thread is keyed on the service, not on the field, so two different
@@ -137,6 +142,43 @@ def subject_of(repository: Optional[str], pr: PullRequest) -> str:
                 break
 
     return f"{repository}:{'/'.join(shared)}" if shared else repository
+
+
+DOCUMENT_SUFFIXES = (".md", ".rst", ".adoc", ".mdx")
+DOCUMENT_HINTS = ("docs/", "doc/", "spec", "register", "polic", "adr", "rfc")
+
+
+def looks_like_a_document(path: str) -> bool:
+    """A file a change's paperwork would live in, rather than the change itself."""
+    lowered = path.lower()
+    return lowered.endswith(DOCUMENT_SUFFIXES) and any(
+        hint in lowered for hint in DOCUMENT_HINTS
+    )
+
+
+def choose_target(pr: PullRequest, paths_read: list[str]) -> Optional[str]:
+    """The document this change concerns, or nothing.
+
+    This was the literal string `docs/specs/customer-record.md`, for every run,
+    in every repository. A Go payments API whose diff touched
+    `api/payments/handler.go` was handed a proposed write to a file that does not
+    exist in it and has nothing to do with the change. Anyone who installed the
+    App on their own repository saw that on their first pull request, and it is
+    the clearest possible signal that a thing is a demo rather than a product.
+
+    Chosen from evidence and never invented. A document inside the diff is the
+    strongest signal there is: the change already touches its own paperwork, and
+    that is the file to keep in step. Failing that, a document a specialist
+    actually opened while reading the repository. Failing both, `None`, and the
+    run produces a review plan rather than a write nobody asked for.
+
+    Sorted, so two runs over the same change choose the same file.
+    """
+    in_the_diff = sorted(p for p in pr.paths() if looks_like_a_document(p))
+    if in_the_diff:
+        return in_the_diff[0]
+    opened = sorted(p for p in set(paths_read) if looks_like_a_document(p))
+    return opened[0] if opened else None
 
 
 def run_chore(
@@ -404,7 +446,7 @@ def run_chore(
     fresh = [f for f in findings if f not in already_known]
 
     draft = "\n\n".join(fragments)
-    target = "docs/specs/customer-record.md"
+    target = choose_target(pr, paths_read)
 
     # What the fleet is entitled to cite: the files in the pull request, plus
     # everything the specialists actually opened from the repository.
@@ -466,7 +508,14 @@ def run_chore(
     # The documentation companion is handed the write tool and told to use it.
     # ADK consults the guard before dispatch and the tool is never invoked.
     if doc_agent is not None:
-        probe = doc_agent.attempt_write(target, draft)
+        # The probe proves the interceptor refuses the write tool, which is a
+        # property of the role and not of the path. When no document was
+        # identified there is nothing to propose, and a probe path is still
+        # needed: the first changed file is used and recorded as a probe, so
+        # nothing here reads as a proposal.
+        probe_path = target or (pr.paths()[0] if pr.paths() else "docs/")
+        probe = doc_agent.attempt_write(probe_path, draft)
+        probe = {**probe, "probe_path": probe_path, "was_a_proposal": target is not None}
         cursor = record("guard.exercised", "documentation-companion", probe, cursor).entry_id
         if probe.get("denied"):
             emit(
@@ -479,6 +528,47 @@ def run_chore(
             emit("guard", f"the guard probe could not run: {probe['error']}")
         else:
             emit("guard", "WARNING: the write tool was reachable from the reader role")
+
+    # 6a. Nothing to write, so nothing is proposed.
+    #
+    # A governance tool that always produces a file to change will produce one
+    # for a change it did not understand, and the first wrong suggestion is the
+    # last one anybody reads. Where no document in the diff and none the
+    # specialists opened is the paperwork for this change, the honest output is
+    # what a human should look at.
+    if target is None:
+        cursor = record(
+            "plan.review_only",
+            "documentation-companion",
+            {
+                "reason": (
+                    "no document in this change, and none opened while reading "
+                    "the repository, is the paperwork for it. Proposing a file "
+                    "to edit would be a guess"
+                ),
+                "findings": fresh,
+                "changed": pr.paths(),
+                "documents_seen": sorted(
+                    p for p in set(list(pr.paths()) + list(paths_read))
+                    if looks_like_a_document(p)
+                ),
+                "next": (
+                    "a reviewer decides which document, if any, this change "
+                    "obliges you to update"
+                ),
+            },
+            cursor,
+        ).entry_id
+        emit(
+            "approval",
+            f"no write proposed. {len(fresh)} finding(s) for a reviewer, and no "
+            f"document in this change is the paperwork for it",
+        )
+        return ChoreResult(
+            run_id, pr.number, dispatch, recalled, verdict, final_verdict,
+            None, False, False, {}, None, "", responses,
+            root.entry_id, cursor, escalated, review_only=True,
+        )
 
     # 6. The approval card, content-addressed.
     card = ApprovalCard(
