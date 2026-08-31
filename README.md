@@ -13,7 +13,7 @@ column and why. Mitos is the fleet that answers that, and the thread you follow 
 
 **▶ Demo video:** `PENDING_YOUTUBE_UPLOAD`
 *(the master is 210.10s, built and verified in CI by
-[run 33374327278](https://github.com/upgradedev/mitos-gcp/actions/runs/33374327278), which decodes the
+[run 33378049239](https://github.com/upgradedev/mitos-gcp/actions/runs/33378049239), which decodes the
 closing frame out of the file that ships and compares it against the card the build says
 it renders, rather than trusting the strings that went in. This line is replaced with the public URL at
 upload, and every CI run annotates a warning while the placeholder is still here so it cannot be
