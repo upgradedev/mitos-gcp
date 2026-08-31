@@ -81,12 +81,36 @@ export const getGitHubAppStatus = () =>
 export const getSession = () => getJson<SessionStatus>("/api/session");
 export const getCatalog = () => getJson<Catalog>("/catalog");
 export const getWatch = () => getJson<Watch>("/watch");
-// `/thread`, not `/api/workspace/thread`. The second requires a session and
-// answers 401 to anyone who has not signed in, which is every judge opening the
-// link in the README. The public one carries the same provenance thread and is
-// what the README, the recorded demo and the deployed checks all use.
+// The public thread: the built-in demo corpus, no account needed. This is what
+// a judge opening the link in the README gets, and it is what the recorded demo
+// and the deployed checks use.
 export const getThread = (limit = 80) =>
   getJson<Thread>(`/thread?limit=${limit}`);
+
+// The signed-in tenant's own runs, scoped to their workspace by the server.
+export const getWorkspaceThread = (limit = 500) =>
+  getJson<Thread>(`/api/workspace/thread?limit=${limit}`);
+
+// Which of the two a viewer should see.
+//
+// The app called the public one unconditionally, with a note explaining that
+// the workspace endpoint answers 401 to anyone not signed in. True, and it made
+// signing in pointless: a user with real pull requests analysed by this fleet
+// was shown the synthetic demo corpus and nothing told them so.
+//
+// A membership is required as well as a session. Authenticated with no
+// installation is a real state, and it has no workspace to read.
+export function threadSourceFor(session: SessionStatus | null): {
+  fetch: (limit?: number) => Promise<Thread>;
+  synthetic: boolean;
+} {
+  const signedIn = Boolean(
+    session?.authenticated && (session.memberships?.length ?? 0) > 0
+  );
+  return signedIn
+    ? { fetch: getWorkspaceThread, synthetic: false }
+    : { fetch: getThread, synthetic: true };
+}
 export const getWorkspaceAnalytics = () =>
   getJson<WorkspaceAnalytics>("/api/workspace/analytics");
 export const approveSuggestedChange = (runId: string) =>
