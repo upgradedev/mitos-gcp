@@ -124,7 +124,7 @@ Nothing to install:
 - The provenance thread: <https://mitos-reader-437828525303.europe-west1.run.app/thread/view>
 - Who each service is and what it cannot reach: <https://mitos-reader-437828525303.europe-west1.run.app/identity>
 - The code: <https://github.com/upgradedev/mitos-gcp>
-- The demo video: <https://youtu.be/OA-PJZuErXk>
+- The demo video: <https://youtu.be/B5DqVeupJxg>
 
 The GitHub App is installed on that repository, so every pull request opened there gets a real check run posted by the deployed fleet. Two of them carry two different verdicts, one because findings needed a reviewer and one because the router found nothing to govern and recorded which specialists it skipped and why.
 

@@ -12,14 +12,14 @@
 **A schema change ships on Tuesday. In March, a regulator asks who approved the mobile-number
 column and why. Mitos is the fleet that answers that, and the thread you follow back.**
 
-**▶ Demo video:** <https://youtu.be/OA-PJZuErXk>
+**▶ Demo video:** <https://youtu.be/B5DqVeupJxg>
 
-*(built and verified in CI, never on a developer machine. The verification decodes the closing frame
-out of the file that ships and compares it against the card the build says it renders, rather than
-trusting the strings that went in. A second build,
-[run 33434906927](https://github.com/upgradedev/mitos-gcp/actions/runs/33434906927), adds an animated
-opening, eight captioned Google Cloud console captures and a closing slide, and runs 223.10s; the
-link above is updated when that master is uploaded.)*
+*(230.10s, built and verified in CI by
+[run 33440671500](https://github.com/upgradedev/mitos-gcp/actions/runs/33440671500), never on a
+developer machine. The verification decodes the closing frame out of the file that ships and
+compares it against the card the build says it renders, rather than trusting the strings that went
+in. An animated opening, the recorded run with its narration cued to the lines it is about, eight
+captioned Google Cloud console captures, and a closing slide.)*
 
 Named for Ariadne's thread. You can always retrace your way out.
 
