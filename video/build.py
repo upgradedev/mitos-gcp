@@ -347,7 +347,7 @@ def stage_mux() -> None:
         [
             "github.com/upgradedev/mitos-gcp",
             "three Cloud Run services, three service accounts",
-            "the reader holds no credential that can write",
+            "the reader cannot reach the spec-repo credential",
         ],
         end,
         end_s,

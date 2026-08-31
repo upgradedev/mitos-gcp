@@ -271,9 +271,15 @@ def run(reader: str, evaluator: str, writer: str) -> int:
         {"path": "docs/x.md", "body": "x", "message": "m", "branch": "b"},
     )
     r.record(status == 403, "the reader refuses to write", f"HTTP {status}")
+    # Asserts the qualifier, not a fixed sentence. The refusal used to say the
+    # reader holds no credential that can write, full stop, and that is false:
+    # it holds a GitHub App installation token and posts check runs with it.
+    # What it cannot reach is the specification repository's key. Checking for
+    # the qualifier is stronger than checking for the old wording, because the
+    # old wording could come back and still pass a substring match.
     r.record(
-        "no credential that can write" in raw,
-        "and says why in words a human can read",
+        "specification repository" in raw and "cannot reach" in raw,
+        "and says which credential, in words a human can read",
         raw[:140],
     )
 
