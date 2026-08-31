@@ -159,6 +159,36 @@ needed one only for that call.
 removing it, so the build still fails on a slow day, which is the day you are
 most likely to be rebuilding.
 
+**Also rejected, on 2026-08-31, and this one was measured rather than reasoned
+about.** The recording ran on an in-memory ledger, so the first frame of the
+video reads `ledger memory` and the 30% criterion asks for a live demo. The
+argument for trying Firestore was that the length variance this ADR describes
+came from the model call and not from the store, so the store could be made real
+at no cost to the cap. A fourth service account was created for it, scoped to
+Firestore with no `aiplatform.user` so the recording could not call a model even
+by accident, and `record.py` gained a guard that fails the build if it asks for
+Firestore and gets memory.
+
+The guard fired twice for real reasons, and then the measurement settled it:
+
+| ledger | run | video | cap |
+|---|---|---|---|
+| memory | 83s | 210.1s | 240s |
+| firestore | **453.2s** | **485.8s** | 240s |
+
+Every ledger append is a network round trip, and there are hundreds. The run is
+five and a half times longer and the video is more than double the cap. Pace
+cannot close that: the pace controls sleeps a human needs to read the screen,
+and removing all of them recovers well under a minute of the four that are
+missing. So the reason this ADR gives is narrower than the reason that holds:
+**anything the recording waits on at network latency breaks the cap**, and the
+model was only the first instance of it.
+
+The service account was removed rather than left in place, because an identity
+that exists for nothing is the thing this entry argues against. The guard in
+`record.py` was kept: it caught two real problems the day it was written, and a
+future run with `ledger: firestore` needs it more than a memory run does.
+
 ### ADR-010 — The deployed system is tested as a pyramid, not smoke-tested
 **Date:** 2026-08-24 | **Status:** Implemented
 **Decision:** `deployed.yml` runs five layers against the live URLs: the
