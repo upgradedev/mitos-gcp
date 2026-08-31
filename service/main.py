@@ -809,6 +809,26 @@ def _complete_analysis_check(*, led: Any, delivery: Any, installation_id: Option
     # conclusion is already used above for a pull request with no readable
     # patch, and the two are the same statement.
     nothing_to_govern = any(item.kind == "run.nothing_to_govern" for item in entries)
+
+    # A run that had things to say and no document it could honestly propose
+    # editing. Distinct from both "nothing to govern" and "here is a plan",
+    # and it must not report as `success` with zero of everything, which is
+    # what it did before this branch existed.
+    review_only = any(item.kind == "plan.review_only" for item in entries)
+    if review_only and not nothing_to_govern:
+        _safe_github_check(
+            repository=delivery.repository, installation_id=installation_id,
+            head_sha=delivery.head_sha, status="completed", check_run_id=check_run_id,
+            conclusion="action_required" if findings else "neutral",
+            summary=(
+                f"Analysis completed with {findings} finding(s). No document in "
+                f"this change, and none opened while reading the repository, is "
+                f"the paperwork for it, so nothing is proposed for approval and "
+                f"a reviewer decides what to update. The router's decision and "
+                f"the evidence read are in the thread."
+            ),
+        )
+        return
     if nothing_to_govern:
         _safe_github_check(
             repository=delivery.repository, installation_id=installation_id,

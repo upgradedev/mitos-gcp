@@ -46,6 +46,10 @@ export const KIND_VOCABULARY: Record<string, Vocab> = {
   "finding.escalated": { label: "escalated", tone: "parked" },
   "finding.raised": { label: "finding", tone: "finding" },
   "plan.proposed": { label: "plan", tone: "plan" },
+  // A run that found things worth saying and no document it could
+  // honestly propose editing. Toned as a finding rather than a plan,
+  // because nothing is being offered for approval.
+  "plan.review_only": { label: "review", tone: "finding" },
   "write.executed": { label: "write", tone: "write" },
 };
 
