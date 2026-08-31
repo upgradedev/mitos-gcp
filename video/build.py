@@ -33,6 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VIDEO = ROOT / "video"
 BUILD = Path(os.environ.get("MITOS_VIDEO_BUILD", VIDEO / "build"))
+STILLS_DIR = VIDEO / "stills"
 
 WIDTH, HEIGHT = 1600, 900
 MARGIN_X, MARGIN_Y = 48, 40
@@ -110,6 +111,11 @@ def duration_of(path: Path) -> float:
 # --------------------------------------------------------------------------
 
 
+
+
+ANSI_RX = re.compile("\x1b\[([0-9;]*)m")
+
+
 @dataclass
 class Beat:
     id: str
@@ -121,14 +127,75 @@ class Beat:
         return hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:16]
 
 
-def load_narration() -> tuple[dict, list[Beat]]:
+def run_meta() -> dict:
+    return json.loads((VIDEO / "run.jsonl").read_text(encoding="utf-8"))
+
+
+def _cue_time(meta: dict, cue: str) -> float:
+    """When the line a beat is about first appeared in the recorded run.
+
+    Colour codes stripped before matching, for the reason `record.py` strips
+    them: the demo colours values inline, so a phrase a person reads as one
+    string is not one string in the captured bytes.
+    """
+    for item in meta["lines"]:
+        if cue in ANSI_RX.sub("", item["line"]):
+            return float(item["t"])
+    raise SystemExit(
+        f"no line in the recorded run contains {cue!r}, so the beat cued on it "
+        f"has nothing to be spoken over. Either the demo stopped printing it or "
+        f"the cue is a typo; do not paper over this with a fixed timestamp."
+    )
+
+
+def load_narration(*, resolve: bool = True) -> tuple[dict, list[Beat]]:
+    """The beats, timed against the run that was actually recorded.
+
+    Timings used to be fixed numbers in `narration.json`, which made the pace a
+    hidden dependency of the script and then silently broke: the numbers were
+    tuned for a roughly 190s terminal run, the workflow records at pace 1.3
+    which produces 89s, and nothing compared the two. The result shipped with
+    every beat from the approval card onwards spoken over a static end card,
+    for 115 of its 210 seconds, and no check anywhere had an opinion about it.
+
+    So a beat now names a `cue`: a substring of the line it is about. Its time
+    is when that line appeared. Change the pace, change the demo, re-record on a
+    slower machine, and the narration follows the picture instead of drifting
+    off it. `stage_check` fails the build if a cue is missing or if two beats
+    then collide.
+
+    `after_run` is the one exception, for the beats spoken over the Google Cloud
+    stills, which come after the terminal and so have no line to cue on.
+
+    `resolve=False` is for `narrate`, which only needs the text and must work
+    before anything has been recorded.
+    """
     cfg = json.loads((VIDEO / "narration.json").read_text(encoding="utf-8"))
-    return cfg, [Beat(b["id"], float(b["at"]), b["text"]) for b in cfg["beats"]]
+    if not resolve:
+        return cfg, [Beat(b["id"], 0.0, b["text"]) for b in cfg["beats"]]
+
+    meta = run_meta()
+    body_s = float(meta["duration_s"])
+    beats = []
+    for b in cfg["beats"]:
+        if "cue" in b:
+            # `offset` moves a beat off its cue line deliberately, which is
+            # different from a fixed timestamp: it still follows the picture if
+            # the pace changes, it is just spoken a few seconds either side of
+            # the line it is about. The opening beat uses a negative one so it
+            # plays over the title card instead of leaving it silent.
+            at = _cue_time(meta, b["cue"]) + float(b.get("offset", 0.0))
+        elif "after_run" in b:
+            at = body_s + float(b["after_run"])
+        else:
+            raise SystemExit(f"beat {b['id']} has neither a cue nor after_run")
+        beats.append(Beat(b["id"], at, b["text"]))
+    return cfg, beats
 
 
 def stage_narrate() -> None:
     """Synthesise only the beats whose text changed."""
-    cfg, beats = load_narration()
+    cfg, beats = load_narration(resolve=False)
     key = os.environ.get("ELEVENLABS_API_KEY")
     if not key:
         raise SystemExit("ELEVENLABS_API_KEY is not set")
@@ -203,7 +270,6 @@ def stage_check() -> list[tuple[Beat, float]]:
 
 # --------------------------------------------------------------------------
 
-ANSI_RX = re.compile(r"\x1b\[([0-9;]*)m")
 
 
 def split_colours(line: str) -> list[tuple[str, str]]:
@@ -331,6 +397,65 @@ def _card(text_lines: list[str], out: Path, seconds: float) -> None:
     shutil.rmtree(txt_dir, ignore_errors=True)
 
 
+def stage_stills() -> Path:
+    """The Google Cloud evidence, held long enough to read.
+
+    A terminal recording cannot show that any of this runs on Google Cloud, and
+    the deliverable asks for exactly that. These are captures of the console for
+    the project this fleet is deployed in, checked in under `video/stills/` and
+    named so the build fails loudly rather than quietly dropping one.
+
+    The segment is a fixed length whatever it contains, so the total duration
+    does not move when a still is added or removed. Missing images are an error:
+    a video that silently ships five of eight is the same defect as a check that
+    passes over the thing it is named after.
+    """
+    cfg, _ = load_narration()
+    total = float(cfg["stills_s"])
+    shots = sorted(p for p in STILLS_DIR.glob("*.png"))
+    if not shots:
+        raise SystemExit(
+            f"no stills in {STILLS_DIR}. The video must demonstrate the backend "
+            f"is running on Google Cloud; see {STILLS_DIR / 'README.md'} for the "
+            f"exact filenames and what has to be visible in each."
+        )
+    each = total / len(shots)
+
+    parts = []
+    for i, shot in enumerate(shots):
+        out = BUILD / f"still{i:02d}.mp4"
+        run(
+            [
+                "ffmpeg", "-v", "error", "-y", "-loop", "1", "-t", f"{each:.3f}",
+                "-i", str(shot),
+                # Fit inside the frame and letterbox on the project's own
+                # background rather than cropping: a console screenshot cropped
+                # to fill is a console screenshot with the evidence cut off.
+                "-vf",
+                f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
+                f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color={BG},"
+                f"format=yuv420p",
+                "-r", str(FPS), "-c:v", "libx264", "-preset", "medium",
+                "-crf", "23", "-profile:v", "high", "-level", "4.0", str(out),
+            ]
+        )
+        parts.append(out)
+
+    lst = BUILD / "stills.txt"
+    lst.write_text(
+        "\n".join(f"file '{p.as_posix()}'" for p in parts), encoding="utf-8"
+    )
+    cloud = BUILD / "cloud.mp4"
+    run(
+        [
+            "ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0",
+            "-i", str(lst), "-c", "copy", str(cloud),
+        ]
+    )
+    print(f"stills: {len(shots)} console captures, {each:.1f}s each, {total:.0f}s")
+    return cloud
+
+
 def stage_mux() -> None:
     cfg, _ = load_narration()
     timed = stage_check()
@@ -366,7 +491,8 @@ def stage_mux() -> None:
     # last line was cut off whenever the recording came in shorter than the
     # narration, which made the pace a hidden dependency of the script: change
     # one word of narration and a passing build starts failing.
-    body_s = duration_of(body)
+    cloud = stage_stills()
+    body_s = duration_of(body) + duration_of(cloud)
     speech_ends_at = max((beat.at + lead + dur) for beat, dur in timed)
     tail = float(cfg["end_card_s"])
     end_s = max(tail, speech_ends_at - (lead + body_s) + tail)
@@ -383,7 +509,7 @@ def stage_mux() -> None:
     lst = BUILD / "parts.txt"
     lst.write_text(
         "\n".join(
-            f"file '{p.as_posix()}'" for p in (title, body, end)
+            f"file '{p.as_posix()}'" for p in (title, body, cloud, end)
         ),
         encoding="utf-8",
     )
@@ -398,7 +524,7 @@ def stage_mux() -> None:
     inputs, filters, labels = [], [], []
     for i, (beat, _dur) in enumerate(timed):
         inputs += ["-i", str(BUILD / "vo" / f"{beat.id}.mp3")]
-        delay_ms = int((beat.at + lead) * 1000)
+        delay_ms = max(0, int((beat.at + lead) * 1000))
         filters.append(f"[{i + 1}:a]adelay={delay_ms}|{delay_ms}[a{i}]")
         labels.append(f"[a{i}]")
     filters.append(f"{''.join(labels)}amix=inputs={len(timed)}:normalize=0[mix]")
