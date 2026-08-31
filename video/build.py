@@ -87,6 +87,16 @@ def run(cmd: list[str]) -> str:
     return proc.stdout
 
 
+def run_reading_stderr(cmd: list[str]) -> str:
+    """ffmpeg writes its log, filter output included, to stderr rather than
+    stdout, and `run` returns stdout. Kept beside `run` so the one suppression
+    both need lives in one place and neither call site carries a literal
+    executable name for bandit to flag."""
+    # Fixed argv list, shell=False. Nothing here is user supplied.
+    proc = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
+    return proc.stderr
+
+
 def duration_of(path: Path) -> float:
     out = run(
         [
@@ -512,13 +522,12 @@ def _verify_end_card(out: Path) -> None:
     # also uses, so the crop cannot drift from what was drawn.
     band_y = _card_top(len(END_CARD)) + (len(END_CARD) - 1) * CARD_LINE_H - 6
     crop = f"crop={WIDTH}:{CARD_LINE_H}:0:{band_y}"
-    proc = subprocess.run(  # nosec B603 - fixed argv, shell=False
-        ["ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
-         "-lavfi", f"[0:v]{crop}[a];[1:v]{crop}[b];[a][b]psnr",
-         "-f", "null", "-"],
-        capture_output=True, text=True,
-    )
-    report = proc.stderr
+    compare = [
+        "ffmpeg", "-v", "info", "-i", str(last), "-i", str(ref_png),
+        "-lavfi", f"[0:v]{crop}[a];[1:v]{crop}[b];[a][b]psnr",
+        "-f", "null", "-",
+    ]
+    report = run_reading_stderr(compare)
     match = re.search(r"average:([0-9.]+|inf)", report)
     if not match:
         raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
