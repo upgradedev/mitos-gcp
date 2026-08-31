@@ -377,7 +377,12 @@ def run(reader: str, evaluator: str, writer: str) -> int:
     for screen, phrase in (
         ("value", "Turn every pull request into an explainable change decision."),
         ("policy", "Schema, API, and security checks run deterministically."),
-        ("write safety", "No write action is simulated or sent from the browser."),
+        # The sentence, not the old one. The previous copy said no write action
+        # is simulated or sent from the browser, which was true before the
+        # approval endpoint existed and read as "this does not work yet"
+        # after it did. What matters is unchanged and is what this asserts:
+        # nothing is written without an owner.
+        ("write safety", "Nothing is written until an owner approves."),
         ("webhook", "Signatures and delivery IDs are checked server-side."),
     ):
         r.record(
