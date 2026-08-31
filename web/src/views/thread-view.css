@@ -643,3 +643,39 @@ html.dark .mitos-thread {
   outline: 2px solid var(--tone-route);
   outline-offset: -2px;
 }
+
+
+/* Which corpus the thread is showing.
+   Amber for the demo corpus rather than red: it is not an error, it is data
+   about nobody, and reading it as a failure would be as wrong as not saying
+   anything at all. */
+.mitos-thread__scope {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: rgb(148 163 184);
+  max-width: 62ch;
+}
+.mitos-thread__scope-badge {
+  display: inline-block;
+  margin-right: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid rgb(45 212 191 / 0.5);
+  border-radius: 2px;
+  color: rgb(94 234 212);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: 0.05rem;
+}
+.mitos-thread__scope.is-synthetic .mitos-thread__scope-badge {
+  border-color: rgb(251 191 36 / 0.55);
+  color: rgb(252 211 77);
+}
+.mitos-thread__scope-detail {
+  display: block;
+  margin-top: 0.35rem;
+  color: rgb(100 116 139);
+  font-size: 0.8rem;
+}

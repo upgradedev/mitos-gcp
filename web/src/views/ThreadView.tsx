@@ -11,8 +11,8 @@
 // than reaching a beginning, it says which of the two happened.
 
 import { useEffect, useMemo, useState } from "react";
-import { getThread, load } from "../api/client";
-import type { Loaded, Thread, ThreadEntry } from "../api/types";
+import { load, threadSourceFor } from "../api/client";
+import type { Loaded, SessionStatus, Thread, ThreadEntry } from "../api/types";
 import {
   ancestryOf,
   groupIntoRuns,
@@ -41,23 +41,35 @@ const NO_ENTRIES: ThreadEntry[] = [];
 
 export interface ThreadViewProps {
   limit?: number;
+  session?: Loaded<SessionStatus>;
 }
 
-export function ThreadView({ limit = DEFAULT_LIMIT }: ThreadViewProps) {
+export function ThreadView({ limit = DEFAULT_LIMIT, session }: ThreadViewProps) {
   const [thread, setThread] = useState<Loaded<Thread>>({ status: "loading" });
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [shown, setShown] = useState(NODES_PER_PAGE);
 
+  // Which corpus this is, decided once and shown on the page.
+  const source = threadSourceFor(
+    session && session.status === "ok" ? session.value : null
+  );
+
   useEffect(() => {
+    // Wait for the session rather than guessing. Fetching the public corpus
+    // first and swapping it later shows a signed-in user somebody else's demo
+    // data for as long as the round trip takes, and there is no honest way to
+    // label that half-second.
+    if (session && session.status !== "ok") return;
     let live = true;
-    load(() => getThread(limit)).then((result) => {
+    load(() => source.fetch(limit)).then((result) => {
       if (live) setThread(result);
     });
     return () => {
       live = false;
     };
-  }, [limit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, source.synthetic, session?.status]);
 
   // Held stable across renders. A fresh [] here would give every render a new
   // array identity, so grouping a thousand entries would rerun on every click.
@@ -127,7 +139,7 @@ export function ThreadView({ limit = DEFAULT_LIMIT }: ThreadViewProps) {
   if (thread.status === "loading") {
     return (
       <section className="mitos-thread">
-        <Head />
+        <Head synthetic={source.synthetic} />
         <div className="mitos-state">
           <div className="mitos-state__title">Reading the thread.</div>
           <div className="mitos-state__body">
@@ -141,7 +153,7 @@ export function ThreadView({ limit = DEFAULT_LIMIT }: ThreadViewProps) {
   if (thread.status !== "ok") {
     return (
       <section className="mitos-thread">
-        <Head />
+        <Head synthetic={source.synthetic} />
         <Failure
           absent={thread.status === "absent"}
           detail={thread.detail}
@@ -156,7 +168,7 @@ export function ThreadView({ limit = DEFAULT_LIMIT }: ThreadViewProps) {
 
   return (
     <section className="mitos-thread">
-      <Head />
+      <Head synthetic={source.synthetic} scope={thread.status === "ok" ? thread.value.scope : undefined} />
 
       <div className="mitos-thread__facts">
         <span>
@@ -276,7 +288,7 @@ export function ThreadView({ limit = DEFAULT_LIMIT }: ThreadViewProps) {
   );
 }
 
-function Head() {
+function Head({ synthetic, scope }: { synthetic: boolean; scope?: string }) {
   return (
     <header className="mitos-thread__head">
       <h1 className="mitos-thread__title">The thread</h1>
@@ -284,6 +296,26 @@ function Head() {
         Everything the fleet did is recorded here, and every entry names the
         entry it came from. Pick a run, then click any entry to see what it
         actually holds and to walk back to the pull request that caused it.
+      </p>
+      {/*
+        Which corpus this is, said on the page rather than in a field nobody
+        renders. The server has always answered with a `scope` describing
+        itself; the interface showed neither it nor any other sign, so a
+        signed-out reader had no way to tell demonstration data from a tenant's
+        real runs, and a signed-in one was being shown the demonstration data.
+      */}
+      <p
+        className={
+          synthetic ? "mitos-thread__scope is-synthetic" : "mitos-thread__scope"
+        }
+      >
+        <span className="mitos-thread__scope-badge">
+          {synthetic ? "Synthetic demo data" : "Your workspace"}
+        </span>
+        {synthetic
+          ? " Nobody's real repository is shown here. This is the built-in demo corpus, the same one the recorded demo replays. Sign in and install the GitHub App to see your own pull requests."
+          : " Runs from repositories in your workspace, scoped by the server. The demo corpus is not mixed in."}
+        {scope ? <span className="mitos-thread__scope-detail"> {scope}</span> : null}
       </p>
     </header>
   );

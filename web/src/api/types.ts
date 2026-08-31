@@ -87,6 +87,11 @@ export interface ThreadEntry {
 export interface Thread {
   count: number;
   entries: ThreadEntry[];
+  // The server says which corpus this is. The public endpoint answers with the
+  // built-in demo corpus and describes itself as such; the workspace endpoint
+  // answers with the signed-in tenant's own runs. The interface showed neither,
+  // so a reader had no way to tell which they were looking at.
+  scope?: string;
 }
 
 export interface WorkspaceAnalytics {

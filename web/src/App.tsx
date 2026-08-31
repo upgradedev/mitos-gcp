@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getConfig, getGitHubAppStatus, getIdentity, getSession, getThread, getWorkspaceAnalytics, load } from "./api/client";
+import { getConfig, getGitHubAppStatus, getIdentity, getSession, getWorkspaceAnalytics, load, threadSourceFor } from "./api/client";
 import type { Config, GitHubAppStatus, Identity, Loaded, SessionStatus, Thread, WorkspaceAnalytics } from "./api/types";
 import Header from "./shell/Header";
 import Sidebar from "./shell/Sidebar";
@@ -34,9 +34,27 @@ export default function App() {
     load(getConfig).then(setConfig);
     load(getGitHubAppStatus).then(setGitHubApp);
     load(getSession).then(setSession);
-    load(() => getThread(500)).then(setThread);
     load(getWorkspaceAnalytics).then(setAnalytics);
   }, []);
+
+  // The thread waits for the session, because which thread depends on it.
+  //
+  // This used to sit in the effect above and always fetch the public one, so a
+  // signed-in user with real analysed pull requests was shown the synthetic
+  // demo corpus, and nothing on the page said so. Anonymous still gets the
+  // public corpus: that is the right answer for a judge opening the link, and
+  // it is labelled where it is rendered.
+  useEffect(() => {
+    if (session.status !== "ok") return;
+    let live = true;
+    const source = threadSourceFor(session.value);
+    load(() => source.fetch(500)).then((result) => {
+      if (live) setThread(result);
+    });
+    return () => {
+      live = false;
+    };
+  }, [session]);
 
   const data = { identity, config, githubApp, session, thread, analytics, onNavigate: go };
 
@@ -48,7 +66,7 @@ export default function App() {
         <Header identity={identity} session={session} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={() => setSidebarOpen((value) => !value)} />
         <main id="main" className="min-w-0 flex-1">
           {route === "dashboard" && <DashboardView {...data} />}
-          {route === "thread" && <ThreadView />}
+          {route === "thread" && <ThreadView session={session} />}
           {route === "pull-requests" && <PullRequestsView {...data} />}
           {route === "repositories" && <RepositoriesProductView {...data} />}
           {route === "boundary" && <BoundaryView />}
