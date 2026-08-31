@@ -642,7 +642,13 @@ def _github_check(
     """Create or update the Mitos Check without affecting webhook acceptance."""
     if not head_sha:
         return check_run_id
-    token = _github_installation_token(installation_id)
+    # Scoped to the one repository this check belongs to. Both write paths asked
+    # for an installation-wide token while knowing exactly which repository they
+    # were writing to, so a token minted to update one check run carried the
+    # App's permissions across every repository the installation covers. The
+    # minter has taken a repository since it was written; neither caller passed
+    # one.
+    token = _github_installation_token(installation_id, repository)
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -681,7 +687,9 @@ def _safe_github_check(**kwargs: Any) -> Optional[int]:
 
 def _github_suggested_pr(*, installation_id: int, repository: str, source_pr: int,
                          expected_head: str, path: str, body: str, run_id: str) -> dict[str, Any]:
-    token = _github_installation_token(installation_id)
+    # Scoped, for the same reason as the check run above, and it matters more
+    # here: this token creates a branch, writes a file and opens a pull request.
+    token = _github_installation_token(installation_id, repository)
     headers = {
         "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -2329,7 +2337,7 @@ def _fetch_diff(
         # path that always needs a token is a read path that can be used to
         # write, which is the argument this project makes about itself.
         try:
-            headers["Authorization"] = f"Bearer {_github_installation_token(installation_id)}"
+            headers["Authorization"] = f"Bearer {_github_installation_token(installation_id, repository)}"
         except Exception as exc:  # noqa: BLE001 - a read may proceed unauthenticated
             print(
                 json.dumps({"event": "diff.token_unavailable", "error": type(exc).__name__}),
@@ -2669,6 +2677,11 @@ def run_stream(req: RunRequest, request: Request) -> StreamingResponse:
                     classifier=build_classifier(PROJECT),
                     doc_agent=build_doc_agent(PROJECT, role=ROLE),
                     publisher=_publisher(),
+                    # The same hop the webhook takes. Judging in this process
+                    # here and delegating there would make the run a judge
+                    # clicks a different run from the one a pull request gets,
+                    # which is the gap this whole finding is about.
+                    gate=_gate(),
                 )
                 q.put({
                     "kind": "done",
