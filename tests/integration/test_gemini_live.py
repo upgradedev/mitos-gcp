@@ -191,43 +191,31 @@ def test_gemini_catches_what_the_patterns_cannot():
         f"the model did not widen the dispatch: {divergence}"
     )
 
-    # Bounded attempts, because the property is that this agent reads before it
-    # refuses, not that it reads on every single turn. A live model that opens
-    # files on two turns in three still demonstrates agency; one that opens
-    # nothing three times running has not, and that fails.
-    #
-    # This is not a skip. Every attempt must produce a refusal, and the read is
-    # asserted across the set rather than dropped.
-    attempts = []
-    for _ in range(3):
-        response = run_specialist(
-            "compliance-companion", pr, dispatch.signals, analyst=build_agentic_analyst()
-        )
-        assert response.status.value == "blocked", (
-            f"the model assessed special-category data instead of refusing it: "
-            f"{response.assessment[:200]}"
-        )
-        assert response.reason.strip()
-        attempts.append(
-            {
-                "reads": response.read_log.get("reads", 0),
-                # `unusable_reply` returns `blocked`, so a model whose answer
-                # could not be parsed is indistinguishable from one that
-                # considered the diff and refused, unless the reason is read.
-                # Naming the difference is what makes a red build actionable.
-                "usable": "did not return a usable answer" not in response.reason,
-                "reason": response.reason[:90],
-            }
-        )
-        if attempts[-1]["reads"] >= 1:
-            break
-
-    assert max(a["reads"] for a in attempts) >= 1, (
-        f"it refused without opening anything on {len(attempts)} attempts. "
-        f"{sum(1 for a in attempts if not a['usable'])} of them were unusable "
-        f"replies rather than considered refusals, which is a model problem "
-        f"and not a gate problem: {attempts}"
+    response = run_specialist(
+        "compliance-companion", pr, dispatch.signals, analyst=build_agentic_analyst()
     )
+    assert response.status.value == "blocked", (
+        f"the model assessed special-category data instead of refusing it: "
+        f"{response.assessment[:200]}"
+    )
+
+    # A refusal a human cannot act on is barely better than no refusal.
+    assert response.reason.strip()
+    assert "``" not in response.reason, (
+        f"the refusal names no file and no change: {response.reason[:160]}"
+    )
+    assert response.citations, "the refusal cites nothing to open"
+
+    # This used to require that the model itself opened a file before refusing.
+    # It no longer does, and the reason is the tighten-only fix: the model
+    # widens the dispatch so compliance runs at all, and once it runs the
+    # deterministic Article 9 rule fires on the widened signal and the refusal
+    # stands without a model turn. That is the safer path, not a weaker one, so
+    # asserting the model read here would be asserting that the deterministic
+    # gate did not get there first.
+    #
+    # The agent's own reading is asserted directly by the next test, which is
+    # where that property belongs.
 
 
 def test_the_agentic_specialist_chooses_what_to_read():
