@@ -282,6 +282,33 @@ scoped key return identical rows, so every test agreed with the bug for as long
 as it existed. That is the argument for ADR-010 restated: the deployed system is
 a different system, and this one needed two tenants before it would show.
 
+**The key is coarse, deliberately, and here is what that costs.** Two segments is
+a guess about layout, not a fact about it. Checked against this repository rather
+than against the fixture: two pull requests touching different files under
+`src/mitos/` share the key `...:src/mitos`, so each recalls the other's findings.
+Under the rule as stated, that module is the service. Erring coarse errs toward
+recalling more, which is the safe direction for a memory whose purpose is to stop
+the fleet re-deciding something, and the same instinct as ADR-002. A change
+spanning unrelated directories shares nothing and falls back to the repository
+alone rather than borrowing a narrower key, which is the case that would have
+been wrong in the other direction.
+
+**What happened to the rows written while the key was global.** Nothing was
+migrated, because the ledger is append-only by interface and rewriting history to
+hide a defect is the opposite of what it is for. Checked instead: every
+`finding.deferred` under the fixture subject carries `run_id: "seed"`, thirty of
+them, all from the corpus seeder and none from a GitHub delivery. So no finding
+raised about a real repository is sitting in the demo corpus a stranger reads.
+Verified rather than assumed:
+
+```bash
+# subject == "services/customer" AND kind == "finding.deferred", then read run_id
+gcloud firestore ...  # structuredQuery in LOG.md, 2026-08-31
+```
+
+Had one been there, the honest outcome would have been a limitation recorded here
+rather than a deletion.
+
 ### ADR-016 — A run with nothing to govern says so, and does not reach the gate
 **Date:** 2026-08-31 | **Status:** Implemented
 **Decision:** when the router wakes no specialist, the run records
