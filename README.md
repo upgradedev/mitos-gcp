@@ -103,6 +103,12 @@ flowchart TB
     EVAL -.->|"PermissionDenied"| SEC
 ```
 
+The same architecture as a single image, drawn by
+[`scripts/architecture_diagram.py`](scripts/architecture_diagram.py) so it cannot
+drift from the system it describes:
+
+![Mitos architecture: three Cloud Run services, two Google model families, an append-only Firestore thread, and one governed write behind a human](docs/architecture.png)
+
 **What the last box is, exactly.** The writer pushes a branch to the specification repository and returns a compare URL and a receipt naming the approval that authorised it. It does **not** open a pull request on the code repository and it does **not** post a status check, and `open_pull_request` and `set_commit_status` remain names in the guard's deny list that nothing may call.
 
 This paragraph used to end by saying nothing in the repository had ever called a GitHub write endpoint. That stopped being true one day after it was written. `service/main.py` creates and updates a check run (`POST` and `PATCH /check-runs`) and, behind an approval, creates a branch, writes a file and opens a pull request (`POST /git/refs`, `PUT /contents/{path}`, `POST /pulls`). Five calls across four endpoints, reached from the webhook handler and from `POST /api/workspace/suggested-changes/approve`. They run under a GitHub App installation token, not under the deploy key, so the sentence that still holds is the narrow one: the writer's credential cannot touch anybody else's repository. The sweeping one did not.
@@ -503,6 +509,32 @@ and nobody watching can tell.
 account. It announces itself on screen.
 
 Python 3.10+; CI runs 3.13.
+
+### Deploy your own copy
+
+Everything is Terraform, so a second fleet is an apply rather than a runbook.
+
+```bash
+gcloud builds submit --project YOUR_PROJECT --region europe-west1   --config cloudbuild.yaml --substitutions _SHA=$(git rev-parse --short HEAD)
+```
+
+```bash
+terraform -chdir=infra init -backend-config="bucket=YOUR_STATE_BUCKET" -backend-config="prefix=mitos"
+```
+
+```bash
+terraform -chdir=infra apply -var="project_id=YOUR_PROJECT" -var="image=europe-west1-docker.pkg.dev/YOUR_PROJECT/cloud-run-source-deploy/mitos-reader:YOUR_SHA"
+```
+
+That creates the three services, the three service accounts, the IAM bindings
+between them, the Firestore database and the secrets. `MITOS_MODEL` and
+`MITOS_CRITIC_MODEL` are variables with defaults, and setting the second to an
+empty string turns the independent critic off.
+
+The image has to be built by `cloudbuild.yaml` rather than by
+`gcloud builds submit --tag`, which cannot pass a build argument, so an image
+built that way reports `MITOS_BUILD_SHA=unknown` and the deployed check refuses
+it for not knowing what it is.
 
 ### Point it at your own repository
 
