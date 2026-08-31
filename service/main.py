@@ -2677,6 +2677,11 @@ def run_stream(req: RunRequest, request: Request) -> StreamingResponse:
                     classifier=build_classifier(PROJECT),
                     doc_agent=build_doc_agent(PROJECT, role=ROLE),
                     publisher=_publisher(),
+                    # The same hop the webhook takes. Judging in this process
+                    # here and delegating there would make the run a judge
+                    # clicks a different run from the one a pull request gets,
+                    # which is the gap this whole finding is about.
+                    gate=_gate(),
                 )
                 q.put({
                     "kind": "done",
