@@ -66,6 +66,17 @@ MAX_READS_PER_RUN = 12
 # both made the ledger report one more read than the corpus served.
 READING_TOOLS = ("read_file", "search:read")
 
+# What one search may open, inside the run budget rather than instead of it.
+#
+# Counting search reads without capping them made the tool unusable: a single
+# search spent all twelve reads, every later `read_file` was refused, and the
+# agent produced an answer it could not support. That showed up as a live test
+# refusing "without opening anything", which was true and was our doing.
+#
+# So a search is a way to find the two or three files worth opening, not a way
+# to read the repository. Four leaves eight for the reads that follow.
+MAX_SEARCH_SCAN = 4
+
 
 class Corpus(Protocol):
     """Where the fleet reads from."""
@@ -295,10 +306,11 @@ def make_tools(
     def search(term: str) -> dict:
         """Find which readable files mention a term.
 
-        This spends the same read budget as read_file: each file it opens is one
-        read. It stops when the budget runs out and tells you so, rather than
-        scanning the rest of the repository, so search the narrowest scope you
-        can and read the files you actually need.
+        This opens files, so it spends the same budget as read_file, and it
+        opens at most a few per call. Use it to find which files are worth
+        reading, then read those. It tells you how much it scanned and whether
+        there was more, so treat an empty result as "not in what I scanned"
+        rather than "not in the repository".
 
         Args:
             term: a word or field name, for example 'retention' or 'mobileNumber'.
@@ -319,6 +331,9 @@ def make_tools(
         stopped_early = False
 
         for path in candidates:
+            if scanned >= MAX_SEARCH_SCAN:
+                stopped_early = True
+                break
             try:
                 body = _bounded_read(path, "search:read")
             except ReadBudgetExhausted:

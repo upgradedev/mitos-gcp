@@ -414,6 +414,17 @@ than continuing to test files it did not pay for, because a hit from one of
 those leaks exactly the term-presence the bound exists to withhold. The scan
 order is sorted so that which files fall inside the budget does not move between
 runs; a bound that moves cannot be audited.
+**Amended the same day, by the live agent failing.** Counting search reads
+without capping them per call made the tool unusable: one search spent all
+twelve reads, every later `read_file` was refused, and the agent returned an
+answer it could not support. `test_gemini_live.py` caught it in the honest
+words, "it refused without opening anything, so it guessed", which was true and
+was our doing. A search now opens at most `MAX_SEARCH_SCAN` files, inside the
+run budget rather than instead of it, so it is a way to find the two or three
+files worth reading rather than a way to read the repository. Both halves are
+needed: a per-call cap with no run budget lets an agent search fifty times, and
+a run budget with no per-call cap is what broke this.
+
 **Rejected:** a separate budget for search. Two budgets is no budget, and the
 question a reader asks is how much of my repository did it read, not how much
 did each tool read.

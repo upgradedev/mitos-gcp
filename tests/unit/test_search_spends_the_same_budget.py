@@ -83,7 +83,11 @@ def test_it_says_when_the_answer_is_partial():
 
     assert out["truncated"] is True
     assert out["files_in_scope"] > out["files_scanned"]
-    assert out["reads_remaining"] == 0
+    assert out["files_scanned"] == tools.MAX_SEARCH_SCAN
+    assert out["reads_remaining"] == tools.MAX_READS_PER_RUN - tools.MAX_SEARCH_SCAN, (
+        "one search consumed the whole run budget, which leaves the agent "
+        "nothing to read with"
+    )
 
 
 def test_a_small_corpus_is_searched_completely_and_says_so():
@@ -100,17 +104,26 @@ def test_a_small_corpus_is_searched_completely_and_says_so():
 
 
 def test_repeated_searches_cannot_re_spend_the_run_budget():
-    """The budget is per run, not per call."""
+    """Each search is capped, and together they cannot exceed the run budget.
+
+    Both halves matter. Capping per call without a run budget lets an agent
+    search fifty times; a run budget without a per-call cap lets one search
+    spend everything, which is how the first version of this fix broke the
+    live agent.
+    """
     corpus = _Corpus(1000)
     log, _, _, search = _tools(corpus)
 
-    search("retention")
-    served_after_first = corpus.served
-    second = search("policy")
+    calls = tools.MAX_READS_PER_RUN // tools.MAX_SEARCH_SCAN
+    for i in range(calls):
+        search(f"term{i}")
 
-    assert second["files_scanned"] == 0
-    assert corpus.served == served_after_first, (
-        "a second search bought itself a fresh budget"
+    assert corpus.served == tools.MAX_READS_PER_RUN
+    exhausted = search("one more")
+
+    assert exhausted["files_scanned"] == 0
+    assert corpus.served == tools.MAX_READS_PER_RUN, (
+        "a search bought itself a fresh budget"
     )
 
 
@@ -119,7 +132,8 @@ def test_search_and_read_file_draw_on_one_budget():
     corpus = _Corpus(1000)
     log, _, read_file, search = _tools(corpus)
 
-    search("retention")
+    for i in range(tools.MAX_READS_PER_RUN // tools.MAX_SEARCH_SCAN):
+        search(f"term{i}")
 
     refused = read_file("docs/specs/f0500.md")
     assert refused["readable"] is False
