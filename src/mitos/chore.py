@@ -81,6 +81,11 @@ class ChoreResult:
     root_entry_id: str = ""
     last_entry_id: str = ""
     escalated: bool = False
+    # No document this run could honestly propose editing. Distinct from parked,
+    # which is a refusal with a named reason, and from completed, which offers
+    # bytes to approve. Reporting it as parked gave it an empty reason, and a
+    # refusal without a reason is the one thing this envelope refuses to be.
+    review_only: bool = False
 
 
 # The thread is keyed on the service, not on the field, so two different
@@ -562,7 +567,7 @@ def run_chore(
         return ChoreResult(
             run_id, pr.number, dispatch, recalled, verdict, final_verdict,
             None, False, False, {}, None, "", responses,
-            root.entry_id, cursor, escalated,
+            root.entry_id, cursor, escalated, review_only=True,
         )
 
     # 6. The approval card, content-addressed.

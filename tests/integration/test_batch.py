@@ -30,15 +30,19 @@ def test_the_backlog_produces_a_countable_result():
     """The count the autonomy criterion asks for.
 
     Thirteen rather than twelve since PR 4483 was added: the item the rules
-    cannot get right. It completes here, deliberately, because this suite runs
-    without a model. `test_rules_alone_are_not_enough.py` asserts that failure
-    directly and the live suite asserts the model fixes it.
+    cannot get right. It is not parked here, deliberately, because this suite
+    runs without a model. `test_rules_alone_are_not_enough.py` asserts that
+    failure directly and the live suite asserts the model fixes it.
+
+    Every state is in the sum. `review` was added and left out of it, and this
+    test caught that immediately, which is the whole reason it counts rather
+    than sampling: a state missing from the total is work the report loses.
     """
     r = _report()
     assert r.presented == len(BACKLOG) == 13
-    assert r.completed + r.parked + r.no_action == r.presented, (
-        "items went missing between the queue and the report"
-    )
+    assert (
+        r.completed + r.parked + r.no_action + r.review == r.presented
+    ), "items went missing between the queue and the report"
 
 
 def test_some_items_are_parked_and_some_complete():
@@ -75,12 +79,21 @@ def test_only_completed_items_ask_for_an_approval():
 
 
 def test_a_refusal_does_not_stop_the_queue():
-    """The item after a parked one still gets worked."""
+    """The item after a parked one still gets worked.
+
+    This asserted specifically that something later `completed`, which held only
+    while every run proposed a write to the same file whatever the change was.
+    The property under test is that the queue keeps going, so it asks for a
+    worked outcome rather than for one particular kind of worked outcome.
+    """
     r = _report()
     states = [o.state for o in r.outcomes]
     parked_at = states.index("parked")
-    assert "completed" in states[parked_at + 1 :], (
-        "the queue stopped at the first refusal"
+    after = states[parked_at + 1 :]
+
+    assert after, "the parked item was the last one, so this proves nothing"
+    assert any(s in ("completed", "review") for s in after), (
+        f"the queue stopped at the first refusal: {after}"
     )
 
 
