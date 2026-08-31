@@ -365,7 +365,7 @@ def stage_mux() -> None:
         )
 
     end = BUILD / "end.mp4"
-    _card(END_CARD[:2] + ["MUTATION: a different closing claim"], end, end_s)
+    _card(END_CARD, end, end_s)
 
     silent = BUILD / "silent.mp4"
     lst = BUILD / "parts.txt"
@@ -521,14 +521,14 @@ def _verify_end_card(out: Path) -> None:
     if not match:
         raise SystemExit(f"could not compare the closing frame: {report[-300:]}")
     score = float("inf") if match.group(1) == "inf" else float(match.group(1))
-    print(f"verify: the closing claim matches END_CARD, PSNR {score:.1f} dB "
-          f"over the band at y={band_y}")
     if score < END_CARD_MIN_PSNR:
         raise SystemExit(
             f"the closing frame does not match END_CARD (PSNR {score:.1f} dB, "
             f"need {END_CARD_MIN_PSNR}). The video shipped a different closing "
             f"card from the one this build says it renders."
         )
+    print(f"verify: the closing claim matches END_CARD, PSNR {score:.1f} dB "
+          f"over the band at y={band_y}")
 
 
 STAGES = {
