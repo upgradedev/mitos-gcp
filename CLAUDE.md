@@ -451,6 +451,34 @@ governance tool that always finds a file to change will find one for a change it
 did not understand, and the first wrong suggestion is the last one anybody
 reads.
 
+### ADR-019 — The evaluator judges, in its own process, and the reader fails closed
+**Date:** 2026-08-31 | **Status:** Implemented
+**Decision:** the deterministic gate runs in the evaluator service, reached over
+an authenticated Cloud Run call with a token audience bound to it.
+`run_chore` takes a `gate` callable: absent, it judges in process, which is what
+the offline suite and the recorded demo do; present, it delegates. A failure to
+reach, authorise or parse the evaluator raises and the run stops.
+**Reason:** evaluation happened inside the reader. Nothing anywhere in the
+repository referenced an evaluator URL. The service was deployed, held its own
+service account, refused anonymous callers and did no work, so "three Cloud Run
+services" was true of the deployment and false of the request path, in a README
+that asks to be checked.
+**Consequence:** there is no fallback, deliberately. A reader that judges its own
+draft when the gate is unreachable is a reader with no gate, and that failure is
+silent: every run still produces a verdict and nothing says which process
+decided it. So the run fails instead, the webhook records it, and no plan is
+proposed and no approval card is minted. The thread carries a `gate.delegated`
+entry naming the service account and build that decided.
+
+Two locks, not one. Cloud Run IAM decides who may call at all: only the reader
+holds `run.invoker` on the evaluator, and the token is audience bound, so a
+token minted for the writer opens nothing. The role check inside the handler is
+the second, for the same reason `/execute` has one: all three deployments carry
+every route and only the right identity may serve it.
+**Kept local:** the model critic. It is advisory, it runs beside the
+deterministic verdict, and shipping a draft to a second process for a model to
+look at buys nothing and costs a round trip.
+
 ## Standards compliance
 
 | ORG_STANDARDS | State |

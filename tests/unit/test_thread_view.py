@@ -22,9 +22,15 @@ from service.thread_view import KIND_STYLE, render
 # Every entry kind the fleet appends. Built as a plain string rather than typed
 # into a shell, because a word-boundary escape once reached this repository as a
 # literal control byte and the rule it belonged to could never match.
+# Any dotted kind in a `kind=` position, rather than a list of prefixes.
+#
+# The list named trigger, fleet, specialist, guard, evaluator, item, plan,
+# write, finding and injection, so a kind under a NEW prefix was invisible
+# to the test named after finding exactly that. Two were added later,
+# run.nothing_to_govern and gate.delegated; neither was ever checked and
+# neither had a colour in either map.
 KIND_PATTERN = (
-    '"((?:trigger|fleet|specialist|guard|evaluator|item|plan|write|finding|injection)'
-    '\\.[a-z_]+)"'
+    r'(?:kind\s*[=:]\s*|record\(\s*)"([a-z_]+\.[a-z_]+)"'
 )
 
 # Assembled rather than written out, so a secret scanner reading this file does

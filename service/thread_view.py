@@ -34,6 +34,11 @@ KIND_STYLE = {
     # honestly propose editing. Coloured as a finding, not a plan:
     # nothing is being offered for approval.
     "plan.review_only": ("#e0af68", "review"),
+    # The router found nothing for this fleet to govern. Quiet, because it
+    # is neither a finding nor a step that did work.
+    "run.nothing_to_govern": ("#8a8790", "nothing to govern"),
+    # The deterministic gate ran in the evaluator service, not here.
+    "gate.delegated": ("#7aa2f7", "gate delegated"),
     "write.executed": ("#5fd75f", "write"),
     "finding.raised": ("#ff9e64", "finding"),
     "finding.deferred": ("#ffd75f", "deferred"),

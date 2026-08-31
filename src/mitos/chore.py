@@ -195,6 +195,14 @@ def run_chore(
     classifier: Any = None,
     doc_agent: Any = None,
     repository: Optional[str] = None,
+    # Who judges the draft.
+    #
+    # `None` runs the deterministic gate in this process, which is what the
+    # offline suite and the recorded demo do and is what makes them need no
+    # credential. Production passes a callable that asks the evaluator service,
+    # so the third identity in the architecture diagram does work rather than
+    # only existing. See ADR-019.
+    gate: Optional[Callable[..., Verdict]] = None,
 ) -> ChoreResult:
     """Run the whole chore. `emit` is how the demo narrates it; the logic does
     not depend on anything being watched."""
@@ -212,6 +220,8 @@ def run_chore(
     # parameter stays. What changed is that not passing one means now, rather
     # than meaning a date in the past.
     today = today or datetime.now(timezone.utc).date().isoformat()
+
+    judge = gate or evaluate
 
     subject = subject_of(repository, pr)
 
@@ -464,7 +474,7 @@ def run_chore(
     cited_allowed = sorted(set(pr.paths()) | set(paths_read))
 
     # 5. The gate. The draft carries whatever was planted in the diff.
-    verdict = evaluate(draft, known_paths=cited_allowed, critic=critic)
+    verdict = judge(draft, known_paths=cited_allowed, critic=critic)
     cursor = record(
         "evaluator.verdict", "evaluator-companion", verdict.as_dict(), cursor
     ).entry_id
@@ -479,7 +489,7 @@ def run_chore(
     if not verdict.passed:
         emit("repair", "stripping what the gate objected to and re-submitting")
         draft = redact_for_repair(draft)
-        final_verdict = evaluate(draft, known_paths=cited_allowed, critic=critic)
+        final_verdict = judge(draft, known_paths=cited_allowed, critic=critic)
         cursor = record(
             "evaluator.verdict",
             "evaluator-companion",

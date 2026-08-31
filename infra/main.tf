@@ -52,6 +52,10 @@ locals {
   # and one instance referencing another inside the same resource is a cycle.
   writer_url = "https://mitos-writer-${var.project_number}.${var.region}.run.app"
 
+  # Built the same way and for the same reason: the reader has to reach the
+  # evaluator, and one instance of a for_each referencing another is a cycle.
+  evaluator_url = "https://mitos-evaluator-${var.project_number}.${var.region}.run.app"
+
   # Deterministic, the same way `writer_url` above is. Deriving the public
   # address from a request header works and is one proxy misconfiguration away
   # from registering a callback URL nobody controls, on an app installation that
@@ -494,6 +498,19 @@ resource "google_cloud_run_v2_service" "fleet" {
         }
       }
 
+      # Where the gate lives. Without it the reader judges its own draft, which
+      # is right offline and wrong in production: the evaluator was deployed,
+      # held its own identity, refused anonymous callers and did no work.
+      # Setting this is what makes the third service load-bearing, and the
+      # reader fails closed rather than falling back if it cannot be reached.
+      dynamic "env" {
+        for_each = each.value == "reader" ? [1] : []
+        content {
+          name  = "MITOS_EVALUATOR_URL"
+          value = local.evaluator_url
+        }
+      }
+
       # Which repositories may wake the fleet. A valid signature proves who sent
       # a delivery, not that we asked for it, so the allowlist is explicit here
       # rather than left to a default in the code.
@@ -549,6 +566,18 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
 # The reader orchestrates and cannot write, so it has to ask.
 resource "google_cloud_run_v2_service_iam_member" "reader_may_ask_the_writer" {
   name     = google_cloud_run_v2_service.fleet["writer"].name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.fleet["reader"].email}"
+}
+
+# And it cannot judge its own draft either, so it has to ask for that too.
+#
+# Only the reader holds this. The writer does not, so a token minted for the
+# writer opens nothing here, and the token the reader sends is audience bound to
+# this service rather than to Cloud Run in general.
+resource "google_cloud_run_v2_service_iam_member" "reader_may_ask_the_evaluator" {
+  name     = google_cloud_run_v2_service.fleet["evaluator"].name
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.fleet["reader"].email}"
