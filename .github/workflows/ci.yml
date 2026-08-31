@@ -293,6 +293,27 @@ jobs:
             exit 1
           fi
 
+      # The second model, on the same terms. Gemini is the mandatory one and
+      # stays load bearing; this is the independent critic, and a critic that is
+      # configured but never exercised is a claim rather than a feature.
+      - name: The second model is reachable and answers in the agreed shape
+        env:
+          PYTHONPATH: src:.
+          MITOS_CRITIC_MODEL: google/gemma-4-26b-a4b-it-maas
+          GOOGLE_CLOUD_PROJECT: upgradegr-mitos
+          GOOGLE_CLOUD_LOCATION: global
+        run: |
+          set -o pipefail
+          python -m pytest tests/integration/test_gemma_live.py -q | tee /tmp/critic.txt
+
+      - name: The second model suite must not have been skipped
+        run: |
+          grep -qE "[0-9]+ passed" /tmp/critic.txt
+          if grep -q "skipped" /tmp/critic.txt; then
+            echo "::error::the live Gemma suite skipped; the independent review is unproven"
+            exit 1
+          fi
+
   security:
     name: SAST and dependency audit
     needs: secret-scan
