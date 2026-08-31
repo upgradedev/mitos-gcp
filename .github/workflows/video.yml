@@ -71,8 +71,12 @@ jobs:
           key: vo-${{ hashFiles('video/narration.json') }}
           restore-keys: vo-
 
-      - name: Install the model client
-        run: pip install -r requirements/spike.txt
+      # Both files. `spike.txt` is the ADK client; `requirements.txt` is what the
+      # deployed image installs and is where google-cloud-firestore lives. This
+      # step installed only the first, so recording against the real ledger
+      # failed on ImportError and fell back to memory.
+      - name: Install the client libraries
+        run: pip install -r requirements.txt -r requirements/spike.txt
 
       # Short-lived, federated, no key in a secret. The same pool and provider
       # the deploy uses, a different service account with a different reach.

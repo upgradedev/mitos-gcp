@@ -90,10 +90,22 @@ def record(pace: float, out: Path, ledger: str) -> dict:
     if ledger == "firestore":
         text = "\n".join(item["line"] for item in lines)
         if "THIS IS NOT THE REAL SYSTEM" in text:
+            # Carry the demo's own reason up. Without it this said "check the
+            # credential" while the actual cause was an ImportError, and the
+            # capture that held the answer was in a JSON file nobody opens
+            # during a failing build.
+            why = next(
+                (
+                    item["line"].strip()
+                    for item in lines
+                    if "Firestore is unreachable" in item["line"]
+                ),
+                "no reason line was captured",
+            )
             raise SystemExit(
-                "asked for the Firestore ledger and the demo fell back to memory. "
-                "The recording would have shipped the fallback banner. Check the "
-                "credential and that requirements/spike.txt is installed."
+                "asked for the Firestore ledger and the demo fell back to "
+                f"memory. The demo said: {why}. The recording would have "
+                "shipped the fallback banner."
             )
         if "ledger firestore" not in text:
             raise SystemExit(
