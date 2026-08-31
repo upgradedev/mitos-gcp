@@ -89,6 +89,14 @@ The live test asserts this against the real endpoint by comparing digests: the h
 
 All three carry every route, and each refuses to serve the routes that are not its job, so a misrouted request fails twice rather than once.
 
+![Mitos infrastructure: six service accounts, per-secret bindings, Workload Identity Federation with no service account key anywhere, and what each identity is refused](https://raw.githubusercontent.com/upgradedev/mitos-gcp/main/docs/infrastructure.png)
+
+Every binding in that diagram was read out of `infra/main.tf` rather than remembered, which is not a
+stylistic point. The first version of the architecture diagram said the reader holds no write
+credential. It holds the GitHub App private key, because it needs it to post the check run. The
+narrow claim, that it has no specification repository credential, is the one that is true and
+enforced.
+
 Everything is Terraform. Continuous integration runs the offline suite, an integration suite against the Firestore adapter, static analysis, a secret scan, a live Gemini call and a live Gemma call, plus a step that fails the build if either live suite silently skipped. A live test that skips is a claim nobody is checking.
 
 ## The bugs that taught us the most were not bugs
@@ -116,6 +124,7 @@ Nothing to install:
 - The provenance thread: <https://mitos-reader-437828525303.europe-west1.run.app/thread/view>
 - Who each service is and what it cannot reach: <https://mitos-reader-437828525303.europe-west1.run.app/identity>
 - The code: <https://github.com/upgradedev/mitos-gcp>
+- The demo video: <https://youtu.be/OA-PJZuErXk>
 
 The GitHub App is installed on that repository, so every pull request opened there gets a real check run posted by the deployed fleet. Two of them carry two different verdicts, one because findings needed a reviewer and one because the router found nothing to govern and recorded which specialists it skipped and why.
 
